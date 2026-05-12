@@ -1,0 +1,230 @@
+---
+title: Set Up Wallets
+description: Initialize a custody provider and create wallets for signing transactions.
+---
+
+Wallets are Solana keypairs managed by a custody provider. SDP uses them to sign transactions for token deployment, minting, transfers, and other onchain operations. You must initialize a signing provider before creating tokens or executing transactions.
+
+## Supported providers
+
+| Provider | Description |
+| --- | --- |
+| **Privy** | Embedded wallet infrastructure platform |
+| **Fireblocks** | Digital asset infrastructure company |
+| **Coinbase CDP** | Embedded wallets for developers |
+| **Para** | Wallet and authentication suite |
+| **Turnkey** | Non-custodial wallet infrastructure platform |
+| **DFNS** | Digital asset wallet infrastructure |
+| **Anchorage** | Regulated institutional crypto custody |
+
+<Tabs items={["Dashboard", "API"]}>
+<Tab value="Dashboard">
+
+### 1. Navigate to Wallets
+
+Open the sidebar and click **Wallets**. If you haven't linked your organization yet, complete the [organization setup](/docs/guides/setup-organization) first.
+
+### 2. Start wallet setup
+
+Click **Get started** on the wallet setup card. This opens the provider setup flow.
+
+### 3. Configure your provider
+
+Fill in the setup form:
+
+- **Provider** — choose from the supported custody providers shown in the setup grid
+- **Wallet label** — a descriptive name for the first wallet
+- **Fireblocks credentials** — required only when the selected provider is Fireblocks
+
+Click **Connect provider & create wallet** to initialize signing and provision the first wallet.
+
+### 4. View your wallet
+
+After provisioning, the Wallets page shows your active provider configuration and wallet cards:
+
+- **Provider** — the active custody provider
+- **Address** — the wallet public key
+- **Wallet ID** — the custody wallet identifier used by SDP
+- **Balance** — the latest cached balance for the wallet
+
+A note at the bottom reads: "Changing providers affects new actions only. Existing onchain authorities are not automatically rotated."
+
+### 5. Create additional wallets (optional)
+
+Click **New wallet** in the top right. The modal has:
+
+- **Provider** — preselected when only one active provider can create wallets, otherwise selectable
+- **Capabilities** — provider feature chips for issuance, transfers, or compliance
+- **Wallet label** — descriptive name, for example "Signing wallet"
+
+Some providers can be connected but do not yet support provisioning additional wallets from the dashboard.
+
+</Tab>
+<Tab value="API">
+
+### 1. Initialize the signing provider
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash
+curl -X POST https://api.solana.com/v1/wallets/initialize \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "privy",
+    "walletLabel": "Master wallet"
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+const response = await fetch("https://api.solana.com/v1/wallets/initialize", {
+  method: "POST",
+  headers: {
+    "Authorization": "Bearer sk_test_...",
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    provider: "privy",
+    walletLabel: "Master wallet",
+  }),
+});
+const { data } = await response.json();
+// data: { configId, publicKey, walletId }
+```
+</Tab>
+<Tab value="Java">
+```java
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/wallets/initialize"))
+    .header("Authorization", "Bearer sk_test_...")
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        {
+          "provider": "privy",
+          "walletLabel": "Master wallet"
+        }"""))
+    .build();
+```
+</Tab>
+</Tabs>
+
+### 2. Create additional wallets
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash
+curl -X POST https://api.solana.com/v1/wallets \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "label": "Mint authority wallet",
+    "purpose": "mint_authority",
+    "setDefault": false
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+const response = await fetch("https://api.solana.com/v1/wallets", {
+  method: "POST",
+  headers: {
+    "Authorization": "Bearer sk_test_...",
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    label: "Mint authority wallet",
+    purpose: "mint_authority",
+    setDefault: false,
+  }),
+});
+```
+</Tab>
+<Tab value="Java">
+```java
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/wallets"))
+    .header("Authorization", "Bearer sk_test_...")
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        {
+          "label": "Mint authority wallet",
+          "purpose": "mint_authority",
+          "setDefault": false
+        }"""))
+    .build();
+```
+</Tab>
+</Tabs>
+
+The `purpose` field is optional metadata in the API. The current dashboard create-wallet flow does not expose wallet-purpose selection.
+
+### 3. List wallets
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash
+curl "https://api.solana.com/v1/wallets?view=summary" \
+  -H "Authorization: Bearer sk_test_..."
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+const response = await fetch("https://api.solana.com/v1/wallets?view=summary", {
+  headers: { "Authorization": "Bearer sk_test_..." },
+});
+const { data } = await response.json();
+// data.wallets includes walletId, publicKey, provider, label, purpose, and status
+```
+</Tab>
+<Tab value="Java">
+```java
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/wallets?view=summary"))
+    .header("Authorization", "Bearer sk_test_...")
+    .GET()
+    .build();
+```
+</Tab>
+</Tabs>
+
+Use the returned `walletId` when setting a default wallet or binding wallet-scoped API keys.
+
+### 4. Set a default wallet
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash
+curl -X POST https://api.solana.com/v1/wallets/default-wallet \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "walletId": "wal_xyz789" }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+await fetch("https://api.solana.com/v1/wallets/default-wallet", {
+  method: "POST",
+  headers: {
+    "Authorization": "Bearer sk_test_...",
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({ walletId: "wal_xyz789" }),
+});
+```
+</Tab>
+<Tab value="Java">
+```java
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/wallets/default-wallet"))
+    .header("Authorization", "Bearer sk_test_...")
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        { "walletId": "wal_xyz789" }"""))
+    .build();
+```
+</Tab>
+</Tabs>
+
+</Tab>
+</Tabs>

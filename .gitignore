@@ -1,0 +1,55 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+.turbo/
+.next/
+apps/**/.next/
+apps/sdp-api/generated/
+apps/sdp-api/.wrangler.*.generated.toml
+
+# Cloudflare
+.wrangler/
+.dev.vars
+.cloudflare.*.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Environment
+.env
+.env.local
+.env.preview
+.env.*.local
+
+# Kora keypairs and secrets (never commit)
+infra/kora/.keypair.json
+infra/kora/.env
+
+# Local secrets (API keys, private keys)
+.secrets/
+
+# Test coverage
+coverage/
+apps/sdp-web/playwright/.clerk/
+apps/sdp-web/playwright/.fixtures/
+apps/sdp-web/playwright-report/
+apps/sdp-web/test-results/
+
+# Misc
+*.tsbuildinfo
+.vercel

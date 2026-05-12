@@ -1,0 +1,470 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.15.1
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: |
+          git diff --name-only --diff-filter=d -z origin/main...HEAD \
+            | xargs -0 --no-run-if-empty pnpm exec biome check --no-errors-on-unmatched
+
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.15.1
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Detect changed packages
+        id: changed
+        run: |
+          CHANGED_PACKAGES=$(git diff --name-only origin/main...HEAD | awk -F/ '/^(apps|packages)\\// {print $1 "/" $2}' | sort -u | tr '\n' ' ' | xargs)
+          echo "packages=${CHANGED_PACKAGES}" >> "$GITHUB_OUTPUT"
+
+      - name: Typecheck
+        if: steps.changed.outputs.packages != ''
+        run: |
+          FILTERS=""
+          for pkg in ${{ steps.changed.outputs.packages }}; do
+            FILTERS="$FILTERS --filter ./$pkg"
+          done
+          pnpm --if-present $FILTERS typecheck
+
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: sdp
+          POSTGRES_USER: sdp
+          POSTGRES_PASSWORD: sdp
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sdp -d sdp"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.15.1
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate Doppler bootstrap secret
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+        run: |
+          if [ -z "${DOPPLER_TOKEN}" ]; then
+            echo "DOPPLER_TOKEN_CI must be configured for secret-aware CI jobs." >&2
+            exit 1
+          fi
+
+      - name: Install Doppler CLI
+        uses: dopplerhq/cli-action@v4
+
+      - name: Unit tests
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+          DOPPLER_CONFIG: dev_ci
+        run: pnpm test
+
+  build_api:
+    name: Build API
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.15.1
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build API (Wrangler dry-run)
+        run: pnpm --filter ./apps/sdp-api build
+
+  build_docs:
+    name: Build Docs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.15.1
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build docs
+        run: pnpm --filter sdp-docs build
+
+  docs_integrity:
+    name: Docs Integrity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.15.1
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate public docs artifacts
+        run: |
+          pnpm --filter sdp-docs generate:api
+          pnpm --filter sdp-docs generate:ai
+
+      - name: Check docs links
+        run: pnpm --filter sdp-docs check:links
+
+  integration_tests_shard:
+    name: Integration Tests (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - name: Kora
+            test_files: src/tests/kora.test.ts src/tests/kora-flow.test.ts
+            rpc_provider: alchemy
+          - name: Issuance
+            test_files: src/tests/issuance-endpoints.test.ts src/tests/token2022.test.ts
+            rpc_provider: quicknode
+          - name: Mosaic
+            test_files: src/tests/mosaic-token-acl.test.ts src/tests/mosaic-abl.test.ts src/tests/mosaic-templates.test.ts
+            rpc_provider: triton
+          - name: Token Flows
+            test_files: src/tests/deploy.test.ts src/tests/mint.test.ts src/tests/burn.test.ts src/tests/freeze.test.ts
+            rpc_provider: quicknode
+          - name: Access
+            test_files: src/tests/payments-wallet-scope.test.ts src/tests/api-keys-flow.test.ts src/tests/api-keys-rotation.test.ts src/tests/custody-local.test.ts
+            rpc_provider: alchemy
+    env:
+      DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
+      SOLANA_NETWORK: devnet
+      INTEGRATION_TEST_FILES: ${{ matrix.test_files }}
+      SOLANA_RPC_CI_PREFERRED_PROVIDER: ${{ matrix.rpc_provider }}
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: sdp
+          POSTGRES_USER: sdp
+          POSTGRES_PASSWORD: sdp
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sdp -d sdp"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.15.1
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate Doppler bootstrap secret
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+        run: |
+          if [ -z "${DOPPLER_TOKEN}" ]; then
+            echo "DOPPLER_TOKEN_CI must be configured for secret-aware CI jobs." >&2
+            exit 1
+          fi
+
+      - name: Install Doppler CLI
+        uses: dopplerhq/cli-action@v4
+
+      - name: Validate integration runtime secrets
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+        run: |
+          doppler run --config dev_ci -- bash <<'EOF'
+          set -euo pipefail
+          if [ -z "${KORA_RPC_URL:-}" ]; then
+            echo "KORA_RPC_URL must be set in the dev_ci Doppler config for integration tests." >&2
+            exit 1
+          fi
+          if [ -z "${PRIVY_APP_ID:-}" ] || [ -z "${PRIVY_APP_SECRET:-}" ]; then
+            echo "PRIVY_APP_ID and PRIVY_APP_SECRET must be set in the dev_ci Doppler config for integration tests." >&2
+            exit 1
+          fi
+          EOF
+
+      - name: Integration tests
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+          DOPPLER_CONFIG: dev_ci
+        run: |
+          read -r -a test_files <<< "${INTEGRATION_TEST_FILES}"
+          pnpm test:integration -- "${test_files[@]}"
+
+  integration_tests:
+    name: Integration Tests (Devnet/Kora)
+    runs-on: ubuntu-latest
+    needs:
+      - integration_tests_shard
+    if: always()
+    timeout-minutes: 5
+    steps:
+      - name: Check integration test results
+        env:
+          INTEGRATION_SHARD_RESULT: ${{ needs.integration_tests_shard.result }}
+        run: |
+          if [ "${INTEGRATION_SHARD_RESULT}" != "success" ]; then
+            echo "One or more integration shards finished with ${INTEGRATION_SHARD_RESULT}." >&2
+            exit 1
+          fi
+          echo "All integration shards passed."
+
+  browser_e2e:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Dashboard E2E
+            test_script: test:e2e:dashboard
+            artifact_suffix: dashboard
+          - name: Issuance E2E
+            test_script: test:e2e:issuance
+            artifact_suffix: issuance
+    env:
+      DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
+      SOLANA_NETWORK: devnet
+      PLAYWRIGHT_API_URL: http://127.0.0.1:8787
+      PLAYWRIGHT_API_PORT: "8787"
+      PLAYWRIGHT_API_PERSIST_PATH: .wrangler/state-playwright
+      PLAYWRIGHT_USE_NEXT_START: "1"
+      PLAYWRIGHT_NEXT_DIST_DIR: .next-playwright
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: sdp
+          POSTGRES_USER: sdp
+          POSTGRES_PASSWORD: sdp
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sdp -d sdp"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.15.1
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate Doppler bootstrap secret
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+        run: |
+          if [ -z "${DOPPLER_TOKEN}" ]; then
+            echo "DOPPLER_TOKEN_CI must be configured for secret-aware CI jobs." >&2
+            exit 1
+          fi
+
+      - name: Install Doppler CLI
+        uses: dopplerhq/cli-action@v4
+
+      - name: Validate browser e2e runtime secrets
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+        run: |
+          doppler run --config dev_ci -- bash <<'EOF'
+          set -euo pipefail
+          if [ -z "${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}" ] || [ -z "${CLERK_SECRET_KEY:-}" ]; then
+            echo "Clerk publishable and secret keys must be set in the dev_ci Doppler config for browser e2e." >&2
+            exit 1
+          fi
+          if [ -z "${PRIVY_APP_ID:-}" ] || [ -z "${PRIVY_APP_SECRET:-}" ]; then
+            echo "PRIVY_APP_ID and PRIVY_APP_SECRET must be set in the dev_ci Doppler config for browser e2e." >&2
+            exit 1
+          fi
+          if [ -z "${KORA_RPC_URL:-}" ]; then
+            echo "KORA_RPC_URL must be set in the dev_ci Doppler config for browser e2e." >&2
+            exit 1
+          fi
+          EOF
+
+      - name: Derive Clerk issuer for local API
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+        run: |
+          CLERK_HOST=$(doppler run --config dev_ci -- node - <<'NODE'
+          const key = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || "";
+          const encoded = key.split("_").slice(2).join("_");
+          if (!encoded) {
+            throw new Error("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is required for issuance e2e");
+          }
+          const normalized = encoded.replace(/-/g, "+").replace(/_/g, "/");
+          const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
+          const decoded = Buffer.from(padded, "base64").toString("utf8").replace(/\$/g, "").trim();
+          if (!decoded) {
+            throw new Error("Unable to derive Clerk frontend host from publishable key");
+          }
+          process.stdout.write(decoded);
+          NODE
+          )
+          echo "CLERK_ISSUER=https://${CLERK_HOST}" >> "$GITHUB_ENV"
+          echo "CLERK_JWKS_URL=https://${CLERK_HOST}/.well-known/jwks.json" >> "$GITHUB_ENV"
+
+      - name: Install Playwright browser
+        run: pnpm --filter sdp-web exec playwright install --with-deps chromium
+
+      - name: Build web app for Playwright
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+          DOPPLER_CONFIG: dev_ci
+          SDP_API_BASE_URL: ${{ env.PLAYWRIGHT_API_URL }}
+          NEXT_PUBLIC_SDP_API_BASE_URL: ${{ env.PLAYWRIGHT_API_URL }}
+          SOLANA_RPC_CI_PREFERRED_PROVIDER: quicknode
+        run: scripts/doppler/run-with-config.sh node scripts/run-with-healthy-solana-rpc.mjs pnpm --filter sdp-web build
+
+      - name: Run browser e2e suite
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+          DOPPLER_CONFIG: dev_ci
+          SOLANA_RPC_CI_PREFERRED_PROVIDER: quicknode
+        run: scripts/doppler/run-with-config.sh node scripts/run-with-healthy-solana-rpc.mjs pnpm --filter sdp-web run ${{ matrix.test_script }}
+
+      - name: Upload Playwright artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-artifacts-${{ matrix.artifact_suffix }}
+          path: |
+            apps/sdp-web/playwright-report
+            apps/sdp-web/test-results
+          if-no-files-found: ignore

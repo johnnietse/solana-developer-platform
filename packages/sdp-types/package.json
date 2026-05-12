@@ -1,0 +1,50 @@
+{
+  "name": "@sdp/types",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./organizations": {
+      "types": "./src/organizations.ts",
+      "import": "./src/organizations.ts",
+      "default": "./src/organizations.ts"
+    },
+    "./custody": {
+      "types": "./src/custody.ts",
+      "import": "./src/custody.ts",
+      "default": "./src/custody.ts"
+    },
+    "./api-keys": {
+      "types": "./src/api-keys.ts",
+      "import": "./src/api-keys.ts",
+      "default": "./src/api-keys.ts"
+    },
+    "./payments": {
+      "types": "./src/payments.ts",
+      "import": "./src/payments.ts",
+      "default": "./src/payments.ts"
+    },
+    "./site": {
+      "types": "./src/site.ts",
+      "import": "./src/site.ts",
+      "default": "./src/site.ts"
+    },
+    "./permissions": {
+      "types": "./src/permissions.ts",
+      "import": "./src/permissions.ts",
+      "default": "./src/permissions.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check src/"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3"
+  }
+}

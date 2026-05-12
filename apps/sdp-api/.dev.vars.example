@@ -1,0 +1,144 @@
+# SDP API local dev vars (copy to .dev.vars)
+
+# DATABASE_URL=postgresql://sdp:sdp@127.0.0.1:5432/sdp
+# For the shared GCP dev database, use the Cloud SQL connection string issued
+# for the `sdp_api_dev` database instead of the local Docker URL above.
+
+# Optional: explicit test-database URL used by `pnpm test` and
+# `pnpm --filter @sdp/api db:migrate:test`. If unset, both derive a `_test`
+# suffix from DATABASE_URL (e.g. `…/sdp` → `…/sdp_test`).
+# TEST_DATABASE_URL=postgresql://sdp:sdp@127.0.0.1:5432/sdp_test
+
+# Deployment mode: "managed" (default; uses Clerk-synced org tier entitlements)
+# or "self_hosted" (every configured provider is automatically entitled
+# regardless of tier). Per-org providerOverrides still apply as a disable-only
+# mechanism.
+# SDP_DEPLOYMENT_MODE=self_hosted
+
+# --- Minimum self-hosted set (no third-party provider dependencies) ---
+# Uncomment these alongside SDP_DEPLOYMENT_MODE=self_hosted to run with
+# only the local signer + native fee payment + a single RPC endpoint.
+#
+# Custody: local signer
+# Generate keypair + encryption key values with: pnpm --filter @sdp/api keygen:local
+# SIGNING_PROVIDER=local
+# CUSTODY_PRIVATE_KEY=<base58-encoded keypair>
+# CUSTODY_ENCRYPTION_KEY=<base64-encoded 256-bit key>  # required for any custody provider — encrypts stored wallet secrets
+#
+# Fee payment: native (do NOT default to "kora" — that points at the
+# Solana Foundation's public Kora endpoint and adds an external dependency)
+# FEE_PAYMENT_PROVIDER=native
+# FEE_PAYER_PRIVATE_KEY=<base58-encoded keypair>
+#
+# RPC: any single endpoint. NOTE: the public Solana endpoint
+# (https://api.devnet.solana.com) heavily rate-limits / blocks
+# getTokenAccountsByOwner with 403, so wallet balance queries will log
+# "failed to fetch SPL balances" on every request. Use a free Helius / Triton /
+# QuickNode key or a local solana-test-validator for any real dashboard
+# walkthrough.
+# SOLANA_RPC_URL=https://devnet.helius-rpc.com/?api-key=<your-key>
+
+# Sentry
+# SENTRY_DSN=https://examplePublicKey@o0.ingest.us.sentry.io/0
+# SENTRY_TRACES_SAMPLE_RATE=1.0
+
+# --- Managed-mode defaults ---
+# These are the defaults for the hosted Solana Foundation deployment.
+# If you are running self-hosted (SDP_DEPLOYMENT_MODE=self_hosted), comment
+# every var in this section out — otherwise SOLANA_RPC_URL and
+# FEE_PAYMENT_PROVIDER below will silently override the self-hosted block above
+# and re-introduce the external dependencies that mode is meant to avoid.
+
+# Solana RPC (devnet). Keep provider URLs templated and put credentials in the
+# *_API_KEY vars below so deploys do not carry live keys in plain text.
+SOLANA_RPC_URL=https://api.devnet.solana.com
+SOLANA_RPC_DEFAULT_PROVIDER=helius
+SOLANA_RPC_ALCHEMY_URL=https://solana-devnet.g.alchemy.com/v2/{API_KEY}
+SOLANA_RPC_TRITON_URL=https://solanaf-sdp-7436.devnet.rpcpool.com/{API_KEY}
+SOLANA_RPC_HELIUS_URL=https://devnet.helius-rpc.com/?api-key={API_KEY}
+SOLANA_RPC_QUICKNODE_URL=https://evocative-old-mansion.solana-devnet.quiknode.pro/{API_KEY}
+# Managed RPC providers for proxy round-robin.
+# For live connectivity tests, configure all provider URLs above.
+# SOLANA_RPC_TRITON_API_KEY=YOUR_TRITON_KEY
+# SOLANA_RPC_HELIUS_API_KEY=YOUR_HELIUS_KEY
+# SOLANA_RPC_ALCHEMY_API_KEY=YOUR_ALCHEMY_KEY
+# SOLANA_RPC_QUICKNODE_API_KEY=YOUR_QUICKNODE_KEY
+
+# Shared devnet Kora instance for managed-mode fee payment.
+KORA_RPC_URL=https://your-kora-devnet-instance.us-central1.run.app
+# KORA_API_KEY=YOUR_KORA_API_KEY (only if API key auth is enabled)
+FEE_PAYMENT_PROVIDER=kora
+# --- end managed-mode defaults ---
+
+# Coinbase CDP platform signer (required for coinbase_cdp custody provider)
+# SIGNING_PROVIDER=coinbase_cdp
+# COINBASE_CDP_API_KEY_ID=YOUR_CDP_API_KEY_ID
+# COINBASE_CDP_API_KEY_SECRET=-----BEGIN EC PRIVATE KEY-----\n...\n-----END EC PRIVATE KEY-----
+# COINBASE_CDP_WALLET_SECRET=BASE64_PKCS8_DER_WALLET_SECRET
+# COINBASE_CDP_API_BASE_URL=https://api.cdp.coinbase.com/platform
+# COINBASE_CDP_NETWORK=solana-devnet
+# COINBASE_CDP_WALLET_ID=YOUR_DEFAULT_CDP_SOLANA_ADDRESS
+
+# Para platform signer (required for para custody provider)
+# SIGNING_PROVIDER=para
+# PARA_API_KEY=YOUR_PARA_API_KEY
+# PARA_API_BASE_URL=https://api.getpara.com
+# PARA_REQUEST_DELAY_MS=0
+# PARA_WALLET_ID=YOUR_DEFAULT_PARA_WALLET_ID
+
+# Turnkey platform signer (required for turnkey custody provider)
+# SIGNING_PROVIDER=turnkey
+# TURNKEY_API_PUBLIC_KEY=YOUR_TURNKEY_API_PUBLIC_KEY_HEX
+# TURNKEY_API_PRIVATE_KEY=YOUR_TURNKEY_API_PRIVATE_KEY_HEX
+# TURNKEY_ORGANIZATION_ID=YOUR_TURNKEY_ORGANIZATION_ID
+# TURNKEY_API_BASE_URL=https://api.turnkey.com
+# TURNKEY_REQUEST_DELAY_MS=0
+# TURNKEY_PRIVATE_KEY_ID=YOUR_DEFAULT_TURNKEY_PRIVATE_KEY_ID
+# TURNKEY_PUBLIC_KEY=YOUR_DEFAULT_TURNKEY_SOLANA_PUBLIC_KEY
+
+# Clerk auth + webhook
+# See docs/self-hosting/clerk-setup.md for the end-to-end walkthrough
+# (account creation, JWT template, webhook relay via Svix CLI).
+#
+# Issuer URL — find in Clerk dashboard → API Keys (e.g. https://<slug>.clerk.accounts.dev)
+CLERK_ISSUER=
+# Optional: only set if you configure an `aud` claim in the JWT template
+# CLERK_AUDIENCE=
+# Optional: defaults to ${CLERK_ISSUER}/.well-known/jwks.json
+# CLERK_JWKS_URL=
+# Webhook signing secret from the Clerk endpoint that points at /webhooks/clerk/link-orgs
+CLERK_WEBHOOK_SECRET=whsec_...
+
+# Compliance providers
+# RANGE_API_KEY=YOUR_RANGE_API_KEY
+# RANGE_API_BASE_URL=https://api.range.org
+# ELLIPTIC_API_TOKEN=YOUR_ELLIPTIC_BEARER_TOKEN
+# ELLIPTIC_API_KEY=YOUR_ELLIPTIC_API_KEY
+# ELLIPTIC_API_SECRET=YOUR_ELLIPTIC_API_SECRET_BASE64
+# ELLIPTIC_API_BASE_URL=https://aml-api.elliptic.co
+# TRM_API_KEY=YOUR_TRM_API_KEY
+# TRM_API_BASE_URL=https://api.trmlabs.com
+# CHAINALYSIS_API_KEY=YOUR_CHAINALYSIS_API_KEY
+# CHAINALYSIS_API_BASE_URL=https://api.chainalysis.com
+# MoonPay ramps (widget-based)
+# MOONPAY_API_KEY=pk_test_...
+# MOONPAY_SECRET_KEY=sk_test_...
+# MOONPAY_ONRAMP_URL=https://buy-sandbox.moonpay.com
+# MOONPAY_OFFRAMP_URL=https://sell-sandbox.moonpay.com
+
+# Lightspark Grid ramps (API-based)
+# LIGHTSPARK_GRID_CLIENT_ID=YOUR_LIGHTSPARK_TOKEN_ID
+# LIGHTSPARK_GRID_CLIENT_SECRET=YOUR_LIGHTSPARK_CLIENT_SECRET
+# LIGHTSPARK_GRID_API_BASE_URL=https://api.lightspark.com/grid/2025-10-13
+
+# BVNK ramps (API-based)
+# Set one auth method:
+# 1) Bearer token auth
+# BVNK_API_TOKEN=YOUR_BVNK_BEARER_TOKEN
+# 2) Hawk auth
+# BVNK_HAWK_AUTH_ID=YOUR_BVNK_HAWK_AUTH_ID
+# BVNK_HAWK_SECRET_KEY=YOUR_BVNK_HAWK_SECRET_KEY
+# BVNK_WALLET_ID=YOUR_BVNK_WALLET_ID
+# BVNK_API_BASE_URL=https://api.sandbox.bvnk.com
+# Note: BVNK on-ramp can require additional provider-side enablement/compliance setup
+# beyond API credentials (for example pay-in permissions on your merchant account).
