@@ -1,12 +1,14 @@
 # Solana Developer Platform
 
-Solana Developer Platform (SDP) is a devnet-first toolkit for building Solana applications with wallets, token issuance, payments, compliance checks, and a hosted dashboard.
+Solana Developer Platform (SDP) is an enterprise development platform for building Solana applications with wallets, token issuance, payments, compliance checks, and a hosted dashboard.
 
 ## Status
 
-SDP is pre-mainnet software. The public repository and APIs are intended for development, evaluation, and devnet integrations.
+SDP is pre-mainnet software. The public repository and APIs are intended for enterprise development, evaluation, and devnet integrations.
 
 This codebase has not been audited. Do not use it to custody production funds, run mainnet financial workflows, or protect regulated production activity without your own review, testing, and security assessment.
+
+Full self-hosting is a work in progress. The repository includes local development and infrastructure helpers, but the primary supported path today is the hosted platform and devnet-oriented development.
 
 The hosted platform is available at https://platform.solana.com and the public docs are at https://platform.solana.com/docs.
 
@@ -82,7 +84,7 @@ pnpm -C apps/sdp-docs generate:ai
 
 ## Contributing
 
-Please read [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`AGENTS.md`](AGENTS.md) before opening a pull request. Include tests for behavior changes and keep public documentation aligned with the OpenAPI source.
+Please read [`CONTRIBUTING.md`](CONTRIBUTING.md), [`AGENTS.md`](AGENTS.md), and the [local development notes](docs/contributing/local-development.md) before opening a pull request. Include tests for behavior changes and keep public documentation aligned with the OpenAPI source.
 
 ## License
 
