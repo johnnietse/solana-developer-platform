@@ -1,217 +1,93 @@
 # Solana Developer Platform
 
-The unified API and dashboard for building blockchain applications on Solana. Create wallets, issue tokens, process payments, and manage custody — all with a single integration.
+Solana Developer Platform (SDP) is a devnet-first toolkit for building Solana applications with wallets, token issuance, payments, compliance checks, and a hosted dashboard.
 
-> **Note:** SDP is devnet-only for now. Mainnet support is not part of the public getting-started path yet.
+## Status
 
-## What is SDP?
+SDP is pre-mainnet software. The public repository and APIs are intended for development, evaluation, and devnet integrations.
 
-The Solana Developer Platform (SDP) provides a comprehensive set of APIs and tools for developers to:
+This codebase has not been audited. Do not use it to custody production funds, run mainnet financial workflows, or protect regulated production activity without your own review, testing, and security assessment.
 
-- **Create and manage wallets** — Support multiple custody providers (Privy, Coinbase CDP, Turnkey, Fireblocks, Para)
-- **Issue tokens** — Mint, transfer, and freeze SPL tokens with ease
-- **Process payments** — Send SOL and SPL tokens with built-in compliance screening
-- **Manage compliance** — Integrate AML/KYC screening (TRM, Chainalysis, Elliptic, Range)
-- **Enable on/off-ramps** — Connect fiat gateways (MoonPay, Lightspark, BVNK)
-- **Multi-tenant management** — Organize projects, teams, and API keys
+The hosted platform is available at https://platform.solana.com and the public docs are at https://platform.solana.com/docs.
 
-**Live platform**: https://platform.solana.com/
+## What is in this repo?
 
-**API Documentation**: https://platform.solana.com/docs
+- `apps/sdp-api`: Cloudflare Workers API, OpenAPI source, route handlers, Postgres/KV integrations
+- `apps/sdp-web`: dashboard application
+- `apps/sdp-docs`: public documentation site and generated API reference
+- `packages/sdp-types`: shared runtime types and product constants
+- `packages/sdp-api-integration`: maintainer-oriented integration test harness
+- `infra`: local and deployment infrastructure helpers
+- `docs/ops`: operator and maintainer notes
 
-## Getting Started
+The supported public API areas are health, API keys, wallets, projects, issuance, payments, and compliance. Internal routes and provider-specific operational details are not part of the public surface.
 
-### For Users & Application Developers
+## Local Development
 
-If you're building with SDP (not contributing to the repo):
+Prerequisites:
 
-1. **Sign up**: https://platform.solana.com/sign-up
-2. **Create a project** and generate API keys
-3. **Read the docs**: https://platform.solana.com/docs
-4. **Integrate the REST API** using your language of choice
+- Node.js 20+
+- pnpm 10.15+
+- Git
 
-See the [public API reference](https://platform.solana.com/docs) for endpoint details.
-
-### For Contributors
-
-Want to contribute to the SDP codebase? Start here:
-
-#### Prerequisites
-
-- **Node.js 20+**
-- **pnpm 10.15.1+** — Install: `npm install -g pnpm`
-- **Git**
-- **Doppler CLI** — Install: `brew install dopplerhq/cli/doppler` (or see [doppler.com/docs/cli](https://docs.doppler.com/docs/cli)). Required to run `pnpm dev` and `pnpm test`.
-
-#### Quick Setup (No Private Accounts)
-
-1. **Clone and install**:
-   ```bash
-   git clone https://github.com/solana-foundation/solana-developer-platform.git
-   cd solana-developer-platform
-   pnpm install
-   ```
-
-2. **Set up local environment**:
-   ```bash
-   # Copy environment template
-   cp apps/sdp-api/.dev.vars.example apps/sdp-api/.dev.vars
-
-   # Open apps/sdp-api/.dev.vars and set SOLANA_RPC_URL=https://api.devnet.solana.com
-   ```
-
-3. **Start local infrastructure**:
-   ```bash
-   # Terminal 1: Database
-   pnpm db:postgres:up
-   pnpm --filter @sdp/api db:postgres:bootstrap
-
-   # Terminal 2: Kora (fee-payer service) — optional
-   pnpm kora:up
-
-   # Terminal 3: Dev server
-   pnpm dev
-   ```
-
-4. **Try the API**:
-   - API: http://localhost:8787
-   - OpenAPI Docs: http://localhost:8787/docs
-   - Dashboard: http://localhost:3000
-
-#### What Works Without Private Accounts
-
-✅ **Full functionality**:
-- Unit tests
-- API exploration and testing
-- Local wallet creation (Kora-based)
-- Token operations (mint, transfer, freeze)
-- Documentation site
-
-❌ **Requires vendor account** (free tiers available):
-- **Dashboard auth**: Clerk (free tier)
-- **Custody providers**: Privy, Coinbase CDP, Turnkey, etc. (business accounts)
-- **Compliance screening**: TRM, Chainalysis, Elliptic, Range (business accounts)
-- **Fiat ramps**: MoonPay, Lightspark, BVNK (business accounts)
-- **Integration tests**: Requires Privy credentials
-
-See [apps/sdp-api/README.md](apps/sdp-api/README.md) for detailed setup instructions.
-
-## Repository Structure
-
-```
-solana-developer-platform/
-├── apps/
-│   ├── sdp-api/              # Core REST API (Cloudflare Workers)
-│   ├── sdp-web/              # Dashboard UI (Next.js)
-│   └── sdp-docs/             # Public documentation site
-├── packages/
-│   ├── sdp-types/            # Shared TypeScript types (internal)
-│   ├── sdp-api-integration/  # Integration test suite (internal)
-│   └── ...                   # Other shared packages
-├── infra/
-│   ├── postgres/             # Local database setup
-│   ├── kora/                 # Fee-payer service setup
-│   └── ...
-└── docs/
-    └── ops/                  # Operator/maintainer documentation
-```
-
-## Public API Overview
-
-The REST API provides these public endpoints (all require API key or session token):
-
-| Family | Purpose | Examples |
-|---|---|---|
-| **Wallets** | Create and manage blockchain accounts | `/v1/wallets`, `/v1/wallets/initialize` |
-| **Issuance** | Mint and manage SPL tokens | `/v1/issuance/tokens`, `/v1/issuance/tokens/{tokenId}/mint` |
-| **Payments** | Send SOL and tokens | `/v1/payments/transfers`, `/v1/payments/transfers/prepare` |
-| **Compliance** | Screen addresses and transactions | `/v1/compliance/address-screenings` |
-| **Projects** | API project management | `/v1/projects` |
-| **API Keys** | Manage access tokens | `/v1/api-keys` |
-| **Health** | Service status | `GET /health` |
-
-**Full API Reference**: https://platform.solana.com/docs
-
-## Package Visibility
-
-| Package | Category | For External Use? |
-|---|---|---|
-| `@sdp/types` | Internal | ❌ Use public REST API instead |
-| `@sdp/api-integration` | Internal | ❌ Maintainer-only test harness |
-| `sdp-api` (app) | Hybrid | ✅ Public API + internal routes |
-| `sdp-web` (app) | Hybrid | ✅ Public landing + internal dashboard |
-| `sdp-docs` (app) | Public | ✅ External documentation site |
-
-See individual `README.md` files in each directory for details.
-
-## Running Tests
-
-### Unit Tests (No External Dependencies)
+Install dependencies:
 
 ```bash
-pnpm test
+pnpm install
 ```
 
-### Integration Tests (Requires Privy + Kora)
+Create a local API environment file:
 
 ```bash
-export SOLANA_RPC_URL="https://api.devnet.solana.com"
-export KORA_RPC_URL="https://your-kora-devnet-instance.us-central1.run.app"
-# export KORA_API_KEY="..."  # only if your Kora endpoint requires it
-export PRIVY_APP_ID=your_app_id
-export PRIVY_APP_SECRET=your_secret
-pnpm test:integration
+cp apps/sdp-api/.dev.vars.example apps/sdp-api/.dev.vars
 ```
 
-See [packages/sdp-api-integration/README.md](packages/sdp-api-integration/README.md) for details.
+For local devnet work, set `SOLANA_RPC_URL=https://api.devnet.solana.com` in `apps/sdp-api/.dev.vars`.
 
-## Local Development with Doppler (Team Members)
-
-If you have team Doppler access:
+Start local services:
 
 ```bash
-doppler login
+pnpm db:postgres:up
+pnpm --filter @sdp/api db:postgres:bootstrap
 pnpm dev
 ```
 
-This injects all secrets automatically. See [docs/ops/doppler-secrets.md](docs/ops/doppler-secrets.md) for details.
+Useful local URLs:
 
-## For Maintainers
+- API: http://localhost:8787
+- API docs: http://localhost:8787/docs
+- Dashboard: http://localhost:3000
 
-Operator and maintainer documentation:
+Some provider-backed features require separate vendor credentials, such as custody providers, compliance providers, fiat ramps, dashboard auth, and integration tests.
 
-- **[Release Operations](docs/ops/release-operations.md)** — Deploy flow, versioning, rollback
-- **[Doppler Setup](docs/ops/doppler-secrets.md)** — Secret management and CI/CD configuration
-- **[Cloudflare Resources](docs/ops/cloudflare-resource-ids.md)** — Hyperdrive and KV namespace configuration
+## Checks
+
+Common checks:
+
+```bash
+pnpm --filter @sdp/api test
+pnpm --filter @sdp/api typecheck
+pnpm --filter sdp-docs check:links
+pnpm --filter sdp-docs build
+pnpm typecheck
+```
+
+Generated artifacts should be regenerated with their owning scripts rather than hand-edited:
+
+```bash
+pnpm -C apps/sdp-api openapi:generate
+pnpm -C apps/sdp-docs generate:api
+pnpm -C apps/sdp-docs generate:ai
+```
 
 ## Contributing
 
-We welcome contributions! Before starting, please:
-
-1. **Check existing issues** — Avoid duplicate work
-2. **Fork and create a branch** — Use descriptive branch names
-3. **Follow conventions** — See `AGENTS.md` for code patterns
-4. **Write tests** — Cover new functionality
-5. **Submit a PR** — Link related issues
-
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) for full guidelines.
+Please read [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`AGENTS.md`](AGENTS.md) before opening a pull request. Include tests for behavior changes and keep public documentation aligned with the OpenAPI source.
 
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
 
-## Support
+## Security
 
-- **Issues & Feature Requests**: [GitHub Issues](https://github.com/solana-foundation/solana-developer-platform/issues)
-- **Documentation**: https://platform.solana.com/docs
-- **Community**: [Solana Developer Discord](https://discord.gg/solana)
-- **Security**: [SECURITY.md](SECURITY.md)
-
-## Project Status
-
-Actively maintained and in public beta. We're improving documentation and onboarding constantly — feedback welcome!
-
----
-
-**Last Updated**: April 2026
-**Repository**: https://github.com/solana-foundation/solana-developer-platform
+Report security issues using the process in [`SECURITY.md`](SECURITY.md). Do not open public issues for vulnerabilities or suspected secrets.
