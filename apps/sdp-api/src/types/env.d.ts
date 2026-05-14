@@ -7,17 +7,27 @@
 
 import type { HyperdriveBinding } from "@/db";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
+import type { KVStoreSet } from "@/runtime/kv";
 import type { CachedSession, OrganizationRpcProvider, Permission } from "@sdp/types";
 
 export interface Env {
-  // Hyperdrive database binding
-  HYPERDRIVE: HyperdriveBinding;
+  // Hyperdrive database binding (Cloudflare runtime only)
+  HYPERDRIVE?: HyperdriveBinding;
 
-  // KV Namespaces
-  SDP_API_KEYS: KVNamespace;
-  SDP_RATE_LIMITS: KVNamespace;
-  SDP_CACHE: KVNamespace;
-  SDP_SESSIONS: KVNamespace;
+  // KV Namespaces (Cloudflare runtime only)
+  SDP_API_KEYS?: KVNamespace;
+  SDP_RATE_LIMITS?: KVNamespace;
+  SDP_CACHE?: KVNamespace;
+  SDP_SESSIONS?: KVNamespace;
+
+  // Node runtime equivalents (Postgres + Redis via connection strings)
+  DATABASE_URL?: string;
+  REDIS_URL?: string;
+
+  // Selects which runtime-specific code path to take.
+  // "cloudflare" uses HYPERDRIVE + KVNamespace bindings above;
+  // "node" uses DATABASE_URL + REDIS_URL.
+  SDP_RUNTIME?: "cloudflare" | "node";
 
   // Environment variables
   ENVIRONMENT: "development" | "production";
@@ -213,6 +223,8 @@ declare module "hono" {
     requestId: string;
     traceId: string;
     requestSource: string;
+    // Runtime-neutral KV bundle, populated by kvStoreMiddleware.
+    kv: KVStoreSet;
   }
 }
 
