@@ -1,3 +1,4 @@
+import { findNeighbour } from "fumadocs-core/page-tree";
 import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
@@ -69,11 +70,19 @@ export default async function Page({ params }: DocsPageProps) {
     notFound();
   }
 
+  const neighbours = findNeighbour(source.pageTree, resolvedPage.page.url);
+  const prev = neighbours.previous
+    ? { name: String(neighbours.previous.name), url: neighbours.previous.url }
+    : undefined;
+  const next = neighbours.next
+    ? { name: String(neighbours.next.name), url: neighbours.next.url }
+    : undefined;
+
   return (
     <DocsPage toc={data.toc} full={data.full}>
       <DocsTitle>{data.title}</DocsTitle>
       <DocsDescription>{data.description}</DocsDescription>
-      <DocsBody>
+      <DocsBody prev={prev} next={next}>
         <MDX components={mdxComponents} />
       </DocsBody>
     </DocsPage>

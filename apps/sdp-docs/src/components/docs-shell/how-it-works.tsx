@@ -15,27 +15,25 @@ export function Step({
   title: string;
   children: React.ReactNode;
 }) {
-  const left: React.ReactNode[] = [];
-  const right: React.ReactNode[] = [];
+  const body: React.ReactNode[] = [];
+  const panels: React.ReactNode[] = [];
 
   React.Children.forEach(children, (child) => {
-    if (React.isValidElement(child) && child.type === StepPanel) {
-      right.push(child);
+    if (React.isValidElement(child) && (child.type as typeof StepPanel).isStepPanel) {
+      panels.push(child);
     } else if (typeof child !== "string" || child.trim()) {
-      left.push(child);
+      body.push(child);
     }
   });
 
   return (
     <div className="hiw-step" id={`step-${number}`}>
-      <div className="hiw-step-left">
-        <div className="hiw-step-header">
-          <span className="hiw-step-num" aria-hidden="true">{number}</span>
-          <h3 className="hiw-step-title">{title}</h3>
-        </div>
-        {left.length > 0 && <div className="hiw-step-body">{left}</div>}
+      <div className="hiw-step-header">
+        <span className="hiw-step-num" aria-hidden="true">{number}</span>
+        <h3 className="hiw-step-title">{title}</h3>
       </div>
-      <div className="hiw-step-right">{right}</div>
+      {body.length > 0 && <div className="hiw-step-body">{body}</div>}
+      {panels}
     </div>
   );
 }
@@ -43,3 +41,4 @@ export function Step({
 export function StepPanel({ children }: { children: React.ReactNode }) {
   return <div className="hiw-step-panel">{children}</div>;
 }
+StepPanel.isStepPanel = true;
