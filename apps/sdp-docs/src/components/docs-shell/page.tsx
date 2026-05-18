@@ -57,14 +57,15 @@ type DocsBodyProps = {
   children: ReactNode;
   prev?: NavPage;
   next?: NavPage;
+  bare?: boolean;
 };
 
-export function DocsBody({ children, prev, next }: DocsBodyProps) {
+export function DocsBody({ children, prev, next, bare }: DocsBodyProps) {
   return (
     <div className="launch-docs-body">
       {children}
-      <PageFeedback />
-      <PageNav prev={prev} next={next} />
+      {!bare && <PageFeedback />}
+      {!bare && <PageNav prev={prev} next={next} />}
     </div>
   );
 }

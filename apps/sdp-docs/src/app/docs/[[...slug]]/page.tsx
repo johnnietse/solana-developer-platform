@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import type { ComponentType } from "react";
 import { DocsBody, DocsDescription, DocsPage, DocsTitle } from "@/components/docs-shell/page";
+import { HOME_TOC } from "@/components/docs-shell/home";
 import { getDocsPagePath } from "@/lib/site";
 import { source } from "@/lib/source";
 import { getMDXComponents } from "../../../../mdx-components";
@@ -16,6 +17,7 @@ const mdxComponents = getMDXComponents({
 type DocsData = {
   title: string;
   description?: string;
+  hideTitle?: boolean;
   body?: ComponentType<{ components?: Record<string, unknown> }>;
   content?: ComponentType<{ components?: Record<string, unknown> }>;
   toc?: Parameters<typeof DocsPage>[0]["toc"];
@@ -78,11 +80,14 @@ export default async function Page({ params }: DocsPageProps) {
     ? { name: String(neighbours.next.name), url: neighbours.next.url }
     : undefined;
 
+  const isHome = resolvedPage.pageSlug.join("/") === "home";
+  const toc = isHome ? HOME_TOC : data.toc;
+
   return (
-    <DocsPage toc={data.toc} full={data.full}>
-      <DocsTitle>{data.title}</DocsTitle>
-      <DocsDescription>{data.description}</DocsDescription>
-      <DocsBody prev={prev} next={next}>
+    <DocsPage toc={toc} full={data.full}>
+      {!data.hideTitle && <DocsTitle>{data.title}</DocsTitle>}
+      {!data.hideTitle && <DocsDescription>{data.description}</DocsDescription>}
+      <DocsBody prev={prev} next={next} bare={data.hideTitle}>
         <MDX components={mdxComponents} />
       </DocsBody>
     </DocsPage>
