@@ -1,6 +1,7 @@
 "use client";
 
 import { useAuth } from "@clerk/nextjs";
+import type { Project } from "@sdp/types";
 import { useRouter } from "next/navigation";
 import {
   createContext,
@@ -32,13 +33,13 @@ type DashboardWorkspaceContextValue = {
   dashboardAccess: DashboardAccess;
   dashboardCacheScope: DashboardCacheScope;
   isSidebarOpen: boolean;
-  selectedProject: string;
+  selectedProject: Project | null;
   issuanceTab: IssuanceWorkspaceTab;
   playgroundApiKeys: DashboardPlaygroundApiKeyOption[];
   selectedPlaygroundApiKeyId: string | null;
   setPlaygroundApiKeys: (keys: DashboardPlaygroundApiKeyOption[]) => void;
   setSelectedPlaygroundApiKeyId: (id: string | null) => void;
-  setSelectedProject: (project: string) => void;
+  setSelectedProject: (project: Project | null) => void;
   setIssuanceTab: (tab: IssuanceWorkspaceTab) => void;
   setSidebarOpen: (open: boolean) => void;
   toggleSidebar: () => void;
@@ -72,7 +73,7 @@ type DashboardWorkspaceProviderProps = {
   children: ReactNode;
   dashboardAccess: DashboardAccess;
   serverDashboardCacheScope: DashboardCacheScope;
-  defaultProject?: string;
+  defaultProject?: Project | null;
   initialSidebarOpen?: boolean;
 };
 
@@ -80,14 +81,14 @@ export function DashboardWorkspaceProvider({
   children,
   dashboardAccess,
   serverDashboardCacheScope,
-  defaultProject = "Default Project",
+  defaultProject = null,
   initialSidebarOpen = true,
 }: DashboardWorkspaceProviderProps) {
   const auth = useAuth();
   const router = useRouter();
   const { replaceSearchParams, searchParams } = useDashboardUrlState();
   const [isSidebarOpen, setSidebarOpenState] = useState(initialSidebarOpen);
-  const [selectedProject, setSelectedProject] = useState(defaultProject);
+  const [selectedProject, setSelectedProject] = useState<Project | null>(defaultProject);
   const [playgroundApiKeys, setPlaygroundApiKeysState] = useState<
     DashboardPlaygroundApiKeyOption[]
   >([]);

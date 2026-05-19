@@ -1,7 +1,7 @@
 "use client";
 
 import { OrganizationSwitcher, SignInButton, UserButton, useAuth } from "@clerk/nextjs";
-import { DEFAULT_SDP_DOCS_URL } from "@sdp/types";
+import { DEFAULT_SDP_DOCS_URL, type ProjectEnvironment } from "@sdp/types";
 import type { LucideIcon } from "lucide-react";
 import {
   ArrowLeft,
@@ -23,6 +23,7 @@ import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
 import { NetworkDebugPanel, NetworkDebugToggle } from "@/components/network-debug-panel";
 import { SentryFeedbackWidget } from "@/components/sentry-feedback-widget";
 import { SentryUserContext } from "@/components/sentry-user-context";
+import { Badge } from "@/components/ui/badge";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 
 type NavItem = {
@@ -165,6 +166,23 @@ function SidebarToggle({
   );
 }
 
+const PROJECT_ENVIRONMENT_LABELS: Record<ProjectEnvironment, string> = {
+  sandbox: "Sandbox",
+  beta: "Beta",
+  production: "Production",
+};
+
+function ProjectEnvironmentBadge({ environment }: { environment: ProjectEnvironment }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span aria-hidden="true" className="text-sm leading-none text-border-medium">
+        |
+      </span>
+      <Badge>{PROJECT_ENVIRONMENT_LABELS[environment]}</Badge>
+    </div>
+  );
+}
+
 function DashboardTopBar({
   isSidebarOpen,
   setSidebarOpen,
@@ -175,6 +193,11 @@ function DashboardTopBar({
   centeredTitle,
   topBarLeadingContent,
 }: DashboardTopBarProps) {
+  const { selectedProject } = useDashboardWorkspace();
+  const environmentBadge = selectedProject ? (
+    <ProjectEnvironmentBadge environment={selectedProject.environment} />
+  ) : null;
+
   if (centeredTitle) {
     return (
       <div className="grid min-h-[40px] grid-cols-[1fr_auto_1fr] items-start gap-3">
@@ -194,6 +217,7 @@ function DashboardTopBar({
         </div>
         <div className="flex items-center justify-end gap-2">
           <UserButton />
+          {environmentBadge}
         </div>
       </div>
     );
@@ -217,6 +241,7 @@ function DashboardTopBar({
 
       <div className="flex items-center gap-2">
         <UserButton />
+        {environmentBadge}
       </div>
     </div>
   );
