@@ -1,7 +1,4 @@
-import type {
-  CounterpartyEntityType,
-  CounterpartyIdentity,
-} from "@sdp/types";
+import type { CounterpartyEntityType, CounterpartyIdentity } from "@sdp/types";
 import type { RepositoryDbClient } from "./base";
 
 export interface CounterpartyRow {

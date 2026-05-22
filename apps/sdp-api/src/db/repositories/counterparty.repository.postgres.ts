@@ -162,12 +162,7 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
                AND external_id = ?
                AND is_active = ?`
         )
-        .bind(
-          params.organizationId,
-          params.projectId,
-          params.externalId,
-          params.isActive ?? true
-        )
+        .bind(params.organizationId, params.projectId, params.externalId, params.isActive ?? true)
         .first<Record<string, unknown>>();
       return row ? mapCounterpartyRow(row) : null;
     },
