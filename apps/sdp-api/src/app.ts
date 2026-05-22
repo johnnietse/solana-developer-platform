@@ -24,6 +24,7 @@ import allowlist from "@/routes/allowlist";
 import apiKeys from "@/routes/api-keys";
 import auth from "@/routes/auth";
 import compliance from "@/routes/compliance";
+import counterparties from "@/routes/counterparties";
 import wallets from "@/routes/custody";
 import docs from "@/routes/docs";
 import health from "@/routes/health";
@@ -214,6 +215,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   v1.route("/onboarding", onboarding);
   v1.route("/payments", payments);
   v1.route("/compliance", compliance);
+  v1.route("/counterparties", counterparties);
 
   app.route("/v1", v1);
 

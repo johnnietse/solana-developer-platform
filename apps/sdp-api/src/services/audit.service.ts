@@ -50,6 +50,7 @@ export type ResourceType =
   | "frozen_account"
   | "custody_config"
   | "custody_wallet"
+  | "counterparty"
   // Transaction resources
   | "transaction"
   | "signing_request";

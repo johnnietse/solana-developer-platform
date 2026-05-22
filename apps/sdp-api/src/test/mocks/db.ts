@@ -26,6 +26,7 @@ const POSTGRES_TEST_TABLES = [
   "magic_links",
   "sessions",
   "project_members",
+  "counterparties",
   "api_keys",
   "projects",
   "invitations",

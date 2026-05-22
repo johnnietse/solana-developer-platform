@@ -14,6 +14,7 @@ import {
   custodyWalletByIdResponseSchema,
   custodyWalletResponseSchema,
   custodyWalletsResponseSchema,
+  counterpartyResponseSchema,
   deleteWalletResponseSchema,
   executeBurnResponseSchema,
   executeForceBurnResponseSchema,
@@ -130,6 +131,7 @@ export const custodySwitchOptionsResponse = successResponseSchema(
   switchProviderOptionsResponseSchema
 );
 export const addressScreeningResponse = successResponseSchema(addressScreeningResponseSchema);
+export const counterpartyResponse = successResponseSchema(counterpartyResponseSchema);
 
 export const allowlistEntriesResponse = successResponseSchema(allowlistEntriesResponseSchema);
 export const allowlistEntryResponse = successResponseSchema(
