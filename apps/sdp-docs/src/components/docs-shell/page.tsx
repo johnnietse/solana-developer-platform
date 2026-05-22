@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { PageFeedback } from "./page-feedback";
 import { PageNav } from "./page-nav";
+import { TableOfContents } from "./toc";
 
 type NavPage = { name: string; url: string };
 
@@ -20,23 +21,7 @@ export function DocsPage({ children, toc, full }: DocsPageProps) {
   return (
     <div className={full ? "launch-docs-page is-full" : "launch-docs-page"}>
       <article className="launch-docs-article">{children}</article>
-      {toc && toc.length > 0 ? (
-        <aside className="launch-docs-toc" aria-label="On this page">
-          <div className="launch-docs-toc-title">On this page</div>
-          <nav>
-            {toc.map((item) => (
-              <a
-                key={item.url}
-                href={item.url}
-                className="launch-docs-toc-link"
-                style={{ paddingLeft: `${Math.max((item.depth ?? 2) - 2, 0) * 12}px` }}
-              >
-                {item.title}
-              </a>
-            ))}
-          </nav>
-        </aside>
-      ) : null}
+      {toc && toc.length > 0 ? <TableOfContents items={toc} /> : null}
     </div>
   );
 }

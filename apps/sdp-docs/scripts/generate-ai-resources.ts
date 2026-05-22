@@ -49,8 +49,7 @@ const FEATURE_SUMMARY = [
 ];
 
 const KEY_PAGE_SLUGS = [
-  "what-is-solana-developer-platform",
-  "getting-started",
+  "introduction",
   "guides/setup-organization",
   "guides/setup-wallets",
   "guides/manage-api-keys",
