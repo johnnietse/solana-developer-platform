@@ -1,9 +1,16 @@
 ---
 title: Create a Token
 description: Define a new token using a template or custom configuration.
+steps:
+  - Choose a template
+  - Configure token identity
+  - Set operational settings
+  - Confirm creation
 ---
 
 Token creation defines your token's metadata, extensions, and operational rules. The token is saved in SDP but **not yet deployed** onchain — see [Deploy a Token](/docs/tokens/deploy-a-token) for the next step.
+
+![Empty Issuance page with a create card](/images/tokens/token-list-empty.png)
 
 ## Templates
 
@@ -34,6 +41,8 @@ The first screen shows three template cards:
 - **Custom** — fully configurable Token-2022 setup
 
 Select a template and click **Continue**.
+
+![Template selection modal showing Stablecoin, Tokenized Security, and Custom cards](/images/tokens/token-create-templates.png)
 
 </Tab>
 <Tab value="API">
@@ -76,6 +85,8 @@ In step 2 of 3, fill in the identity fields:
 
 Click **Continue** when ready.
 
+![Identity configuration form with Metadata URI, Token Name, Symbol, and Decimals fields](/images/tokens/token-create-identity.png)
+
 </Tab>
 <Tab value="API">
 
@@ -114,6 +125,8 @@ In step 3 of 3, configure:
 - **Allowlist** — toggle on or off; required and locked for `tokenized-security`
 
 Click **Create token** to save the draft.
+
+![Operational settings form showing Main Signer and Transfer Controls with Allowlist and Denylist toggles](/images/tokens/token-create-settings.png)
 
 </Tab>
 <Tab value="API">
@@ -173,9 +186,13 @@ The token is saved in SDP with status `pending`. Nothing has been written to Sol
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-A success toast confirms creation. The token appears in the **Issuance** list with a `Pending` badge.
+A success toast confirms creation. The token appears in the **Issuance** list with a `Draft` badge.
 
-From here, open the token and click **Deploy** to move to the next step.
+![Issuance list showing the newly created token with a Draft badge](/images/tokens/token-list-draft.png)
+
+Open the token to see its detail page. The status shows **Not deployed** and a **Deploy** button is available to move to the next step.
+
+![Token detail page showing Not deployed status and Deploy button](/images/tokens/token-detail-pending.png)
 
 </Tab>
 <Tab value="API">

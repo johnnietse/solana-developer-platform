@@ -1,6 +1,10 @@
 ---
 title: Deploy a Token
 description: Deploy a created token to the Solana blockchain.
+steps:
+  - Open the deploy action
+  - Deploy the token
+  - Confirm deployment
 ---
 
 After [creating a token](/docs/tokens/create-a-token), deploy it onchain. Deployment creates the mint account on Solana and assigns authorities to your configured wallets.
@@ -25,6 +29,8 @@ Locate the token you want to deploy. Deployment is irreversible — the mint acc
 In the **Issuance** list, click the token with a `Pending` badge to open its detail page.
 
 The **Deploy** button appears in the token header and in the fund management panel.
+
+![Token detail page showing Not deployed status and Deploy button](/images/tokens/token-detail-pending.png)
 
 </Tab>
 <Tab value="API">
@@ -52,7 +58,13 @@ Use **execute mode** when SDP controls the signing wallet, or **prepare mode** w
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-Click **Deploy**. A confirmation modal shows the token details — review them, then click **Confirm deploy**.
+Click **Deploy**. A modal shows the signer wallet that will authorize the transaction. Review the wallet ID and public key, then click **Deploy now**.
+
+![Deploy token modal showing the signer wallet details](/images/tokens/token-deploy-modal.png)
+
+A confirmation prompt asks you to confirm the on-chain submission. Click **Deploy now** to proceed.
+
+![Deploy token confirmation dialog](/images/tokens/token-deploy-confirm.png)
 
 SDP submits the transaction to Solana and polls for confirmation. The page updates automatically when deployment completes.
 
@@ -107,7 +119,9 @@ Once the transaction is confirmed, the token is active and ready for minting and
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-The token status badge changes from `Pending` to `Active`. The detail page now shows the mint address and onchain supply (initially 0).
+The token status badge changes from `Not deployed` to the onchain mint address. The detail page shows Mint and Burn actions in the Operations tab, and a confirmed deploy transaction in the Transactions table.
+
+![Deployed token detail page with mint address, Operations tab, and confirmed deploy transaction](/images/tokens/token-deployed.png)
 
 </Tab>
 <Tab value="API">

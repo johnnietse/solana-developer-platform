@@ -22,6 +22,7 @@ type DocsData = {
   content?: ComponentType<{ components?: Record<string, unknown> }>;
   toc?: Parameters<typeof DocsPage>[0]["toc"];
   full?: Parameters<typeof DocsPage>[0]["full"];
+  steps?: string[];
 };
 
 type DocsPageProps = {
@@ -81,7 +82,16 @@ export default async function Page({ params }: DocsPageProps) {
     : undefined;
 
   const isHome = resolvedPage.pageSlug.join("/") === "home";
-  const toc = isHome ? HOME_TOC : data.toc;
+  const baseToc = isHome ? HOME_TOC : (data.toc ?? []);
+  const steps = data.steps ?? [];
+  let toc = baseToc;
+  if (steps.length > 0) {
+    const stepItems = steps.map((title, i) => ({ title, url: `#step-${i + 1}`, depth: 3 }));
+    const howItWorksIdx = baseToc.findIndex((item) => item.url === "#how-it-works");
+    toc = howItWorksIdx >= 0
+      ? [...baseToc.slice(0, howItWorksIdx + 1), ...stepItems, ...baseToc.slice(howItWorksIdx + 1)]
+      : [...baseToc, ...stepItems];
+  }
 
   return (
     <DocsPage toc={toc} full={data.full}>
