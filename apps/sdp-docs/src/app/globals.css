@@ -441,7 +441,6 @@ body {
 }
 
 .launch-docs-breadcrumb span {
-  background: var(--launch-active-bg);
   color: var(--launch-ink);
 }
 
