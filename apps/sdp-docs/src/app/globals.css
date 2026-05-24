@@ -1816,3 +1816,238 @@ a.rounded-lg.border.p-4 > p.truncate {
   margin-top: 0;
   margin-bottom: 0;
 }
+
+/* ── API Playground widget ── */
+
+.api-pg {
+  margin: 32px 0;
+  border: 1px solid var(--launch-border);
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--launch-white);
+}
+
+.api-pg-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--launch-border);
+  background: var(--launch-bg);
+}
+
+.api-pg-title {
+  font-family: var(--font-berkeley-mono, monospace);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--launch-muted);
+}
+
+.api-pg-endpoint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.api-pg-method {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 5px;
+  font-family: var(--font-berkeley-mono, monospace);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.api-pg-method--post {
+  background: oklch(0.95 0.06 55);
+  color: oklch(0.52 0.12 55);
+}
+
+.api-pg-method--get {
+  background: oklch(0.94 0.07 150);
+  color: oklch(0.45 0.13 150);
+}
+
+.api-pg-path {
+  font-family: var(--font-berkeley-mono, monospace);
+  font-size: 12px;
+  color: var(--launch-text);
+}
+
+/* Form */
+.api-pg-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+}
+
+.api-pg-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.api-pg-label {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--launch-ink);
+}
+
+.api-pg-hint {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--launch-muted);
+  margin-top: -2px;
+}
+
+.api-pg-input {
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--launch-border-strong);
+  border-radius: 8px;
+  background: var(--launch-cream);
+  font-family: var(--font-berkeley-mono, monospace);
+  font-size: 13px;
+  color: var(--launch-ink);
+  outline: none;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.api-pg-input::placeholder {
+  color: var(--launch-muted);
+}
+
+.api-pg-input:focus {
+  border-color: var(--launch-ink);
+  box-shadow: 0 0 0 3px oklch(0.2189 0.0016 17.28 / 0.08);
+}
+
+.api-pg-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.api-pg-run {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 8px;
+  background: var(--launch-ink);
+  color: var(--launch-white);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.api-pg-run:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+.api-pg-run:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.api-pg-run:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+@keyframes api-pg-spin {
+  to { transform: rotate(360deg); }
+}
+
+.api-pg-spin {
+  animation: api-pg-spin 0.7s linear infinite;
+}
+
+/* Response panel */
+.api-pg-response {
+  border-top: 1px solid var(--launch-border);
+}
+
+.api-pg-response-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid oklch(1 0 0 / 0.06);
+  background: oklch(0.18 0.005 17);
+}
+
+.api-pg-status {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 5px;
+  font-family: var(--font-berkeley-mono, monospace);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.api-pg-status--ok {
+  background: oklch(0.35 0.09 150);
+  color: oklch(0.88 0.12 150);
+}
+
+.api-pg-status--err {
+  background: oklch(0.35 0.12 25);
+  color: oklch(0.88 0.1 25);
+}
+
+.api-pg-elapsed {
+  font-family: var(--font-berkeley-mono, monospace);
+  font-size: 11px;
+  color: oklch(0.55 0 0);
+}
+
+.api-pg-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid oklch(1 0 0 / 0.12);
+  border-radius: 5px;
+  background: transparent;
+  color: oklch(0.65 0 0);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+
+.api-pg-copy:hover {
+  border-color: oklch(1 0 0 / 0.28);
+  color: oklch(0.88 0 0);
+}
+
+.api-pg-pre {
+  margin: 0;
+  padding: 16px;
+  background: oklch(0.18 0.005 17);
+  overflow-x: auto;
+}
+
+.api-pg-pre code {
+  font-family: var(--font-berkeley-mono, monospace);
+  font-size: 12px;
+  line-height: 1.65;
+  color: oklch(0.82 0.02 150);
+  white-space: pre;
+}

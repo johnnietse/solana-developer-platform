@@ -57,6 +57,20 @@ See the [Compliance API reference](/docs/reference/api/compliance) for the full 
 </Tabs>
 </StepPanel>
 
+<ApiPlayground
+  title="Try it"
+  endpoint="/v1/compliance/address-screenings"
+  method="POST"
+  fields={[
+    {
+      key: "address",
+      label: "Wallet address",
+      placeholder: "Enter a Solana wallet address…",
+      hint: "Use any address — the check runs against your configured compliance providers.",
+    },
+  ]}
+/>
+
 </Step>
 
 <Step number={2} title="Freeze and unfreeze an account">
