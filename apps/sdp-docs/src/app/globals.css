@@ -959,12 +959,12 @@ body {
    (.launch-home h2.launch-home-section-label has higher specificity). */
 .launch-home h2.launch-home-section-label {
   margin: 0 0 18px;
-  font-family: var(--font-berkeley-mono, monospace);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--launch-muted);
+  font-family: var(--font-abc-diatype, sans-serif);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  text-transform: none;
+  color: var(--launch-ink);
 }
 
 /* ── Capabilities grid ── */
@@ -1186,9 +1186,6 @@ body {
   width: 32px;
   height: 32px;
   place-items: center;
-  border: 1px solid var(--launch-border);
-  border-radius: 8px;
-  background: var(--launch-bg);
   color: var(--launch-ink);
 }
 
