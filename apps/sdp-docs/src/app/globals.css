@@ -674,14 +674,14 @@ body {
   padding: 0.875rem 1rem;
   border: 1px solid var(--launch-border-strong);
   border-radius: 10px;
-  background: var(--launch-white);
+  background: var(--launch-bg);
   text-decoration: none;
   transition: border-color 0.15s, background 0.15s;
 }
 
 .page-nav-link:hover {
   border-color: var(--launch-ink);
-  background: var(--launch-white);
+  background: var(--launch-bg);
 }
 
 .page-nav-direction {
