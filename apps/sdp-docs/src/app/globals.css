@@ -125,6 +125,13 @@ body {
   background: var(--launch-cream);
 }
 
+.docs-is-home .launch-docs-main {
+  background-image: url('/images/hero-pattern.png');
+  background-repeat: no-repeat;
+  background-position: top center;
+  background-size: 100% auto;
+}
+
 .launch-docs-main-inner {
   width: min(100%, 1120px);
   margin: 0 auto;
@@ -899,8 +906,13 @@ body {
 /* ── Hero ── */
 .launch-home-hero {
   padding-bottom: 48px;
-  border-bottom: 1px solid var(--launch-border);
   margin-bottom: 52px;
+}
+
+.launch-home-hero-divider {
+  height: 1px;
+  background: var(--launch-border);
+  margin: 20px 0 36px;
 }
 
 .launch-home-hero-label {
@@ -914,19 +926,18 @@ body {
 }
 
 .launch-home-hero-headline {
-  margin: 0 0 14px;
+  margin: 0 0 16px;
   font-family: var(--font-abc-diatype, sans-serif);
-  font-size: clamp(28px, 4vw, 40px);
+  font-size: clamp(32px, 4vw, 48px);
   font-weight: 700;
   color: var(--launch-ink);
-  line-height: 1.12;
-  letter-spacing: -0.01em;
-  max-width: 600px;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
   text-wrap: balance;
 }
 
 .launch-home-hero-sub {
-  margin: 0 0 28px;
+  margin: 0 0 24px;
   font-family: var(--font-sans);
   font-size: 16px;
   line-height: 1.6;
@@ -959,11 +970,11 @@ body {
 /* Note: prefixed with .launch-home to beat the global .sdp-docs-shell h1-h6 rule
    (.launch-home h2.launch-home-section-label has higher specificity). */
 .launch-home h2.launch-home-section-label {
-  margin: 0 0 18px;
+  margin: 0 0 20px;
   font-family: var(--font-abc-diatype, sans-serif);
-  font-size: 20px;
+  font-size: 26px;
   font-weight: 700;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
   text-transform: none;
   color: var(--launch-ink);
 }
@@ -1078,7 +1089,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 18px;
+  margin-bottom: 20px;
 }
 
 .launch-home-section-head .launch-home-section-label {
@@ -1088,17 +1099,28 @@ body {
 .launch-home-more {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  font-family: var(--font-berkeley-mono, monospace);
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--launch-muted);
+  gap: 5px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--launch-border-strong);
+  border-radius: 8px;
+  background: var(--launch-white);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--launch-text);
   text-decoration: none;
-  transition: color 150ms ease;
+  transition: border-color 140ms ease, color 140ms ease;
+  white-space: nowrap;
 }
 
 .launch-home-more:hover {
+  border-color: var(--launch-ink);
   color: var(--launch-ink);
+}
+
+.launch-home-more--below {
+  margin-top: 14px;
 }
 
 /* ── Trust + availability strip ── */
@@ -1164,11 +1186,41 @@ body {
   gap: 10px;
 }
 
+/* 3-column horizontal layout for platform model cards */
+.launch-home-model-cards {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+/* Horizontal card variant */
+.launch-home-outcome--h {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 18px 20px;
+}
+
+.launch-home-outcome--h .launch-home-outcome-icon-wrap {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.launch-home-outcome-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.launch-home-outcome--h h3.launch-home-outcome-title {
+  text-wrap: pretty;
+}
+
 .launch-home-outcome {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 20px;
+  padding: 18px 20px;
   border: 1px solid var(--launch-border);
   border-radius: 12px;
   background: var(--launch-white);
@@ -1665,36 +1717,20 @@ body {
   .launch-home-browse-grid {
     grid-template-columns: repeat(2, 1fr);
   }
+
+  .launch-home-model-cards {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 
 @media (max-width: 767px) {
   .launch-home-caps,
   .launch-home-outcomes,
+  .launch-home-model-cards,
   .launch-home-resources,
   .launch-home-paths,
   .launch-home-browse-grid {
     grid-template-columns: 1fr;
-  }
-
-  /* Vertical model flow on mobile */
-  .launch-home-model {
-    flex-direction: column;
-    overflow: visible;
-  }
-
-  .launch-home-model-item {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .launch-home-model-step {
-    padding: 16px 18px;
-  }
-
-  .launch-home-model-arrow {
-    align-self: center;
-    transform: rotate(90deg);
-    margin: 2px 0;
   }
 
   .launch-home-strip-label {

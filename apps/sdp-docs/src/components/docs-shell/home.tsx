@@ -1,5 +1,6 @@
-import { ArrowRight, ArrowUpRight, Building2, CircleDollarSign, Lock, ChevronRight } from "lucide-react";
+import { ArrowRight, Building2, CircleDollarSign, Lock, KeyRound, Coins, Zap, Shield, FolderOpen } from "lucide-react";
 import Link from "next/link";
+import { HomePageClass } from "./home-page-class";
 
 export const HOME_TOC = [
   { title: "Platform model", url: "#platform-model", depth: 2 },
@@ -13,28 +14,39 @@ const CUSTODY_PROVIDERS = ["Privy", "Fireblocks", "Coinbase CDP", "Turnkey"];
 const modelSteps = [
   {
     name: "Organization",
-    desc: "Top-level container",
+    desc: "Top-level entity — owns projects, wallets, and members.",
     href: "/docs/guides/setup-organization",
+    Icon: Building2,
+  },
+  {
+    name: "Projects",
+    desc: "Scoped environments within an org with their own API keys and members.",
+    href: "/docs/guides/setup-organization",
+    Icon: FolderOpen,
   },
   {
     name: "Wallets & keys",
-    desc: "Custody + scoped API",
+    desc: "Provision custody wallets and generate project-scoped API keys.",
     href: "/docs/guides/setup-wallets",
+    Icon: KeyRound,
   },
   {
     name: "Tokens",
-    desc: "Create, deploy, configure",
+    desc: "Create, deploy, and configure Token-2022 assets.",
     href: "/docs/tokens/create-a-token",
+    Icon: Coins,
   },
   {
     name: "Operations",
-    desc: "Mint, burn, transfer",
+    desc: "Mint, burn, and transfer tokens via dashboard or API.",
     href: "/docs/tokens/mint-and-burn",
+    Icon: Zap,
   },
   {
     name: "Compliance",
-    desc: "Freeze, allowlist, screen",
+    desc: "Freeze, allowlist, and screen for regulated issuance.",
     href: "/docs/tokens/freeze-and-compliance",
+    Icon: Shield,
   },
 ];
 
@@ -80,6 +92,8 @@ const quickstart = [
 export function DocsHome() {
   return (
     <div className="launch-home">
+      <HomePageClass />
+      <div className="launch-home-hero-divider" aria-hidden="true" />
 
       {/* ── Hero ── */}
       <section className="launch-home-hero">
@@ -90,7 +104,7 @@ export function DocsHome() {
           Real-world asset issuance, payments, and markets on Solana
         </h1>
         <p className="launch-home-hero-sub">
-          A dashboard and REST API for RWA issuance, payment rails, and market infrastructure — skip key management, Token-2022 boilerplate, and Solana environment setup.
+          A dashboard and REST API for real-world asset issuance, payments, and markets on Solana — with built-in compliance controls.
         </p>
         <div className="launch-home-actions">
           <Link href="/docs/getting-started" className="launch-home-cta-primary">
@@ -105,18 +119,17 @@ export function DocsHome() {
       {/* ── Platform model ── */}
       <section id="platform-model" className="launch-home-section">
         <h2 className="launch-home-section-label">Platform model</h2>
-        <div className="launch-home-model">
-          {modelSteps.map((step, i) => (
-            <div key={step.href} className="launch-home-model-item">
-              <Link href={step.href} className="launch-home-model-step">
-                <span className="launch-home-model-num">0{i + 1}</span>
-                <span className="launch-home-model-name">{step.name}</span>
-                <span className="launch-home-model-desc">{step.desc}</span>
-              </Link>
-              {i < modelSteps.length - 1 && (
-                <ChevronRight className="launch-home-model-arrow" aria-hidden="true" />
-              )}
-            </div>
+        <div className="launch-home-outcomes launch-home-model-cards">
+          {modelSteps.map((step) => (
+            <Link key={step.name} href={step.href} className="launch-home-outcome launch-home-outcome--h">
+              <div className="launch-home-outcome-icon-wrap">
+                <step.Icon size={16} aria-hidden="true" />
+              </div>
+              <div className="launch-home-outcome-body">
+                <h3 className="launch-home-outcome-title">{step.name}</h3>
+                <p className="launch-home-outcome-desc">{step.desc}</p>
+              </div>
+            </Link>
           ))}
         </div>
       </section>
@@ -144,12 +157,7 @@ export function DocsHome() {
 
       {/* ── Outcomes ── */}
       <section id="outcomes" className="launch-home-section">
-        <div className="launch-home-section-head">
-          <h2 className="launch-home-section-label">Outcomes</h2>
-          <Link href="/docs/introduction" className="launch-home-more">
-            See all capabilities <ArrowRight size={12} aria-hidden="true" />
-          </Link>
-        </div>
+        <h2 className="launch-home-section-label">Outcomes</h2>
         <div className="launch-home-outcomes">
           {outcomes.map((o) => (
             <Link key={o.href} href={o.href} className="launch-home-outcome">
@@ -158,12 +166,12 @@ export function DocsHome() {
               </div>
               <h3 className="launch-home-outcome-title">{o.title}</h3>
               <p className="launch-home-outcome-desc">{o.desc}</p>
-              <span className="launch-home-outcome-cta">
-                Read guide <ArrowUpRight size={12} aria-hidden="true" />
-              </span>
             </Link>
           ))}
         </div>
+        <Link href="/docs/introduction" className="launch-home-more launch-home-more--below">
+          See all capabilities <ArrowRight size={12} aria-hidden="true" />
+        </Link>
       </section>
 
       {/* ── Quickstart ── */}
