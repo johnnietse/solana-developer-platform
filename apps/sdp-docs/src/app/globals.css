@@ -672,15 +672,16 @@ body {
   flex-direction: column;
   gap: 0.25rem;
   padding: 0.875rem 1rem;
-  border: 1px solid var(--launch-border);
+  border: 1px solid var(--launch-border-strong);
   border-radius: 10px;
+  background: var(--launch-white);
   text-decoration: none;
   transition: border-color 0.15s, background 0.15s;
 }
 
 .page-nav-link:hover {
-  border-color: var(--launch-border-strong);
-  background: var(--launch-hover-bg);
+  border-color: var(--launch-ink);
+  background: var(--launch-white);
 }
 
 .page-nav-direction {
