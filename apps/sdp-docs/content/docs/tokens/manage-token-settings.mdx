@@ -26,13 +26,17 @@ Review the token's current authorities and configuration before making changes.
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-Open the token detail page. The **Settings** or **Token info** panel shows:
+Open the token detail page. The **Overview** tab shows the token address, mint authority, current supply, and core metadata.
 
-- Current mint authority
-- Freeze authority
-- Permanent delegate (if enabled)
-- Allowlist status
-- Active extensions
+![Token detail Overview tab showing token address, mint authority, supply, template, and decimals](/images/tokens/token-settings-overview.png)
+
+The **Permissions** tab lists every authority and which wallet currently holds it.
+
+![Permissions tab showing Mint Authority, Freeze Authority, Metadata Authority, and Permanent Delegate Authority with Edit buttons](/images/tokens/token-settings-permissions.png)
+
+The **Extensions** tab shows the template and each operational flag — allowlist status, mintable, freezable, and default account state.
+
+![Extensions tab showing template, allowlist, mintable, freezable, and default account state settings](/images/tokens/token-settings-extensions.png)
 
 </Tab>
 <Tab value="API">
