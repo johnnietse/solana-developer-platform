@@ -136,11 +136,15 @@ export async function generateMetadata({ params }: DocsPageProps): Promise<Metad
 
   const data = resolvedPage.page.data as DocsData;
 
+  const pagePath = getDocsPagePath(Array.isArray(slug) ? slug.join("/") : "");
   return {
     title: data.title,
     description: data.description,
     alternates: {
-      canonical: getDocsPagePath(Array.isArray(slug) ? slug.join("/") : ""),
+      canonical: pagePath,
+      types: {
+        "text/markdown": `${pagePath}.md`,
+      },
     },
   };
 }

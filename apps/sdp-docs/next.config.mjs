@@ -13,6 +13,15 @@ const withMDX = createMDX({
 const nextConfig = {
   reactStrictMode: true,
   assetPrefix: "/docs",
+  async rewrites() {
+    return [
+      // Serve /docs/:slug.md as the markdown representation of each docs page
+      {
+        source: "/docs/:slug*.md",
+        destination: "/api/docs-md/:slug*",
+      },
+    ];
+  },
 };
 
 export default withMDX(nextConfig);
