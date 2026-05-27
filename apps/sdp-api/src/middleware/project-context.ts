@@ -1,6 +1,6 @@
 import type { Context, Next } from "hono";
 import { getDb } from "@/db";
-import { AppError } from "@/lib/errors";
+import { badRequest, forbidden, unauthorized } from "@/lib/errors";
 import type { Env } from "@/types/env";
 
 const PROJECT_HEADER = "x-project-id";
@@ -19,19 +19,18 @@ export function projectContextMiddleware() {
     const userId = clerk?.userId ?? session?.userId;
 
     if (!orgId || !userId) {
-      return next();
+      throw unauthorized("Authentication is required");
     }
 
     const requested = c.req.header(PROJECT_HEADER) ?? c.req.query("projectId") ?? null;
 
-    const projectId = requested
-      ? await assertProjectMembership(c, orgId, userId, requested)
-      : await findDefaultSandboxProjectId(c, orgId, userId);
-
-    if (!projectId) {
-      throw new AppError("FORBIDDEN", "No project associated with this organization");
+    if (!requested) {
+      throw badRequest(
+        `Project scope is required. Provide a ${PROJECT_HEADER} header or projectId query parameter.`
+      );
     }
 
+    const projectId = await assertProjectMembership(c, orgId, userId, requested);
     c.set("projectId", projectId);
     await next();
   };
@@ -55,27 +54,8 @@ async function assertProjectMembership(
     .first<{ id: string }>();
 
   if (!row) {
-    throw new AppError("FORBIDDEN", "Requested project is not accessible");
+    throw forbidden("Requested project is not accessible");
   }
 
   return row.id;
-}
-
-async function findDefaultSandboxProjectId(
-  c: Context<{ Bindings: Env }>,
-  organizationId: string,
-  userId: string
-): Promise<string | null> {
-  const row = await getDb(c.env)
-    .prepare(
-      `SELECT p.id
-       FROM projects p
-       JOIN project_members pm ON pm.project_id = p.id
-       WHERE p.organization_id = ? AND p.slug = 'default-sandbox' AND p.status = 'active' AND pm.user_id = ?
-       LIMIT 1`
-    )
-    .bind(organizationId, userId)
-    .first<{ id: string }>();
-
-  return row?.id ?? null;
 }
