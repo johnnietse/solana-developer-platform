@@ -78,12 +78,14 @@ export function getAuth(c: Context<{ Bindings: Env }>): ApiKeyContext {
     };
   }
 
+  const projectId = c.get("projectId") ?? null;
+
   const clerk = c.get("clerk");
   if (clerk) {
     return {
       id: clerk.userId,
       organizationId: clerk.organizationId,
-      projectId: null,
+      projectId,
       role: clerk.role,
       permissions: clerk.permissions,
       environment: "dashboard",
@@ -101,7 +103,7 @@ export function getAuth(c: Context<{ Bindings: Env }>): ApiKeyContext {
     return {
       id: session.userId,
       organizationId: session.organizationId,
-      projectId: null,
+      projectId,
       role: "session",
       permissions: session.permissions,
       environment: "dashboard",
