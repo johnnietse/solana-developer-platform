@@ -2,7 +2,7 @@ import type { Counterparty, CounterpartyResponse, ListCounterpartiesResponse } f
 import { z } from "zod";
 import { getDb } from "@/db";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
-import { getAuth } from "@/lib/auth";
+import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
 import {
   badRequest,
@@ -41,7 +41,7 @@ function mapToCounterparty(row: CounterpartyRow): Counterparty {
 
 export const listCounterparties = async (c: AppContext) => {
   const auth = getAuth(c);
-  const projectId = c.get("projectId")!;
+  const projectId = requireProjectId(c);
   const parsed = listCounterpartiesQuerySchema.safeParse(c.req.query());
 
   if (!parsed.success) {
@@ -71,7 +71,7 @@ export const listCounterparties = async (c: AppContext) => {
 
 export const getCounterparty = async (c: AppContext) => {
   const auth = getAuth(c);
-  const projectId = c.get("projectId")!;
+  const projectId = requireProjectId(c);
   const params = counterpartyIdParamsSchema.safeParse(c.req.param());
 
   if (!params.success) {
@@ -95,7 +95,7 @@ export const getCounterparty = async (c: AppContext) => {
 
 export const createCounterparty = async (c: AppContext) => {
   const auth = getAuth(c);
-  const projectId = c.get("projectId")!;
+  const projectId = requireProjectId(c);
   const body = await c.req.json();
   const parsed = createCounterpartySchema.safeParse(body);
 
@@ -153,7 +153,7 @@ export const createCounterparty = async (c: AppContext) => {
 
 export const updateCounterparty = async (c: AppContext) => {
   const auth = getAuth(c);
-  const projectId = c.get("projectId")!;
+  const projectId = requireProjectId(c);
   const params = counterpartyIdParamsSchema.safeParse(c.req.param());
 
   if (!params.success) {
@@ -209,7 +209,7 @@ export const updateCounterparty = async (c: AppContext) => {
 
 export const archiveCounterparty = async (c: AppContext) => {
   const auth = getAuth(c);
-  const projectId = c.get("projectId")!;
+  const projectId = requireProjectId(c);
   const params = counterpartyIdParamsSchema.safeParse(c.req.param());
 
   if (!params.success) {

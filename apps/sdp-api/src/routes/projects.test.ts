@@ -93,8 +93,12 @@ describe("Projects Routes", () => {
       )
       .run();
 
-    // Cache API key in KV
-    await kv.apiKeys.put(`key:${apiKeyHash}`, JSON.stringify(TEST_CACHED_API_KEY));
+    // Cache API key in KV — override projectId so the cached actor scope
+    // matches the project row we just seeded for this test suite.
+    await kv.apiKeys.put(
+      `key:${apiKeyHash}`,
+      JSON.stringify({ ...TEST_CACHED_API_KEY, projectId: TEST_PROJECT.id })
+    );
   });
 
   describe("POST /v1/projects", () => {

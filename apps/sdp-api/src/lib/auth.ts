@@ -119,6 +119,22 @@ export function getAuth(c: Context<{ Bindings: Env }>): ApiKeyContext {
   throw new AppError("UNAUTHORIZED", "Authentication required");
 }
 
+/**
+ * Get the resolved project ID from request context.
+ * The projectContextMiddleware guarantees this is set for any route it gates;
+ * the runtime check here is defense-in-depth for handlers that may be reused
+ * outside that middleware.
+ *
+ * @throws AppError BAD_REQUEST if no project scope is available.
+ */
+export function requireProjectId(c: Context<{ Bindings: Env }>): string {
+  const projectId = c.get("projectId");
+  if (!projectId) {
+    throw new AppError("BAD_REQUEST", "Project scope is required");
+  }
+  return projectId;
+}
+
 export function getClerkAuth(c: Context<{ Bindings: Env }>): ClerkAuthContext {
   const auth = c.get("clerk");
   if (!auth) {

@@ -7,6 +7,7 @@ import type {
 } from "@sdp/types";
 import type { Context } from "hono";
 import { getDb } from "@/db";
+import { requireProjectId } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { ApiKeyService } from "@/services/api-key.service";
@@ -69,10 +70,7 @@ function resolveActor(c: AppContext): {
 
 export const listApiKeys = async (c: AppContext) => {
   resolveActor(c);
-  const projectId = c.get("projectId");
-  if (!projectId) {
-    throw new AppError("BAD_REQUEST", "Project scope is required");
-  }
+  const projectId = requireProjectId(c);
 
   const apiKeyService = new ApiKeyService(getDb(c.env));
   const apiKeys = await apiKeyService.listForProject(projectId);
@@ -123,10 +121,7 @@ export const createApiKey = async (c: AppContext) => {
     walletPurpose,
   } = parsed.data;
 
-  const projectId = c.get("projectId");
-  if (!projectId) {
-    throw new AppError("BAD_REQUEST", "Project scope is required to create an API key");
-  }
+  const projectId = requireProjectId(c);
 
   const hasOrgAdminAccess =
     actor.permissions.includes("*") || actor.permissions.includes("org:admin");
@@ -270,10 +265,7 @@ export const createApiKey = async (c: AppContext) => {
 export const getApiKey = async (c: AppContext) => {
   const { keyId } = c.req.param();
   const actor = resolveActor(c);
-  const projectId = c.get("projectId");
-  if (!projectId) {
-    throw new AppError("BAD_REQUEST", "Project scope is required");
-  }
+  const projectId = requireProjectId(c);
 
   const apiKeyService = new ApiKeyService(getDb(c.env));
   const key = await apiKeyService.getDetails(keyId, actor.organizationId, projectId);
@@ -310,10 +302,7 @@ export const getApiKey = async (c: AppContext) => {
 export const updateApiKey = async (c: AppContext) => {
   const { keyId } = c.req.param();
   const actor = resolveActor(c);
-  const projectId = c.get("projectId");
-  if (!projectId) {
-    throw new AppError("BAD_REQUEST", "Project scope is required");
-  }
+  const projectId = requireProjectId(c);
 
   const body = await c.req.json();
   const parsed = apiKeyUpdateSchema.safeParse(body);
@@ -427,10 +416,7 @@ export const updateApiKey = async (c: AppContext) => {
 export const rotateApiKey = async (c: AppContext) => {
   const { keyId } = c.req.param();
   const actor = resolveActor(c);
-  const projectId = c.get("projectId");
-  if (!projectId) {
-    throw new AppError("BAD_REQUEST", "Project scope is required");
-  }
+  const projectId = requireProjectId(c);
 
   // Prevent rotating the key being used
   if (actor.apiKeyId && keyId === actor.apiKeyId) {
@@ -484,10 +470,7 @@ export const rotateApiKey = async (c: AppContext) => {
 export const revokeApiKey = async (c: AppContext) => {
   const { keyId } = c.req.param();
   const actor = resolveActor(c);
-  const projectId = c.get("projectId");
-  if (!projectId) {
-    throw new AppError("BAD_REQUEST", "Project scope is required");
-  }
+  const projectId = requireProjectId(c);
 
   // Prevent revoking your own key
   if (actor.apiKeyId && keyId === actor.apiKeyId) {
