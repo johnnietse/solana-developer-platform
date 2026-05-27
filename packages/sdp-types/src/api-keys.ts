@@ -22,7 +22,7 @@ export interface ApiKeyWalletBinding {
 export interface ApiKey {
   id: string; // key_xxxxxxxxxxxx
   organizationId: string;
-  projectId: string | null; // Optional project scoping
+  projectId: string;
   createdBy: string;
   name: string;
   description: string | null;
@@ -51,7 +51,7 @@ export interface ApiKey {
 export interface CachedApiKey {
   id: string;
   organizationId: string;
-  projectId: string | null;
+  projectId: string;
   role: ApiKeyRole;
   permissions: Permission[];
   environment: ApiKeyEnvironment;
@@ -68,9 +68,9 @@ export interface CachedApiKey {
 export interface CreateApiKeyRequest {
   name: string;
   description?: string;
+  projectId: string;
   role?: ApiKeyRole;
   permissions?: Permission[];
-  environment?: ApiKeyEnvironment;
   walletScope: ApiKeyWalletScope;
   allowedIps?: string[]; // CIDR ranges for IP restriction
   expiresAt?: string; // ISO date string
