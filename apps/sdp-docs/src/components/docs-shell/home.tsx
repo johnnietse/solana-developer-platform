@@ -107,9 +107,6 @@ export function DocsHome() {
 
       {/* ── Hero ── */}
       <section className="launch-home-hero">
-        <p className="launch-home-hero-badge">
-          For fintechs, asset issuers &amp; regulated platforms
-        </p>
         <h1 className="launch-home-hero-headline">
           Real-world asset issuance, payments, and markets on Solana
         </h1>

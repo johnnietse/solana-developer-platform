@@ -908,6 +908,10 @@ body {
     overflow: auto;
     padding: 4px 0 4px 20px;
   }
+
+  .docs-is-home .launch-docs-toc {
+    padding-top: 240px;
+  }
 }
 
 /* ── Inline code ── */
