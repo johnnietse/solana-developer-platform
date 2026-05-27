@@ -302,13 +302,11 @@ function CreateApiKeyDetailsStep({
 function CreateApiKeyReviewStep({
   draft,
   selectedWallets,
-  projectId,
   environment,
   onBack,
 }: {
   draft: ApiKeyDraft;
   selectedWallets: PaymentsDashboardWallet[];
-  projectId: string;
   environment: SdpEnvironment;
   onBack: () => void;
 }) {
@@ -321,7 +319,6 @@ function CreateApiKeyReviewStep({
     <form action={createApiKeyAction} className="mt-4 space-y-3">
       <input type="hidden" name="name" value={draft.name} />
       <input type="hidden" name="role" value={draft.role} />
-      <input type="hidden" name="projectId" value={projectId} />
       <input type="hidden" name="expiresAt" value={draft.expiresAt} />
       <input type="hidden" name="walletScope" value={draft.walletScope} />
       {draft.walletScope === "selected"
@@ -496,7 +493,6 @@ export function CreateApiKeyModal({
             <CreateApiKeyReviewStep
               draft={draft}
               selectedWallets={selectedWallets}
-              projectId={selectedProjectId}
               environment={sdpEnvironment}
               onBack={() => setStep(1)}
             />

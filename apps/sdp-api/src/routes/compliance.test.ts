@@ -80,8 +80,8 @@ async function seedAuth(tier: "individual" | "enterprise" = "enterprise"): Promi
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, environment, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         TEST_API_KEY.id,
@@ -93,7 +93,6 @@ async function seedAuth(tier: "individual" | "enterprise" = "enterprise"): Promi
         keyHash,
         "api_developer",
         JSON.stringify(["payments:read"]),
-        "sandbox",
         "active"
       ),
   ]);

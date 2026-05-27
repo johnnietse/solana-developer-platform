@@ -107,7 +107,6 @@ export const createApiKey = async (c: AppContext) => {
   const {
     name,
     description,
-    projectId,
     role = "api_developer",
     permissions,
     walletScope,
@@ -120,6 +119,11 @@ export const createApiKey = async (c: AppContext) => {
     walletLabel,
     walletPurpose,
   } = parsed.data;
+
+  const projectId = c.get("projectId");
+  if (!projectId) {
+    throw new AppError("BAD_REQUEST", "Project scope is required to create an API key");
+  }
 
   const hasOrgAdminAccess =
     actor.permissions.includes("*") || actor.permissions.includes("org:admin");

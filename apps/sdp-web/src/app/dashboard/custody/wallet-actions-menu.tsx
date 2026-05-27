@@ -63,7 +63,7 @@ export function WalletActionsMenu({
 
     startTransition(() => {
       void (async () => {
-        const result = await checkWalletSignerMemoAction(walletId, sandboxProject.id).catch(
+        const result = await checkWalletSignerMemoAction(walletId).catch(
           (error) => ({
             status: "error" as const,
             message: error instanceof Error ? error.message : "Signer check failed.",

@@ -225,10 +225,6 @@ export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
       description: "Role assigned to this API key.",
       example: "api_developer",
     }),
-    projectId: withOpenApi(apiKeyCreateSchemaBase.shape.projectId, {
-      description: "Project this API key belongs to. Determines sandbox vs production environment.",
-      example: "prj_abc123",
-    }),
     walletScope: withOpenApi(apiKeyCreateSchemaBase.shape.walletScope, {
       description:
         "Explicit wallet access mode. Use 'all' to allow every wallet in scope or 'selected' to bind specific wallets.",

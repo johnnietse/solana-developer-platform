@@ -12,6 +12,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useTransition,
 } from "react";
 import { SWRConfig } from "swr";
 import { Button } from "@/components/ui/button";
@@ -19,7 +20,7 @@ import type { DashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
 import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
-import { PROJECT_COOKIE_NAME } from "@/lib/project-cookie";
+import { selectProjectAction } from "@/lib/project-cookie-action";
 
 export type IssuanceWorkspaceTab = "tokens" | "playground";
 export type CounterpartyWorkspaceTab = "overview" | "playground";
@@ -45,8 +46,8 @@ type DashboardWorkspaceContextValue = {
   counterpartyTab: CounterpartyWorkspaceTab;
   playgroundApiKeys: DashboardPlaygroundApiKeyOption[];
   selectedPlaygroundApiKeyId: string | null;
-  selectProject: (projectId: string) => void;
-  switchEnvironment: (value: SdpEnvironment) => void;
+  isProjectSwitching: boolean;
+  selectProject: (projectId: string | null) => void;
   setPlaygroundApiKeys: (keys: DashboardPlaygroundApiKeyOption[]) => void;
   setSelectedPlaygroundApiKeyId: (id: string | null) => void;
   setIssuanceTab: (tab: IssuanceWorkspaceTab) => void;
@@ -137,43 +138,34 @@ export function DashboardWorkspaceProvider({
     projectId: selectedProjectId,
   });
 
-  const selectProject = useCallback((projectId: string) => {
-    setSelectedProjectId(projectId);
-  }, []);
+  const [isProjectSwitching, startProjectSwitchTransition] = useTransition();
 
-  useEffect(() => {
-    if (!selectedProjectId) return;
-    if (projects.some((project) => project.id === selectedProjectId)) return;
-    setSelectedProjectId(sandboxProject?.id ?? productionProject?.id ?? projects[0]?.id ?? null);
-  }, [selectedProjectId, projects, sandboxProject, productionProject]);
-
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-    if (!selectedProjectId) {
-      document.cookie = `${PROJECT_COOKIE_NAME}=; Path=/; Max-Age=0; SameSite=Lax`;
-      return;
-    }
-    document.cookie = `${PROJECT_COOKIE_NAME}=${selectedProjectId}; Path=/; Max-Age=31536000; SameSite=Lax`;
-    router.refresh();
-  }, [selectedProjectId, router]);
-
-  const switchEnvironment = useCallback(
-    (environment: SdpEnvironment) => {
-      const target = environment === "production" ? productionProject : sandboxProject;
-      if (target) {
-        setSelectedProjectId(target.id);
-      }
+  const selectProject = useCallback(
+    (projectId: string | null) => {
+      startProjectSwitchTransition(async () => {
+        const changed = await selectProjectAction(projectId);
+        setSelectedProjectId(projectId);
+        if (changed) router.refresh();
+      });
     },
-    [productionProject, sandboxProject]
+    [router]
   );
+
+  useEffect(() => {
+    if (projects.some((project) => project.id === selectedProjectId)) return;
+    selectProject(sandboxProject?.id ?? null);
+  }, [selectedProjectId, projects, sandboxProject, selectProject]);
 
   useEffect(() => {
     if (!auth.isLoaded || liveDashboardCacheScopeKey === serverDashboardCacheScopeKey) {
       return;
     }
 
-    router.refresh();
-  }, [auth.isLoaded, liveDashboardCacheScopeKey, router, serverDashboardCacheScopeKey]);
+    startProjectSwitchTransition(async () => {
+      await selectProjectAction(null);
+      router.refresh();
+    });
+  }, [auth.isLoaded, liveDashboardCacheScopeKey, serverDashboardCacheScopeKey, router]);
 
   const previousPathnameRef = useRef(pathname);
   useEffect(() => {
@@ -243,12 +235,12 @@ export function DashboardWorkspaceProvider({
       selectedProjectId,
       sdpEnvironment,
       isSidebarOpen,
+      isProjectSwitching,
       issuanceTab,
       counterpartyTab,
       playgroundApiKeys,
       selectedPlaygroundApiKeyId,
       selectProject,
-      switchEnvironment,
       setPlaygroundApiKeys,
       setSelectedPlaygroundApiKeyId,
       setIssuanceTab,
@@ -265,12 +257,12 @@ export function DashboardWorkspaceProvider({
       selectedProjectId,
       sdpEnvironment,
       isSidebarOpen,
+      isProjectSwitching,
       playgroundApiKeys,
       issuanceTab,
       counterpartyTab,
       selectedPlaygroundApiKeyId,
       selectProject,
-      switchEnvironment,
       setPlaygroundApiKeys,
       setIssuanceTab,
       setCounterpartyTab,

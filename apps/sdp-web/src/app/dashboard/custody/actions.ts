@@ -353,16 +353,11 @@ export type WalletFaucetActionResult =
     };
 
 export async function checkWalletSignerMemoAction(
-  walletId: string,
-  projectId: string
+  walletId: string
 ): Promise<WalletSignerCheckActionResult> {
   const resolvedWalletId = walletId.trim();
-  const resolvedProjectId = projectId.trim();
   if (!resolvedWalletId) {
     return { status: "error", message: "walletId is required" };
-  }
-  if (!resolvedProjectId) {
-    return { status: "error", message: "projectId is required" };
   }
 
   const now = Date.now();
@@ -377,7 +372,6 @@ export async function checkWalletSignerMemoAction(
       body: JSON.stringify({
         name: keyName,
         role: "api_developer",
-        projectId: resolvedProjectId,
         walletScope: "selected",
         signingWalletId: resolvedWalletId,
         signingWalletIds: [resolvedWalletId],

@@ -447,6 +447,7 @@ async function getBalancesByWalletId(
 
 export const createWallet = async (c: AppContext) => {
   const actor = resolveActor(c);
+  const projectId = c.get("projectId");
 
   const body = await c.req.json();
   const parsed = createWalletSchema.safeParse(body);
@@ -460,7 +461,7 @@ export const createWallet = async (c: AppContext) => {
   const signingService = signingServiceModule.createSigningService(c.env);
 
   try {
-    const wallet = await signingService.createWallet(actor.organizationId, parsed.data.projectId, {
+    const wallet = await signingService.createWallet(actor.organizationId, projectId, {
       provider: parsed.data.provider,
       label: parsed.data.label,
       purpose: parsed.data.purpose,

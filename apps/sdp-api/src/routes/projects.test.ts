@@ -12,6 +12,11 @@ import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 
+const TEST_PROJECT = {
+  id: "prj_test_projects",
+  slug: "test-test-org-projects",
+};
+
 describe("Projects Routes", () => {
   let apiKeyHash: string;
 
@@ -39,15 +44,12 @@ describe("Projects Routes", () => {
       await kv.rateLimits.delete(key.name);
     }
 
-    // Clear projects tables
-    await db
-      .prepare("DELETE FROM project_members")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM projects")
-      .run()
-      .catch(() => {});
+    // Delete in FK-safe order: api_keys → project_members → projects.
+    // The migration added ON DELETE RESTRICT from api_keys.project_id, so
+    // projects can't be wiped until referring keys are gone.
+    await db.prepare("DELETE FROM api_keys").run();
+    await db.prepare("DELETE FROM project_members").run();
+    await db.prepare("DELETE FROM projects").run();
 
     // Seed organization
     await db
@@ -65,14 +67,30 @@ describe("Projects Routes", () => {
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
 
+    // Seed a default project so the API key has a parent project
+    await db
+      .prepare(
+        `INSERT OR REPLACE INTO projects (id, organization_id, name, slug, environment, status, created_by)
+         VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
+      )
+      .bind(TEST_PROJECT.id, TEST_ORG.id, TEST_PROJECT.slug, TEST_USER.id)
+      .run();
+
     // Seed API key with projects:write permission
     await db
       .prepare(
         `INSERT OR REPLACE INTO api_keys
-         (id, organization_id, created_by, name, key_prefix, key_hash, role, permissions, environment, status)
-         VALUES (?, ?, ?, 'Test Key', ?, ?, 'api_admin', '["*"]', 'sandbox', 'active')`
+         (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
+         VALUES (?, ?, ?, ?, 'Test Key', ?, ?, 'api_admin', '["*"]', 'active')`
       )
-      .bind(TEST_API_KEY.id, TEST_ORG.id, TEST_USER.id, TEST_API_KEY.prefix, apiKeyHash)
+      .bind(
+        TEST_API_KEY.id,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        TEST_USER.id,
+        TEST_API_KEY.prefix,
+        apiKeyHash
+      )
       .run();
 
     // Cache API key in KV

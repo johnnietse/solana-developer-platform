@@ -25,9 +25,9 @@ import { NetworkDebugPanel, NetworkDebugToggle } from "@/components/network-debu
 import { SentryFeedbackWidget } from "@/components/sentry-feedback-widget";
 import { SentryUserContext } from "@/components/sentry-user-context";
 import { Badge } from "@/components/ui/badge";
+import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { cn } from "@/lib/utils";
-import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 
 type SubNavItem = {
   label: string;

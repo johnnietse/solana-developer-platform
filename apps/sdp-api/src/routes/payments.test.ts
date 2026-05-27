@@ -134,8 +134,8 @@ async function seedAuthAndWallet(): Promise<void> {
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, environment, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         TEST_API_KEY.id,
@@ -147,7 +147,6 @@ async function seedAuthAndWallet(): Promise<void> {
         keyHash,
         "api_admin",
         JSON.stringify(["*"]),
-        "sandbox",
         "active"
       ),
     getDb(env)
@@ -1814,7 +1813,7 @@ describe("Payments routes", () => {
       .bind(
         params.id,
         TEST_ORG.id,
-        null,
+        TEST_PROJECT.id,
         params.walletId ?? TEST_WALLET_ID,
         TEST_SOLANA_ADDRESSES.wallet1,
         TEST_SOLANA_ADDRESSES.wallet2,

@@ -77,8 +77,8 @@ async function seedAuthAndConfigs(): Promise<void> {
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, environment, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         TEST_API_KEY.id,
@@ -90,7 +90,6 @@ async function seedAuthAndConfigs(): Promise<void> {
         keyHash,
         "api_admin",
         JSON.stringify(["*"]),
-        "sandbox",
         "active"
       ),
     getDb(env)
@@ -102,7 +101,7 @@ async function seedAuthAndConfigs(): Promise<void> {
       .bind(
         PRIVY_CONFIG_ID,
         TEST_ORG.id,
-        null,
+        TEST_PROJECT.id,
         "privy",
         "test-config",
         "sdp-custody-encryption-v1",
@@ -118,7 +117,7 @@ async function seedAuthAndConfigs(): Promise<void> {
       .bind(
         PARA_CONFIG_ID,
         TEST_ORG.id,
-        null,
+        TEST_PROJECT.id,
         "para",
         "test-config",
         "sdp-custody-encryption-v1",
@@ -131,7 +130,7 @@ async function seedAuthAndConfigs(): Promise<void> {
            (id, organization_id, project_id, default_custody_config_id)
          VALUES (?, ?, ?, ?)`
       )
-      .bind("csd_multi_org_default", TEST_ORG.id, null, PRIVY_CONFIG_ID),
+      .bind("csd_multi_org_default", TEST_ORG.id, TEST_PROJECT.id, PRIVY_CONFIG_ID),
     getDb(env)
       .prepare(
         `INSERT INTO custody_wallets
@@ -246,10 +245,10 @@ describe("Custody multi-provider routes", () => {
       .prepare(
         `SELECT default_custody_config_id
          FROM custody_scope_defaults
-         WHERE organization_id = ? AND project_id IS NULL
+         WHERE organization_id = ? AND project_id = ?
          LIMIT 1`
       )
-      .bind(TEST_ORG.id)
+      .bind(TEST_ORG.id, TEST_PROJECT.id)
       .first<{ default_custody_config_id: string }>();
 
     expect(defaultPointer?.default_custody_config_id).toBe(PARA_CONFIG_ID);
@@ -360,7 +359,7 @@ describe("Custody multi-provider routes", () => {
         .bind(
           walletlessConfigId,
           TEST_ORG.id,
-          null,
+          TEST_PROJECT.id,
           "turnkey",
           "test-config",
           "sdp-custody-encryption-v1",
@@ -371,9 +370,9 @@ describe("Custody multi-provider routes", () => {
         .prepare(
           `UPDATE custody_scope_defaults
            SET default_custody_config_id = ?, updated_at = datetime('now')
-           WHERE organization_id = ? AND project_id IS NULL`
+           WHERE organization_id = ? AND project_id = ?`
         )
-        .bind(walletlessConfigId, TEST_ORG.id),
+        .bind(walletlessConfigId, TEST_ORG.id, TEST_PROJECT.id),
     ]);
 
     const res = await app.request(
@@ -414,7 +413,7 @@ describe("Custody multi-provider routes", () => {
         .bind(
           DFNS_CONFIG_ID,
           TEST_ORG.id,
-          null,
+          TEST_PROJECT.id,
           "dfns",
           "legacy-config",
           "sdp-custody-encryption-v1",
@@ -440,9 +439,9 @@ describe("Custody multi-provider routes", () => {
         .prepare(
           `UPDATE custody_scope_defaults
            SET default_custody_config_id = ?, updated_at = datetime('now')
-           WHERE organization_id = ? AND project_id IS NULL`
+           WHERE organization_id = ? AND project_id = ?`
         )
-        .bind(DFNS_CONFIG_ID, TEST_ORG.id),
+        .bind(DFNS_CONFIG_ID, TEST_ORG.id, TEST_PROJECT.id),
     ]);
 
     const res = await app.request(
@@ -503,10 +502,10 @@ describe("Custody multi-provider routes", () => {
       .prepare(
         `SELECT default_custody_config_id
          FROM custody_scope_defaults
-         WHERE organization_id = ? AND project_id IS NULL
+         WHERE organization_id = ? AND project_id = ?
          LIMIT 1`
       )
-      .bind(TEST_ORG.id)
+      .bind(TEST_ORG.id, TEST_PROJECT.id)
       .first<{ default_custody_config_id: string }>();
 
     expect(defaultPointer?.default_custody_config_id).toBe(PRIVY_CONFIG_ID);

@@ -74,8 +74,8 @@ async function seedAuthAndActiveConfig(): Promise<void> {
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, environment, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         TEST_API_KEY.id,
@@ -87,7 +87,6 @@ async function seedAuthAndActiveConfig(): Promise<void> {
         keyHash,
         "api_admin",
         JSON.stringify(["*"]),
-        "sandbox",
         "active"
       ),
     getDb(env)

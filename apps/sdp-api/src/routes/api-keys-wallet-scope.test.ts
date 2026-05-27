@@ -73,8 +73,8 @@ async function seedAuthAndWallets(): Promise<void> {
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, environment, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         TEST_API_KEY.id,
@@ -86,7 +86,6 @@ async function seedAuthAndWallets(): Promise<void> {
         keyHash,
         "api_admin",
         JSON.stringify(["*"]),
-        "sandbox",
         "active"
       ),
     getDb(env)
@@ -167,7 +166,7 @@ describe("API key wallet scope routes", () => {
         },
         body: JSON.stringify({
           name: "Missing wallet scope",
-          environment: "sandbox",
+          projectId: TEST_PROJECT.id,
         }),
       },
       env
@@ -187,6 +186,7 @@ describe("API key wallet scope routes", () => {
         },
         body: JSON.stringify({
           name: "Conflicting all-wallet key",
+          projectId: TEST_PROJECT.id,
           walletScope: "all",
           signingWalletId: "wal_scope_a",
         }),
@@ -210,7 +210,7 @@ describe("API key wallet scope routes", () => {
         },
         body: JSON.stringify({
           name: "Scoped key",
-          environment: "sandbox",
+          projectId: TEST_PROJECT.id,
           walletScope: "selected",
           signingWalletId: "wal_scope_b",
           signingWalletIds: ["wal_scope_a", "wal_scope_b"],
