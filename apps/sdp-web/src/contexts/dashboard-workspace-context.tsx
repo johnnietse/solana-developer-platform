@@ -1,7 +1,7 @@
 "use client";
 
 import { useAuth } from "@clerk/nextjs";
-import type { SdpEnvironment } from "@sdp/types";
+import type { Project, SdpEnvironment } from "@sdp/types";
 import { usePathname, useRouter } from "next/navigation";
 import {
   createContext,
@@ -34,17 +34,20 @@ export interface DashboardPlaygroundApiKeyOption {
 type DashboardWorkspaceContextValue = {
   dashboardAccess: DashboardAccess;
   dashboardCacheScope: DashboardCacheScope;
+  projects: Project[];
+  sandboxProject: Project | null;
+  productionProject: Project | null;
+  selectedProjectId: string | null;
   sdpEnvironment: SdpEnvironment;
   isSidebarOpen: boolean;
-  selectedProject: string;
   issuanceTab: IssuanceWorkspaceTab;
   counterpartyTab: CounterpartyWorkspaceTab;
   playgroundApiKeys: DashboardPlaygroundApiKeyOption[];
   selectedPlaygroundApiKeyId: string | null;
-  setSdpEnvironment: (value: SdpEnvironment) => void;
+  selectProject: (projectId: string) => void;
+  switchEnvironment: (value: SdpEnvironment) => void;
   setPlaygroundApiKeys: (keys: DashboardPlaygroundApiKeyOption[]) => void;
   setSelectedPlaygroundApiKeyId: (id: string | null) => void;
-  setSelectedProject: (project: string) => void;
   setIssuanceTab: (tab: IssuanceWorkspaceTab) => void;
   setCounterpartyTab: (tab: CounterpartyWorkspaceTab) => void;
   setSidebarOpen: (open: boolean) => void;
@@ -79,7 +82,7 @@ type DashboardWorkspaceProviderProps = {
   children: ReactNode;
   dashboardAccess: DashboardAccess;
   serverDashboardCacheScope: DashboardCacheScope;
-  defaultProject?: string;
+  projects: Project[];
   initialSidebarOpen?: boolean;
 };
 
@@ -87,7 +90,7 @@ export function DashboardWorkspaceProvider({
   children,
   dashboardAccess,
   serverDashboardCacheScope,
-  defaultProject = "Default Project",
+  projects,
   initialSidebarOpen = true,
 }: DashboardWorkspaceProviderProps) {
   const auth = useAuth();
@@ -95,19 +98,27 @@ export function DashboardWorkspaceProvider({
   const pathname = usePathname();
   const { replaceSearchParams, searchParams } = useDashboardUrlState();
   const [isSidebarOpen, setSidebarOpenState] = useState(initialSidebarOpen);
-  const [sdpEnvironment, setSdpEnvironment] = useState<SdpEnvironment>("sandbox");
-  const [selectedProject, setSelectedProject] = useState(defaultProject);
+  const sandboxProject = useMemo(
+    () => projects.find((project) => project.slug === "default-sandbox") ?? null,
+    [projects]
+  );
+  const productionProject = useMemo(
+    () => projects.find((project) => project.slug === "default-production") ?? null,
+    [projects]
+  );
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
+    sandboxProject?.id ?? null
+  );
+  const sdpEnvironment: SdpEnvironment =
+    selectedProjectId && selectedProjectId === productionProject?.id ? "production" : "sandbox";
   const [playgroundApiKeys, setPlaygroundApiKeysState] = useState<
     DashboardPlaygroundApiKeyOption[]
   >([]);
   const [selectedPlaygroundApiKeyId, setSelectedPlaygroundApiKeyId] = useState<string | null>(null);
   const liveDashboardCacheScope = useMemo<DashboardCacheScope>(
     () =>
-      auth.isLoaded
-        ? {
-            orgId: auth.orgId ?? null,
-            userId: auth.userId ?? null,
-          }
+      auth.isLoaded && auth.orgId && auth.userId
+        ? { orgId: auth.orgId, userId: auth.userId }
         : serverDashboardCacheScope,
     [auth.isLoaded, auth.orgId, auth.userId, serverDashboardCacheScope]
   );
@@ -122,8 +133,28 @@ export function DashboardWorkspaceProvider({
   const dashboardScopeIsFresh = liveDashboardCacheScopeKey === serverDashboardCacheScopeKey;
   const shouldRenderScopeRefreshFallback = auth.isLoaded && !dashboardScopeIsFresh;
   const swrScopeKey = getDashboardCacheScopeKey(liveDashboardCacheScope, {
-    environment: sdpEnvironment,
+    projectId: selectedProjectId,
   });
+
+  const selectProject = useCallback((projectId: string) => {
+    setSelectedProjectId(projectId);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedProjectId) return;
+    if (projects.some((project) => project.id === selectedProjectId)) return;
+    setSelectedProjectId(sandboxProject?.id ?? productionProject?.id ?? projects[0]?.id ?? null);
+  }, [selectedProjectId, projects, sandboxProject, productionProject]);
+
+  const switchEnvironment = useCallback(
+    (environment: SdpEnvironment) => {
+      const target = environment === "production" ? productionProject : sandboxProject;
+      if (target) {
+        setSelectedProjectId(target.id);
+      }
+    },
+    [productionProject, sandboxProject]
+  );
 
   useEffect(() => {
     if (!auth.isLoaded || liveDashboardCacheScopeKey === serverDashboardCacheScopeKey) {
@@ -195,17 +226,20 @@ export function DashboardWorkspaceProvider({
     () => ({
       dashboardAccess,
       dashboardCacheScope: liveDashboardCacheScope,
+      projects,
+      sandboxProject,
+      productionProject,
+      selectedProjectId,
       sdpEnvironment,
       isSidebarOpen,
-      selectedProject,
       issuanceTab,
       counterpartyTab,
       playgroundApiKeys,
       selectedPlaygroundApiKeyId,
-      setSdpEnvironment,
+      selectProject,
+      switchEnvironment,
       setPlaygroundApiKeys,
       setSelectedPlaygroundApiKeyId,
-      setSelectedProject,
       setIssuanceTab,
       setCounterpartyTab,
       setSidebarOpen,
@@ -214,13 +248,18 @@ export function DashboardWorkspaceProvider({
     [
       dashboardAccess,
       liveDashboardCacheScope,
+      projects,
+      sandboxProject,
+      productionProject,
+      selectedProjectId,
       sdpEnvironment,
       isSidebarOpen,
       playgroundApiKeys,
       issuanceTab,
       counterpartyTab,
       selectedPlaygroundApiKeyId,
-      selectedProject,
+      selectProject,
+      switchEnvironment,
       setPlaygroundApiKeys,
       setIssuanceTab,
       setCounterpartyTab,
