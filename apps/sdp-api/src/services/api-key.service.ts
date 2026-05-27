@@ -101,22 +101,6 @@ interface ApiKeyDetailsRow extends ApiKeyListRow {
 export class ApiKeyService {
   constructor(private db: DatabaseClient) {}
 
-  async listForOrganization(organizationId: string): Promise<ApiKeyListItem[]> {
-    const result = await this.db
-      .prepare(
-        `SELECT ak.id, ak.name, ak.description, ak.key_prefix, ak.role, p.environment, ak.status,
-                ak.last_used_at, ak.expires_at, ak.created_at
-         FROM api_keys ak
-         JOIN projects p ON p.id = ak.project_id
-         WHERE ak.organization_id = ? AND ak.status NOT IN ('revoked', 'deactivated')
-         ORDER BY ak.created_at DESC`
-      )
-      .bind(organizationId)
-      .all<ApiKeyListRow>();
-
-    return result.results.map((row) => this.mapListRow(row));
-  }
-
   async listForProject(projectId: string): Promise<ApiKeyListItem[]> {
     const result = await this.db
       .prepare(
@@ -133,7 +117,11 @@ export class ApiKeyService {
     return result.results.map((row) => this.mapListRow(row));
   }
 
-  async getDetails(keyId: string, organizationId: string): Promise<ApiKeyDetails | null> {
+  async getDetails(
+    keyId: string,
+    organizationId: string,
+    projectId: string
+  ): Promise<ApiKeyDetails | null> {
     const row = await this.db
       .prepare(
         `SELECT ak.id, ak.name, ak.description, ak.key_prefix, ak.role, p.environment, ak.status,
@@ -141,9 +129,9 @@ export class ApiKeyService {
                 ak.last_used_at, ak.expires_at, ak.rotated_from, ak.rotation_deadline, ak.created_at
          FROM api_keys ak
          JOIN projects p ON p.id = ak.project_id
-         WHERE ak.id = ? AND ak.organization_id = ?`
+         WHERE ak.id = ? AND ak.organization_id = ? AND ak.project_id = ?`
       )
-      .bind(keyId, organizationId)
+      .bind(keyId, organizationId, projectId)
       .first<ApiKeyDetailsRow>();
 
     if (!row) {
@@ -252,6 +240,7 @@ export class ApiKeyService {
   async rotateApiKey(
     keyId: string,
     organizationId: string,
+    projectId: string,
     gracePeriodHours: number,
     pepper?: string
   ): Promise<RotateApiKeyResult | null> {
@@ -261,9 +250,9 @@ export class ApiKeyService {
                 p.environment, ak.project_id, ak.allowed_ips, ak.signing_wallet_id, ak.created_by
          FROM api_keys ak
          JOIN projects p ON p.id = ak.project_id
-         WHERE ak.id = ? AND ak.organization_id = ? AND ak.status = 'active'`
+         WHERE ak.id = ? AND ak.organization_id = ? AND ak.project_id = ? AND ak.status = 'active'`
       )
-      .bind(keyId, organizationId)
+      .bind(keyId, organizationId, projectId)
       .first<{
         id: string;
         name: string;
@@ -349,14 +338,17 @@ export class ApiKeyService {
 
   async revokeApiKey(
     keyId: string,
-    organizationId: string
+    organizationId: string,
+    projectId: string
   ): Promise<{
     keyHash: string;
     revokedAt: string;
   } | null> {
     const key = await this.db
-      .prepare("SELECT id, key_hash FROM api_keys WHERE id = ? AND organization_id = ?")
-      .bind(keyId, organizationId)
+      .prepare(
+        "SELECT id, key_hash FROM api_keys WHERE id = ? AND organization_id = ? AND project_id = ?"
+      )
+      .bind(keyId, organizationId, projectId)
       .first<{ id: string; key_hash: string }>();
 
     if (!key) {

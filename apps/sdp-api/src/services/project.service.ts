@@ -26,7 +26,6 @@ export interface CreateProjectInput {
 export interface UpdateProjectInput {
   name?: string;
   description?: string | null;
-  environment?: ProjectEnvironment;
   settings?: ProjectSettings | null;
 }
 
@@ -264,11 +263,6 @@ export class ProjectService {
     if (input.description !== undefined) {
       updates.push("description = ?");
       values.push(input.description);
-    }
-
-    if (input.environment !== undefined) {
-      updates.push("environment = ?");
-      values.push(input.environment);
     }
 
     if (input.settings !== undefined) {

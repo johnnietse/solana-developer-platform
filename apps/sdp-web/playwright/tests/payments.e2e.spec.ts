@@ -21,7 +21,11 @@ test.describe
         bearerToken: session.bearerToken,
         tier: "enterprise",
       });
-      const api = createLocalApiClient(getBootstrapApiBaseUrl(), session.bearerToken);
+      const api = createLocalApiClient(
+        getBootstrapApiBaseUrl(),
+        session.bearerToken,
+        fixtures.projectId
+      );
 
       await api.post(`/v1/issuance/tokens/${fixtures.tokens.open.id}/mint`, {
         mint: {

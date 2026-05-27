@@ -1,8 +1,8 @@
-import type { ListProjectsResponse, ProjectResponse, UpdateProjectRequest } from "@sdp/types";
+import type { ListProjectsResponse, ProjectEnvironment, ProjectResponse, UpdateProjectRequest } from "@sdp/types";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
-import { AppError, notFound } from "@/lib/errors";
+import { AppError, forbidden, notFound } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
 import { ProjectService, ProjectServiceError } from "@/services/project.service";
@@ -47,6 +47,17 @@ export const createProject = async (c: AppContext) => {
     throw new AppError("UNAUTHORIZED", "Could not resolve authenticated user for project creation");
   }
 
+  // API keys are scoped to a project with a fixed environment; projects created
+  // through them must inherit that same environment.
+  let resolvedEnvironment = parsed.data.environment;
+  if (auth.authType === "api_key") {
+    const keyEnv = auth.environment as ProjectEnvironment;
+    if (resolvedEnvironment && resolvedEnvironment !== keyEnv) {
+      throw forbidden(`A ${keyEnv} API key can only create ${keyEnv} projects`);
+    }
+    resolvedEnvironment = keyEnv;
+  }
+
   const projectService = new ProjectService(getDb(c.env));
 
   try {
@@ -56,7 +67,7 @@ export const createProject = async (c: AppContext) => {
       name: parsed.data.name,
       slug: parsed.data.slug,
       description: parsed.data.description,
-      environment: parsed.data.environment,
+      environment: resolvedEnvironment,
       settings: parsed.data.settings,
     });
 

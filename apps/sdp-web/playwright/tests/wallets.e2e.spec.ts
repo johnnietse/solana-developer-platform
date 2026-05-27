@@ -6,6 +6,7 @@ import {
   bootstrapLocalWalletFixtures,
   ensureLinkedOrg,
   getBootstrapApiBaseUrl,
+  resolvePlaywrightProjectId,
 } from "../support/local-dashboard-bootstrap";
 
 interface TokenResponse {
@@ -222,7 +223,15 @@ test.describe
         fundSourceAmountSol: 0.05,
         tier: "enterprise",
       });
-      const api = createLocalApiClient(getBootstrapApiBaseUrl(), session.bearerToken);
+      const projectId = await resolvePlaywrightProjectId(
+        getBootstrapApiBaseUrl(),
+        session.bearerToken
+      );
+      const api = createLocalApiClient(
+        getBootstrapApiBaseUrl(),
+        session.bearerToken,
+        projectId
+      );
       await session.page.close();
 
       const wallet = fixtures.wallets[0];

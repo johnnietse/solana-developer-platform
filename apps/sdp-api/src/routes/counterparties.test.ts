@@ -39,6 +39,10 @@ describe("Counterparties Routes", () => {
       .run()
       .catch(() => {});
     await db
+      .prepare("DELETE FROM api_keys")
+      .run()
+      .catch(() => {});
+    await db
       .prepare("DELETE FROM project_members")
       .run()
       .catch(() => {});

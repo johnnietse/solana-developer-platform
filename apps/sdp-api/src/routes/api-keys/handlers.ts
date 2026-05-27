@@ -68,11 +68,14 @@ function resolveActor(c: AppContext): {
 }
 
 export const listApiKeys = async (c: AppContext) => {
-  const actor = resolveActor(c);
-  const orgId = actor.organizationId;
+  resolveActor(c);
+  const projectId = c.get("projectId");
+  if (!projectId) {
+    throw new AppError("BAD_REQUEST", "Project scope is required");
+  }
 
   const apiKeyService = new ApiKeyService(getDb(c.env));
-  const apiKeys = await apiKeyService.listForOrganization(orgId);
+  const apiKeys = await apiKeyService.listForProject(projectId);
 
   const response: ListApiKeysResponse = {
     apiKeys: apiKeys.map((key) => ({
@@ -267,9 +270,13 @@ export const createApiKey = async (c: AppContext) => {
 export const getApiKey = async (c: AppContext) => {
   const { keyId } = c.req.param();
   const actor = resolveActor(c);
+  const projectId = c.get("projectId");
+  if (!projectId) {
+    throw new AppError("BAD_REQUEST", "Project scope is required");
+  }
 
   const apiKeyService = new ApiKeyService(getDb(c.env));
-  const key = await apiKeyService.getDetails(keyId, actor.organizationId);
+  const key = await apiKeyService.getDetails(keyId, actor.organizationId, projectId);
 
   if (!key) {
     throw notFound("API key");
@@ -303,6 +310,10 @@ export const getApiKey = async (c: AppContext) => {
 export const updateApiKey = async (c: AppContext) => {
   const { keyId } = c.req.param();
   const actor = resolveActor(c);
+  const projectId = c.get("projectId");
+  if (!projectId) {
+    throw new AppError("BAD_REQUEST", "Project scope is required");
+  }
 
   const body = await c.req.json();
   const parsed = apiKeyUpdateSchema.safeParse(body);
@@ -313,10 +324,12 @@ export const updateApiKey = async (c: AppContext) => {
     });
   }
 
-  // Verify key belongs to this organization
+  // Verify key belongs to this organization and the current project scope
   const existing = await getDb(c.env)
-    .prepare("SELECT id, key_hash, project_id FROM api_keys WHERE id = ? AND organization_id = ?")
-    .bind(keyId, actor.organizationId)
+    .prepare(
+      "SELECT id, key_hash, project_id FROM api_keys WHERE id = ? AND organization_id = ? AND project_id = ?"
+    )
+    .bind(keyId, actor.organizationId, projectId)
     .first<{ id: string; key_hash: string; project_id: string }>();
 
   if (!existing) {
@@ -414,6 +427,10 @@ export const updateApiKey = async (c: AppContext) => {
 export const rotateApiKey = async (c: AppContext) => {
   const { keyId } = c.req.param();
   const actor = resolveActor(c);
+  const projectId = c.get("projectId");
+  if (!projectId) {
+    throw new AppError("BAD_REQUEST", "Project scope is required");
+  }
 
   // Prevent rotating the key being used
   if (actor.apiKeyId && keyId === actor.apiKeyId) {
@@ -435,6 +452,7 @@ export const rotateApiKey = async (c: AppContext) => {
   const rotation = await apiKeyService.rotateApiKey(
     keyId,
     actor.organizationId,
+    projectId,
     gracePeriodHours,
     c.env.API_KEY_PEPPER
   );
@@ -466,6 +484,10 @@ export const rotateApiKey = async (c: AppContext) => {
 export const revokeApiKey = async (c: AppContext) => {
   const { keyId } = c.req.param();
   const actor = resolveActor(c);
+  const projectId = c.get("projectId");
+  if (!projectId) {
+    throw new AppError("BAD_REQUEST", "Project scope is required");
+  }
 
   // Prevent revoking your own key
   if (actor.apiKeyId && keyId === actor.apiKeyId) {
@@ -482,9 +504,9 @@ export const revokeApiKey = async (c: AppContext) => {
 
   const existing = await getDb(c.env)
     .prepare(
-      "SELECT id, name, status, revoked_at FROM api_keys WHERE id = ? AND organization_id = ?"
+      "SELECT id, name, status, revoked_at FROM api_keys WHERE id = ? AND organization_id = ? AND project_id = ?"
     )
-    .bind(keyId, actor.organizationId)
+    .bind(keyId, actor.organizationId, projectId)
     .first<{ id: string; name: string; status: string; revoked_at: string | null }>();
 
   if (!existing) {
@@ -507,7 +529,7 @@ export const revokeApiKey = async (c: AppContext) => {
   }
 
   const apiKeyService = new ApiKeyService(getDb(c.env));
-  const revokedKey = await apiKeyService.revokeApiKey(keyId, actor.organizationId);
+  const revokedKey = await apiKeyService.revokeApiKey(keyId, actor.organizationId, projectId);
 
   if (!revokedKey) {
     throw notFound("API key");

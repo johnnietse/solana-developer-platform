@@ -294,6 +294,21 @@ async function listWallets(api: LocalApiClient): Promise<PaymentsDashboardWallet
   return data.wallets;
 }
 
+export async function resolvePlaywrightProjectId(
+  localApiBaseUrl: string,
+  bearerToken: string
+): Promise<string> {
+  const projectsApi = createLocalApiClient(localApiBaseUrl, bearerToken);
+  const { projects } = await projectsApi.get<{ projects: Array<{ id: string; slug: string }> }>(
+    "/v1/projects"
+  );
+  const sandbox = projects.find((project) => project.slug === "default-sandbox") ?? projects[0];
+  if (!sandbox) {
+    throw new Error("No project available for Playwright bootstrap");
+  }
+  return sandbox.id;
+}
+
 async function requestWalletAirdropLamports(
   api: LocalApiClient,
   walletAddress: string,
@@ -619,11 +634,16 @@ export async function bootstrapLocalWalletFixtures(input: {
   const fundSourceWallet = input.fundSourceWallet ?? false;
   const fundSourceAmountSol = input.fundSourceAmountSol ?? 1;
   const runtimeEnv = getPlaywrightApiRuntimeEnv();
-  const api = createLocalApiClient(runtimeEnv.localApiBaseUrl, bearerToken);
 
   const organization = await ensureLinkedOrg(identity, {
     tier: input.tier,
   });
+
+  const projectId = await resolvePlaywrightProjectId(
+    runtimeEnv.localApiBaseUrl,
+    bearerToken
+  );
+  const api = createLocalApiClient(runtimeEnv.localApiBaseUrl, bearerToken, projectId);
 
   const initialized = await api.post<InitializeWalletResponse>("/v1/wallets/initialize", {
     provider,
