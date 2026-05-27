@@ -1,27 +1,44 @@
 "use server";
 
+import type { ListProjectsResponse } from "@sdp/types";
 import { cookies } from "next/headers";
 import { PROJECT_COOKIE_NAME } from "./project-cookie";
+import { sdpApiFetch } from "./sdp-api";
+
+const COOKIE_OPTIONS = { path: "/" as const, maxAge: 31_536_000, sameSite: "lax" as const };
+
+export async function selectProjectAction(projectId: string | null): Promise<void> {
+  const store = await cookies();
+  if (projectId) {
+    store.set(PROJECT_COOKIE_NAME, projectId, COOKIE_OPTIONS);
+  } else {
+    store.delete(PROJECT_COOKIE_NAME);
+  }
+}
 
 /**
- * Sets (or clears) the selected project cookie server-side.
- * Returns true if the stored value changed, so the caller can decide whether
- * to trigger a router refresh.
+ * Called on Clerk org switch. Loads the new org's projects under the new
+ * session and, if the cookie's projectId isn't accessible in that scope,
+ * replaces it with the new org's sandbox. Setting the cookie inside a Server
+ * Action triggers Next to re-render the current page/layouts with the new
+ * value in effect — SSR never runs with a stale cookie.
  */
-export async function selectProjectAction(projectId: string | null): Promise<boolean> {
-  const store = await cookies();
-  const prev = store.get(PROJECT_COOKIE_NAME)?.value ?? null;
-
-  if (!projectId) {
-    store.delete(PROJECT_COOKIE_NAME);
-    return prev !== null;
+export async function reconcileProjectCookieAction(): Promise<void> {
+  let projects: ListProjectsResponse["projects"] = [];
+  try {
+    projects = (await sdpApiFetch<ListProjectsResponse>("/v1/projects")).projects;
+  } catch {
+    return;
   }
 
-  store.set(PROJECT_COOKIE_NAME, projectId, {
-    path: "/",
-    maxAge: 31_536_000,
-    sameSite: "lax",
-  });
+  const store = await cookies();
+  const current = store.get(PROJECT_COOKIE_NAME)?.value ?? null;
+  if (current && projects.some((p) => p.id === current)) return;
 
-  return projectId !== prev;
+  const next = projects.find((p) => p.slug === "default-sandbox") ?? projects[0] ?? null;
+  if (next) {
+    store.set(PROJECT_COOKIE_NAME, next.id, COOKIE_OPTIONS);
+  } else if (current) {
+    store.delete(PROJECT_COOKIE_NAME);
+  }
 }

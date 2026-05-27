@@ -20,7 +20,10 @@ import type { DashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
 import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
-import { selectProjectAction } from "@/lib/project-cookie-action";
+import {
+  reconcileProjectCookieAction,
+  selectProjectAction,
+} from "@/lib/project-cookie-action";
 
 export type IssuanceWorkspaceTab = "tokens" | "playground";
 export type CounterpartyWorkspaceTab = "overview" | "playground";
@@ -98,7 +101,6 @@ export function DashboardWorkspaceProvider({
   initialSidebarOpen = true,
 }: DashboardWorkspaceProviderProps) {
   const auth = useAuth();
-  const router = useRouter();
   const pathname = usePathname();
   const { replaceSearchParams, searchParams } = useDashboardUrlState();
   const [isSidebarOpen, setSidebarOpenState] = useState(initialSidebarOpen);
@@ -142,16 +144,12 @@ export function DashboardWorkspaceProvider({
 
   const [isProjectSwitching, startProjectSwitchTransition] = useTransition();
 
-  const selectProject = useCallback(
-    (projectId: string | null) => {
-      startProjectSwitchTransition(async () => {
-        const changed = await selectProjectAction(projectId);
-        setSelectedProjectId(projectId);
-        if (changed) router.refresh();
-      });
-    },
-    [router]
-  );
+  const selectProject = useCallback((projectId: string | null) => {
+    startProjectSwitchTransition(async () => {
+      await selectProjectAction(projectId);
+      setSelectedProjectId(projectId);
+    });
+  }, []);
 
   // Persist the in-memory selection to the cookie when:
   //   - the current selection isn't backed by a known project (stale state), or
@@ -173,10 +171,10 @@ export function DashboardWorkspaceProvider({
       return;
     }
 
-    startProjectSwitchTransition(() => {
-      router.refresh();
+    startProjectSwitchTransition(async () => {
+      await reconcileProjectCookieAction();
     });
-  }, [auth.isLoaded, liveDashboardCacheScopeKey, serverDashboardCacheScopeKey, router]);
+  }, [auth.isLoaded, liveDashboardCacheScopeKey, serverDashboardCacheScopeKey]);
 
   const previousPathnameRef = useRef(pathname);
   useEffect(() => {
