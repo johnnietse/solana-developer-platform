@@ -13,6 +13,11 @@ const TEST_ORG = {
   slug: "api-key-wallet-scope-org",
 };
 
+const TEST_PROJECT = {
+  id: "prj_test_api_key_wallet_scope",
+  slug: "test-api-key-wallet-scope-project",
+};
+
 const TEST_USER = {
   id: "usr_api_key_wallet_scope",
   email: "api-key-wallet-scope@example.com",
@@ -27,7 +32,7 @@ const TEST_API_KEY = {
 const TEST_CACHED_API_KEY: CachedApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
-  projectId: null,
+  projectId: TEST_PROJECT.id,
   role: "api_admin",
   permissions: ["*"],
   environment: "sandbox",
@@ -53,6 +58,20 @@ async function seedAuthAndWallets(): Promise<void> {
       .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
     getDb(env)
       .prepare(
+        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        TEST_PROJECT.id,
+        TEST_ORG.id,
+        "Test Project",
+        TEST_PROJECT.slug,
+        "sandbox",
+        "active",
+        TEST_USER.id
+      ),
+    getDb(env)
+      .prepare(
         `INSERT INTO api_keys
            (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, environment, status)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -60,7 +79,7 @@ async function seedAuthAndWallets(): Promise<void> {
       .bind(
         TEST_API_KEY.id,
         TEST_ORG.id,
-        null,
+        TEST_PROJECT.id,
         TEST_USER.id,
         "Admin test key",
         TEST_API_KEY.prefix,
