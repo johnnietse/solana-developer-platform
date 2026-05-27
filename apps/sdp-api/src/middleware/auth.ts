@@ -18,7 +18,6 @@ import { AppError } from "@/lib/errors";
 import { hashString } from "@/lib/hash";
 import type { KVStore } from "@/runtime/kv";
 import type { Env } from "@/types/env";
-import { ensureDefaultProjects } from "./ensure-default-projects";
 
 const KV_TTL_SECONDS = 3600; // 1 hour cache
 
@@ -381,15 +380,7 @@ export function unifiedAuthMiddleware(
       if (options.allowClerk) {
         const { clerkAuthMiddleware } = await import("./clerk-auth");
         const clerkMw = clerkAuthMiddleware();
-        return await clerkMw(c, async () => {
-          const clerk = c.get("clerk");
-          if (clerk?.organizationId && clerk?.userId) {
-            await ensureDefaultProjects(c, clerk.organizationId, clerk.userId).catch((err) =>
-              console.error("ensureDefaultProjects failed:", err)
-            );
-          }
-          await next();
-        });
+        return await clerkMw(c, next);
       }
     }
 
@@ -397,15 +388,7 @@ export function unifiedAuthMiddleware(
     if (options.allowSession) {
       const { sessionAuthMiddleware } = await import("./session-auth");
       const sessionMw = sessionAuthMiddleware();
-      return await sessionMw(c, async () => {
-        const session = c.get("session");
-        if (session?.organizationId && session?.userId) {
-          await ensureDefaultProjects(c, session.organizationId, session.userId).catch((err) =>
-            console.error("ensureDefaultProjects failed:", err)
-          );
-        }
-        await next();
-      });
+      return await sessionMw(c, next);
     }
 
     throw new AppError("UNAUTHORIZED", "API key required");

@@ -10,6 +10,7 @@ import {
   ClerkOrganizationsService,
 } from "@/services/clerk-organizations.service";
 import { type ClerkUser, ClerkUsersService } from "@/services/clerk-users.service";
+import { ensureDefaultProjects } from "@/services/ensure-default-projects";
 import { syncProviderAccessFromClerk } from "@/services/provider-availability.service";
 import type { Env } from "@/types/env";
 
@@ -531,6 +532,8 @@ async function upsertMembership(c: AppContext, data: Record<string, unknown>) {
     )
     .bind(memberId, organizationId, userId, role)
     .run();
+
+  await ensureDefaultProjects(c, organizationId, userId);
 }
 
 async function deleteMembership(c: AppContext, data: Record<string, unknown>) {
