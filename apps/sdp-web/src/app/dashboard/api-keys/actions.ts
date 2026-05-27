@@ -103,7 +103,7 @@ async function deactivateApiKeyRequest(input: {
 export async function createApiKeyAction(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   const role = String(formData.get("role") ?? "api_developer");
-  const environment = String(formData.get("environment") ?? "sandbox");
+  const projectId = String(formData.get("projectId") ?? "").trim();
   const walletScope = String(formData.get("walletScope") ?? "").trim();
   const defaultWalletId = String(formData.get("signingWalletId") ?? "").trim();
   const signingWalletIds = formData
@@ -116,6 +116,14 @@ export async function createApiKeyAction(formData: FormData) {
     await setFlash({
       level: "error",
       message: "API key name is required.",
+    });
+    redirect(API_KEYS_PAGE_PATH);
+  }
+
+  if (!projectId) {
+    await setFlash({
+      level: "error",
+      message: "No active project. Reload the dashboard and try again.",
     });
     redirect(API_KEYS_PAGE_PATH);
   }
@@ -138,19 +146,19 @@ export async function createApiKeyAction(formData: FormData) {
 
   const payload: {
     name: string;
+    projectId: string;
     role: "api_admin" | "api_developer" | "api_readonly";
-    environment: "sandbox" | "production";
     walletScope: "all" | "selected";
     expiresAt?: string;
     signingWalletId?: string;
     signingWalletIds?: string[];
   } = {
     name,
+    projectId,
     role:
       role === "api_admin" || role === "api_readonly" || role === "api_developer"
         ? role
         : "api_developer",
-    environment: environment === "production" ? "production" : "sandbox",
     walletScope: walletScope === "selected" ? "selected" : "all",
   };
 
