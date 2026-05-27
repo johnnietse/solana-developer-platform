@@ -196,6 +196,7 @@ export interface Env {
 declare module "hono" {
   interface ContextVariableMap {
     // API key auth context set by middleware
+    projectId?: string;
     apiKey?: {
       id: string;
       organizationId: string;

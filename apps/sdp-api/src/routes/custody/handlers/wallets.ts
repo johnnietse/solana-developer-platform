@@ -344,7 +344,7 @@ function resolveWalletFilters(
   c: AppContext,
   options: { defaultIncludeAllProviders?: boolean } = {}
 ) {
-  const projectId = c.req.query("projectId") ?? undefined;
+  const projectId = c.get("projectId");
   const providerQuery = c.req.query("provider");
   const includeAllProviders = c.req.query("includeAllProviders");
   const includeBalances = parseBooleanQueryParam(c.req.query("includeBalances"));
@@ -505,7 +505,7 @@ export const deleteWallet = async (c: AppContext) => {
     });
   }
 
-  const projectId = parsed.data.projectId ?? actor.projectId;
+  const projectId = c.get("projectId");
   const signingService = signingServiceModule.createSigningService(c.env);
 
   try {
@@ -558,7 +558,7 @@ export const setDefaultWallet = async (c: AppContext) => {
     });
   }
 
-  const projectId = parsed.data.projectId ?? undefined;
+  const projectId = c.get("projectId");
   const signingService = signingServiceModule.createSigningService(c.env);
   const config = parsed.data.provider
     ? await signingService.getConfigurationByProvider(
@@ -624,7 +624,7 @@ export const setDefaultWallet = async (c: AppContext) => {
 export const updateWallet = async (c: AppContext) => {
   const actor = resolveActor(c);
   const auth = getAuth(c);
-  const projectId = c.req.query("projectId") ?? actor.projectId;
+  const projectId = c.get("projectId");
   const walletId = c.req.param("walletId")?.trim();
 
   if (!walletId) {
@@ -803,7 +803,7 @@ export const getWalletAggregate = async (c: AppContext) => {
 export const getWalletById = async (c: AppContext) => {
   const actor = resolveActor(c);
   const auth = getAuth(c);
-  const projectId = c.req.query("projectId") ?? actor.projectId;
+  const projectId = c.get("projectId");
   const walletId = c.req.param("walletId")?.trim();
 
   if (!walletId) {
@@ -884,7 +884,7 @@ export const getWalletById = async (c: AppContext) => {
 export const getPublicKey = async (c: AppContext) => {
   const actor = resolveActor(c);
   const auth = getAuth(c);
-  const projectId = c.req.query("projectId");
+  const projectId = c.get("projectId");
   const requestedWalletId = c.req.query("walletId");
 
   const signingService = signingServiceModule.createSigningService(c.env);
@@ -893,7 +893,7 @@ export const getPublicKey = async (c: AppContext) => {
     const walletId = resolveApiKeySigningWalletId(auth, requestedWalletId, ["wallets:read"]);
     const publicKey = await signingService.getPublicKey(
       actor.organizationId,
-      projectId ?? undefined,
+      projectId,
       walletId ?? undefined
     );
 
