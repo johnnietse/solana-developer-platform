@@ -125,11 +125,23 @@ body {
   background: var(--launch-cream);
 }
 
+/* Canvas hero pattern — injected into .launch-docs-main by HomePageClass */
 .docs-is-home .launch-docs-main {
-  background-image: url("/images/hero-pattern.png");
-  background-repeat: no-repeat;
-  background-position: top center;
-  background-size: 100% auto;
+  position: relative;
+}
+
+.docs-is-home .launch-docs-main-inner {
+  position: relative;
+  z-index: 1;
+}
+
+.launch-home-pattern-bg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 600px;
+  pointer-events: none;
 }
 
 .launch-docs-main-inner {
