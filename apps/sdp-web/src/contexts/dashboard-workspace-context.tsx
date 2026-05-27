@@ -19,6 +19,7 @@ import type { DashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
 import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
+import { PROJECT_COOKIE_NAME } from "@/lib/project-cookie";
 
 export type IssuanceWorkspaceTab = "tokens" | "playground";
 export type CounterpartyWorkspaceTab = "overview" | "playground";
@@ -145,6 +146,16 @@ export function DashboardWorkspaceProvider({
     if (projects.some((project) => project.id === selectedProjectId)) return;
     setSelectedProjectId(sandboxProject?.id ?? productionProject?.id ?? projects[0]?.id ?? null);
   }, [selectedProjectId, projects, sandboxProject, productionProject]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    if (!selectedProjectId) {
+      document.cookie = `${PROJECT_COOKIE_NAME}=; Path=/; Max-Age=0; SameSite=Lax`;
+      return;
+    }
+    document.cookie = `${PROJECT_COOKIE_NAME}=${selectedProjectId}; Path=/; Max-Age=31536000; SameSite=Lax`;
+    router.refresh();
+  }, [selectedProjectId, router]);
 
   const switchEnvironment = useCallback(
     (environment: SdpEnvironment) => {
