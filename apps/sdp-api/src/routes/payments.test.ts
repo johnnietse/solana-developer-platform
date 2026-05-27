@@ -1718,7 +1718,7 @@ describe("Payments routes", () => {
       .bind(
         "xfr_existing_daily_limit",
         TEST_ORG.id,
-        null,
+        TEST_PROJECT.id,
         TEST_WALLET_ID,
         TEST_SOLANA_ADDRESSES.wallet1,
         TEST_SOLANA_ADDRESSES.wallet2,

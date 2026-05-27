@@ -21,26 +21,6 @@ async function loadProjects(): Promise<Project[]> {
   }
 }
 
-async function ensureSelectedProjectCookie(projects: Project[]): Promise<void> {
-  if (projects.length === 0) return;
-
-  const store = await cookies();
-  const current = store.get(PROJECT_COOKIE_NAME)?.value ?? null;
-  if (current && projects.some((project) => project.id === current)) {
-    return;
-  }
-
-  const fallback =
-    projects.find((project) => project.slug === "default-sandbox") ?? projects[0] ?? null;
-  if (!fallback) return;
-
-  store.set(PROJECT_COOKIE_NAME, fallback.id, {
-    path: "/",
-    maxAge: 31_536_000,
-    sameSite: "lax",
-  });
-}
-
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
   const { orgRole, orgId, userId } = await auth();
 
@@ -55,7 +35,12 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   } satisfies DashboardCacheScope;
 
   const projects = await loadProjects();
-  await ensureSelectedProjectCookie(projects);
+  const cookieStore = await cookies();
+  const cookieProjectId = cookieStore.get(PROJECT_COOKIE_NAME)?.value ?? null;
+  const initialSelectedProjectId =
+    cookieProjectId && projects.some((project) => project.id === cookieProjectId)
+      ? cookieProjectId
+      : null;
 
   return (
     <DashboardWorkspaceProvider
@@ -63,6 +48,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
       dashboardAccess={dashboardAccess}
       serverDashboardCacheScope={dashboardCacheScope}
       projects={projects}
+      initialSelectedProjectId={initialSelectedProjectId}
     >
       <NetworkDebugProvider>
         <DashboardShell>{children}</DashboardShell>

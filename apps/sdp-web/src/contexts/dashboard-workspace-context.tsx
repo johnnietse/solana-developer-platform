@@ -85,6 +85,7 @@ type DashboardWorkspaceProviderProps = {
   dashboardAccess: DashboardAccess;
   serverDashboardCacheScope: DashboardCacheScope;
   projects: Project[];
+  initialSelectedProjectId: string | null;
   initialSidebarOpen?: boolean;
 };
 
@@ -93,6 +94,7 @@ export function DashboardWorkspaceProvider({
   dashboardAccess,
   serverDashboardCacheScope,
   projects,
+  initialSelectedProjectId,
   initialSidebarOpen = true,
 }: DashboardWorkspaceProviderProps) {
   const auth = useAuth();
@@ -109,7 +111,7 @@ export function DashboardWorkspaceProvider({
     [projects]
   );
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
-    sandboxProject?.id ?? null
+    initialSelectedProjectId ?? sandboxProject?.id ?? null
   );
   const sdpEnvironment: SdpEnvironment =
     selectedProjectId && selectedProjectId === productionProject?.id ? "production" : "sandbox";
@@ -151,10 +153,21 @@ export function DashboardWorkspaceProvider({
     [router]
   );
 
+  // Persist the in-memory selection to the cookie when:
+  //   - the current selection isn't backed by a known project (stale state), or
+  //   - the server reported no cookie value at mount (first visit / cleared cookie)
+  // Server Components can't write cookies in Next 16, so the layout passes
+  // initialSelectedProjectId=null when the cookie is missing/stale; we persist
+  // it here via the existing selectProjectAction.
   useEffect(() => {
-    if (projects.some((project) => project.id === selectedProjectId)) return;
-    selectProject(sandboxProject?.id ?? null);
-  }, [selectedProjectId, projects, sandboxProject, selectProject]);
+    const selectionIsValid =
+      selectedProjectId !== null &&
+      projects.some((project) => project.id === selectedProjectId);
+    if (selectionIsValid && initialSelectedProjectId === selectedProjectId) return;
+
+    const target = selectionIsValid ? selectedProjectId : (sandboxProject?.id ?? null);
+    selectProject(target);
+  }, [selectedProjectId, projects, sandboxProject, selectProject, initialSelectedProjectId]);
 
   useEffect(() => {
     if (!auth.isLoaded || liveDashboardCacheScopeKey === serverDashboardCacheScopeKey) {
