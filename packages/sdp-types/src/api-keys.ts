@@ -68,7 +68,6 @@ export interface CachedApiKey {
 export interface CreateApiKeyRequest {
   name: string;
   description?: string;
-  projectId: string;
   role?: ApiKeyRole;
   permissions?: Permission[];
   walletScope: ApiKeyWalletScope;
