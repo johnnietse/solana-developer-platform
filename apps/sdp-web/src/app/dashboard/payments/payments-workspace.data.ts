@@ -1,7 +1,10 @@
 "use client";
 
 import type {
+  CryptoRailId,
   CustodyWalletAggregate,
+  FiatCurrency,
+  OnrampPairSupport,
   PaymentRampExecution,
   PaymentsWalletAggregateEnvelope,
   PaymentTransferEnvelope as TransferEnvelope,
@@ -166,6 +169,30 @@ export function riskToneClassName(result: ComplianceProviderResult): string {
     return "border-[rgba(158,43,56,0.2)] bg-[rgba(158,43,56,0.08)] text-[#9e2b38]";
   }
   return "border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.05)] text-[rgba(28,28,29,0.72)]";
+}
+
+export interface OnrampSupportSnapshot {
+  sourceCurrencies: readonly FiatCurrency[];
+  cryptoRails: readonly CryptoRailId[];
+  pairs: readonly OnrampPairSupport[];
+}
+
+type OnrampSupportEnvelope = { data?: OnrampSupportSnapshot } & ApiErrorBody;
+
+export async function fetchOnrampSupport(signal?: AbortSignal): Promise<OnrampSupportSnapshot> {
+  const response = await fetch("/api/dashboard/payments/ramps/onramp/support", {
+    method: "GET",
+    cache: "no-store",
+    signal,
+  });
+  const body = (await response.json().catch(() => ({}))) as OnrampSupportEnvelope;
+  if (!response.ok) {
+    throw new Error(getApiError(body, `Onramp support request failed (${response.status}).`));
+  }
+  if (!body.data) {
+    throw new Error("Onramp support response is missing data.");
+  }
+  return body.data;
 }
 
 export async function fetchWallets(

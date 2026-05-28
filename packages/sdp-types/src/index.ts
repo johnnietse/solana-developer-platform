@@ -6,6 +6,8 @@ export * from "./api-keys";
 export * from "./counterparties";
 export * from "./custody";
 export * from "./organizations";
+export * from "./generated/onramp-support.generated";
+export * from "./payment-rails";
 export * from "./payments";
 export * from "./permissions";
 export * from "./private-transfers";

@@ -4,8 +4,10 @@ import type {
   PaymentRampExecutionStatus,
   SdpEnvironment,
 } from "@sdp/types";
+import { ONRAMP_CRYPTO_RAILS, ONRAMP_SOURCE_CURRENCIES, ONRAMP_SUPPORT } from "@sdp/types";
 import { getDb } from "@/db";
 import { parseDecimalAmount } from "@/lib/amount";
+import { buildBvnkHawkAuthorizationHeader } from "@/lib/bvnk-hawk";
 import { AppError, providerNotConfigured } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { isAddress } from "@/lib/solana";
@@ -445,47 +447,6 @@ function buildBvnkComplianceDetails(
       : {}),
     partyDetails,
   };
-}
-
-async function hmacSha256Base64(value: string, secretKey: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(secretKey),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
-  );
-  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(value));
-  return Buffer.from(signature).toString("base64");
-}
-
-async function buildBvnkHawkAuthorizationHeader(
-  url: URL,
-  method: "GET" | "POST",
-  authId: string,
-  secretKey: string
-): Promise<string> {
-  const ts = Math.floor(Date.now() / 1000).toString();
-  const nonce = crypto.randomUUID().replace(/-/g, "").slice(0, 12);
-  const resource = `${url.pathname}${url.search}`;
-  const port = url.port || (url.protocol === "https:" ? "443" : "80");
-
-  const normalized = [
-    "hawk.1.header",
-    ts,
-    nonce,
-    method.toUpperCase(),
-    resource,
-    url.hostname.toLowerCase(),
-    port,
-    "",
-    "",
-    "",
-  ].join("\n");
-
-  const mac = await hmacSha256Base64(normalized, secretKey);
-  return `Hawk id="${authId}", ts="${ts}", nonce="${nonce}", mac="${mac}"`;
 }
 
 async function bvnkRequest(
@@ -1279,4 +1240,12 @@ export async function simulateSandboxTransfer(c: AppContext) {
   }
 
   return success(c, { transaction });
+}
+
+export async function listOnrampSupport(c: AppContext) {
+  return success(c, {
+    sourceCurrencies: ONRAMP_SOURCE_CURRENCIES,
+    cryptoRails: ONRAMP_CRYPTO_RAILS,
+    pairs: ONRAMP_SUPPORT,
+  });
 }

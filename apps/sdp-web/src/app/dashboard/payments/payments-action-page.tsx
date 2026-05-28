@@ -2,6 +2,8 @@
 
 import type {
   ComplianceProviderId,
+  CryptoRailId,
+  FiatCurrency,
   PaymentsDashboardWallet,
   PaymentTransferSummary,
   RampProviderId,
@@ -31,16 +33,19 @@ import { isSolBalance } from "./payments-overview.utils";
 import {
   createTransfer,
   executeRampFlow,
+  fetchOnrampSupport,
   fetchWalletBalances,
   fetchWalletPolicy,
   fetchWallets,
   getDevnetExplorerUrl,
+  type OnrampSupportSnapshot,
   type PaymentRampExecution,
   type PaymentRampInstruction,
   type PaymentWalletBalance,
   runComplianceCheck,
   simulateSandboxTransfer,
 } from "./payments-workspace.data";
+import { CryptoRailIcon, CurrencyFlag, ProviderLogo } from "./ramp-icons";
 import type { ComplianceSnapshot } from "./payments-workspace.types";
 import { ProviderRiskTable } from "./provider-risk-table";
 
@@ -57,6 +62,16 @@ const REQUIRED_ACTION_ASSETS = ["USDC"] as const;
 const MOONPAY_ONRAMP_MIN_USD = 20;
 const PAYMENTS_ACTION_WALLETS_KEY = "payments-action-wallets";
 const PAYMENTS_ACTION_WALLET_BALANCES_KEY = "payments-action-wallet-balances";
+const PAYMENTS_ACTION_ONRAMP_SUPPORT_KEY = "payments-action-onramp-support";
+
+// Map crypto rail id (e.g. "usdc.solana") to the asset symbol used in the details step.
+function railToAssetSymbol(railId: CryptoRailId | null): string | null {
+  if (!railId) {
+    return null;
+  }
+  const [asset] = railId.split(".");
+  return asset ? asset.toUpperCase() : null;
+}
 // biome-ignore lint/security/noSecrets: Solana native mint address constant, not a secret.
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 // biome-ignore lint/security/noSecrets: Devnet USDC mint address constant, not a secret.
@@ -1230,6 +1245,8 @@ export function PaymentsActionPage({
   const [bvnkLastName, setBvnkLastName] = useState("");
   const [bvnkDateOfBirth, setBvnkDateOfBirth] = useState("");
   const [bvnkCountryCode, setBvnkCountryCode] = useState("");
+  const [selectedSourceCurrency, setSelectedSourceCurrency] = useState<FiatCurrency | null>(null);
+  const [selectedDestRail, setSelectedDestRail] = useState<CryptoRailId | null>(null);
   const [policyAllowlist, setPolicyAllowlist] = useState<string[]>([]);
   const [policyLoading, setPolicyLoading] = useState(false);
   const [policyError, setPolicyError] = useState<string | null>(null);
@@ -1304,6 +1321,64 @@ export function PaymentsActionPage({
   }, [selectedWallet, selectedWalletBalancesSnapshot]);
   const isOnrampBranch = branch === "onramp";
   const isOfframpBranch = branch === "offramp";
+
+  const { data: onrampSupport } = useSWR<OnrampSupportSnapshot>(
+    isOnrampBranch ? PAYMENTS_ACTION_ONRAMP_SUPPORT_KEY : null,
+    () => fetchOnrampSupport(),
+    { revalidateOnFocus: false, revalidateIfStale: false }
+  );
+
+  // Source currencies offered by ANY of this org's enabled providers.
+  const availableSourceCurrencies = useMemo<readonly FiatCurrency[]>(() => {
+    if (!onrampSupport) return [];
+    const enabled = new Set(enabledRampProviders);
+    const set = new Set<FiatCurrency>();
+    for (const pair of onrampSupport.pairs) {
+      if (pair.providers.some((p) => enabled.has(p))) {
+        set.add(pair.source);
+      }
+    }
+    return [...set].sort();
+  }, [enabledRampProviders, onrampSupport]);
+
+  // Destination rails offered for the chosen source currency, restricted to enabled providers.
+  const availableDestRails = useMemo<readonly CryptoRailId[]>(() => {
+    if (!onrampSupport || !selectedSourceCurrency) return onrampSupport?.cryptoRails ?? [];
+    const enabled = new Set(enabledRampProviders);
+    const set = new Set<CryptoRailId>();
+    for (const pair of onrampSupport.pairs) {
+      if (pair.source !== selectedSourceCurrency) continue;
+      if (pair.providers.some((p) => enabled.has(p))) {
+        set.add(pair.dest);
+      }
+    }
+    return [...set];
+  }, [enabledRampProviders, onrampSupport, selectedSourceCurrency]);
+
+  // Providers that support the currently-selected (source, dest) pair, intersected with enabled.
+  const providersForPair = useMemo<readonly RampProviderId[] | null>(() => {
+    if (!onrampSupport || !selectedSourceCurrency || !selectedDestRail) return null;
+    const enabled = new Set(enabledRampProviders);
+    const pair = onrampSupport.pairs.find(
+      (p) => p.source === selectedSourceCurrency && p.dest === selectedDestRail
+    );
+    if (!pair) return [];
+    return pair.providers.filter((p) => enabled.has(p));
+  }, [enabledRampProviders, onrampSupport, selectedSourceCurrency, selectedDestRail]);
+
+  // Reset the dest rail if it's no longer valid for the current source.
+  useEffect(() => {
+    if (!isOnrampBranch) return;
+    if (selectedDestRail && !availableDestRails.includes(selectedDestRail)) {
+      setSelectedDestRail(null);
+    }
+  }, [availableDestRails, isOnrampBranch, selectedDestRail]);
+
+  // Sync selectedAsset to the chosen rail's asset symbol so the details step stays accurate.
+  useEffect(() => {
+    const symbol = railToAssetSymbol(selectedDestRail);
+    if (symbol) setSelectedAsset(symbol);
+  }, [selectedDestRail]);
   const assetOptions = useMemo(
     () => resolveWalletActionAssets(selectedWalletWithBalances, issuedTokenSymbolsByMint),
     [issuedTokenSymbolsByMint, selectedWalletWithBalances]
@@ -1344,11 +1419,19 @@ export function PaymentsActionPage({
   const isDepositBranch = branch === "wallet_deposit";
   const hasEnabledComplianceProviders = enabledComplianceProviders.length > 0;
   const providerOptions = useMemo(
-    () =>
-      (isOnrampBranch ? ONRAMP_PROVIDER_OPTIONS : OFFRAMP_PROVIDER_OPTIONS).filter((option) =>
-        enabledRampProviders.includes(option.id)
-      ),
-    [enabledRampProviders, isOnrampBranch]
+    () => {
+      const base = (isOnrampBranch ? ONRAMP_PROVIDER_OPTIONS : OFFRAMP_PROVIDER_OPTIONS).filter(
+        (option) => enabledRampProviders.includes(option.id)
+      );
+      // On the onramp branch, narrow to the providers that support the picked pair.
+      // Until the user picks both source + dest (providersForPair === null), show everything.
+      if (!isOnrampBranch || providersForPair === null) {
+        return base;
+      }
+      const allowed = new Set(providersForPair);
+      return base.filter((option) => allowed.has(option.id));
+    },
+    [enabledRampProviders, isOnrampBranch, providersForPair]
   );
   const providerLabel = providerOptions.find((option) => option.id === provider)?.title ?? null;
   const numericAmount = parseOptionalNumber(amount);
@@ -1455,6 +1538,8 @@ export function PaymentsActionPage({
     setBvnkLastName("");
     setBvnkDateOfBirth("");
     setBvnkCountryCode("");
+    setSelectedSourceCurrency(null);
+    setSelectedDestRail(null);
     setTransferCompliance(null);
     setTransferComplianceDismissed(false);
     setPolicyError(null);
@@ -2029,25 +2114,94 @@ export function PaymentsActionPage({
     </div>
   );
 
-  const renderProviderStep = () => (
-    <div className="grid gap-4">
-      {providerOptions.length === 0 ? (
-        <div className="rounded-2xl border border-border-light bg-border-extra-light px-5 py-5 text-sm text-text-low">
-          No ramp providers are enabled for this organization.
-        </div>
-      ) : null}
-      {providerOptions.map((option) => (
-        <ActionChoiceCard
-          key={option.id}
-          active={provider === option.id}
-          title={option.title}
-          description={option.description}
-          icon={<CheckCircle2Icon className="size-5" />}
-          onClick={() => selectProvider(option.id)}
-        />
-      ))}
+  const renderOnrampPairPicker = () => (
+    <div className="grid gap-4 rounded-2xl border border-border-light bg-border-extra-light p-5 sm:grid-cols-2">
+      <div className="space-y-2">
+        <Label>From currency</Label>
+        <Select
+          label="From currency"
+          placeholder="Select fiat currency"
+          size="xl"
+          value={selectedSourceCurrency ?? null}
+          onValueChange={(next) => {
+            if (next) {
+              setSelectedSourceCurrency(next as FiatCurrency);
+            }
+          }}
+        >
+          {availableSourceCurrencies.map((currency) => (
+            <SelectItem key={currency} value={currency}>
+              <span className="flex items-center gap-2">
+                <CurrencyFlag currency={currency} />
+                <span>{currency}</span>
+              </span>
+            </SelectItem>
+          ))}
+        </Select>
+      </div>
+      <div className="space-y-2">
+        <Label>To crypto</Label>
+        <Select
+          label="To crypto"
+          placeholder={selectedSourceCurrency ? "Select crypto rail" : "Pick a currency first"}
+          size="xl"
+          value={selectedDestRail ?? null}
+          onValueChange={(next) => {
+            if (next) {
+              setSelectedDestRail(next as CryptoRailId);
+            }
+          }}
+        >
+          {availableDestRails.map((rail) => (
+            <SelectItem key={rail} value={rail}>
+              <span className="flex items-center gap-2">
+                <CryptoRailIcon railId={rail} />
+                <span>{rail.replace(".", " · ").toUpperCase()}</span>
+              </span>
+            </SelectItem>
+          ))}
+        </Select>
+      </div>
     </div>
   );
+
+  const renderProviderStep = () => {
+    const showPairPicker = isOnrampBranch;
+    const noProvidersForPair =
+      showPairPicker &&
+      selectedSourceCurrency &&
+      selectedDestRail &&
+      providerOptions.length === 0;
+
+    return (
+      <div className="grid gap-4">
+        {showPairPicker ? renderOnrampPairPicker() : null}
+        {providerOptions.length === 0 && !showPairPicker ? (
+          <div className="rounded-2xl border border-border-light bg-border-extra-light px-5 py-5 text-sm text-text-low">
+            No ramp providers are enabled for this organization.
+          </div>
+        ) : null}
+        {noProvidersForPair ? (
+          <div className="rounded-2xl border border-border-light bg-border-extra-light px-5 py-5 text-sm text-text-low">
+            No enabled provider supports{" "}
+            <span className="font-medium text-text-extra-high">{selectedSourceCurrency}</span> →{" "}
+            <span className="font-medium text-text-extra-high">{selectedDestRail}</span>. Try a
+            different pair.
+          </div>
+        ) : null}
+        {providerOptions.map((option) => (
+          <ActionChoiceCard
+            key={option.id}
+            active={provider === option.id}
+            title={option.title}
+            description={option.description}
+            icon={<ProviderLogo providerId={option.id} />}
+            onClick={() => selectProvider(option.id)}
+          />
+        ))}
+      </div>
+    );
+  };
 
   const renderWalletSelect = ({
     label,
