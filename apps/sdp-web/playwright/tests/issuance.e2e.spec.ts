@@ -14,7 +14,7 @@ function shortValue(value: string): string {
 
 async function gotoIssuanceDashboard(page: Page): Promise<void> {
   await page.goto("/dashboard/issuance");
-  await expect(page.getByRole("button", { name: "Create draft" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Create draft" })).toBeVisible();
 }
 
 async function gotoToken(page: Page, tokenId: string): Promise<void> {
@@ -128,7 +128,7 @@ test.describe
       const draftSymbol = `UsD${draftSuffix}`;
 
       await gotoIssuanceDashboard(page);
-      await page.getByRole("button", { name: "Create draft" }).click();
+      await page.getByRole("link", { name: "Create draft" }).click();
       await page
         .getByRole("button", { name: /Stablecoin/i })
         .first()
