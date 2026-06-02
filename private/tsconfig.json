@@ -1,0 +1,12 @@
+{
+  "extends": "../apps/sdp-api/tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "typeRoots": ["../apps/sdp-api/node_modules/@types", "../apps/sdp-api/node_modules"],
+    "paths": {
+      "@/*": ["../apps/sdp-api/src/*"]
+    }
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["dist"]
+}
