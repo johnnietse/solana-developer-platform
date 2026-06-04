@@ -16,6 +16,7 @@ import type { BackgroundRunner } from "@/runtime/background";
 import type { Observability } from "@/runtime/observability";
 import type { Env } from "@/types/env";
 import { PENDING_TRANSFERS_CRON, runPendingTransfersReconciliation } from "./pending-transfers";
+import { runRecurringPaymentsCollection } from "./recurring-payments";
 
 export interface CronDeps {
   env: Env;
@@ -65,6 +66,11 @@ export function startCron(deps: CronDeps): CronHandle | null {
       return;
     }
     runPendingTransfersReconciliation({
+      env: deps.env,
+      bg: deps.bg,
+      observability: deps.observability,
+    });
+    runRecurringPaymentsCollection({
       env: deps.env,
       bg: deps.bg,
       observability: deps.observability,

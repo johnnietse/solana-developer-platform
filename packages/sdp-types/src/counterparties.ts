@@ -104,3 +104,27 @@ export interface CounterpartyAccount {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface CreateCounterpartyAccountRequest {
+  accountKind: CounterpartyAccountKind;
+  label?: string | null;
+  details?: CounterpartyAccountDetails;
+  providerAccountData?: CounterpartyAccountProviderData;
+}
+
+export interface UpdateCounterpartyAccountRequest {
+  label?: string | null;
+  details?: CounterpartyAccountDetails;
+  providerAccountData?: CounterpartyAccountProviderData;
+}
+
+export interface CounterpartyAccountResponse {
+  counterpartyAccount: CounterpartyAccount;
+}
+
+export interface ListCounterpartyAccountsResponse {
+  counterpartyAccounts: CounterpartyAccount[];
+  total: number;
+  page: number;
+  pageSize: number;
+}

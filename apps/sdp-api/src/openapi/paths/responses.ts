@@ -7,6 +7,7 @@ import {
   allowlistEntrySchema,
   apiKeyDetailSchema,
   apiKeyResponseSchema,
+  counterpartyAccountResponseSchema,
   counterpartyResponseSchema,
   currentUserResponseSchema,
   custodyConfigResponseSchema,
@@ -20,6 +21,7 @@ import {
   executeForceBurnResponseSchema,
   executeMintResponseSchema,
   executePauseResponseSchema,
+  executePaymentRecurringPaymentResponseSchema,
   executeSeizeResponseSchema,
   executeUnpauseResponseSchema,
   executeUpdateAuthorityResponseSchema,
@@ -28,6 +30,7 @@ import {
   inviteMemberResponseSchema,
   listApiKeysResponseSchema,
   listCounterpartiesResponseSchema,
+  listCounterpartyAccountsResponseSchema,
   listMembersResponseSchema,
   listProjectApiKeysResponseSchema,
   listProjectMembersResponseSchema,
@@ -42,6 +45,8 @@ import {
   onrampQuoteResponseSchema,
   organizationSchema,
   paginatedResponseSchema,
+  paymentRecurringPaymentListResponseSchema,
+  paymentRecurringPaymentResponseSchema,
   paymentSubscriptionCollectionAttemptListResponseSchema,
   paymentSubscriptionCollectionAttemptResponseSchema,
   paymentSubscriptionListResponseSchema,
@@ -96,6 +101,10 @@ export const apiKeyRevokeResponse = successResponseSchema(revokeApiKeyResponseSc
 
 export const counterpartyResponse = successResponseSchema(counterpartyResponseSchema);
 export const listCounterpartiesResponse = successResponseSchema(listCounterpartiesResponseSchema);
+export const counterpartyAccountResponse = successResponseSchema(counterpartyAccountResponseSchema);
+export const listCounterpartyAccountsResponse = successResponseSchema(
+  listCounterpartyAccountsResponseSchema
+);
 
 export const projectResponse = successResponseSchema(projectResponseSchema);
 export const listProjectsResponse = successResponseSchema(listProjectsResponseSchema);
@@ -163,6 +172,15 @@ export const walletPolicyResponse = successResponseSchema(walletPolicyResponseSc
 export const prepareTransferResponse = successResponseSchema(prepareTransferResponseSchema);
 export const transferResponse = successResponseSchema(transferResponseSchema);
 export const transferListResponse = paginatedResponseSchema(transferSchema);
+export const paymentRecurringPaymentResponse = successResponseSchema(
+  paymentRecurringPaymentResponseSchema
+);
+export const paymentRecurringPaymentListResponse = successResponseSchema(
+  paymentRecurringPaymentListResponseSchema
+);
+export const executePaymentRecurringPaymentResponse = successResponseSchema(
+  executePaymentRecurringPaymentResponseSchema
+);
 export const paymentSubscriptionPlanResponse = successResponseSchema(
   paymentSubscriptionPlanResponseSchema
 );

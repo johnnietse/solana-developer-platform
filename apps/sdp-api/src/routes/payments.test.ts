@@ -15,9 +15,11 @@ import {
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
+import * as subscriptionsSdk from "@solana/subscriptions";
 import { getTransferSolInstruction } from "@solana-program/system";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
+import * as repositories from "@/db/repositories";
 import app from "@/index";
 import { hashString } from "@/lib/hash";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
@@ -39,6 +41,15 @@ const getSplTokenBalancesMock = vi.spyOn(tokenAccounts, "getSplTokenBalances");
 const getSplTokenAccountAddressesMock = vi.spyOn(tokenAccounts, "getSplTokenAccountAddresses");
 const createFeePaymentAdapterMock = vi.spyOn(feePaymentAdapters, "createFeePaymentAdapter");
 const createOrgSignerMock = vi.spyOn(solanaServices, "createOrgSigner");
+const fetchMaybePlanMock = vi.spyOn(subscriptionsSdk, "fetchMaybePlan");
+const fetchMaybeSubscriptionAuthorityMock = vi.spyOn(
+  subscriptionsSdk,
+  "fetchMaybeSubscriptionAuthority"
+);
+const fetchMaybeSubscriptionDelegationMock = vi.spyOn(
+  subscriptionsSdk,
+  "fetchMaybeSubscriptionDelegation"
+);
 
 const TEST_CONFIG_ID = "cust_cfg_payments_test";
 const TEST_CUSTODY_WALLET_ID = "cwlt_payments_test";
@@ -373,6 +384,93 @@ function mockTokenSupplyDecimalsOnce(decimals = 6): void {
   } as unknown as ReturnType<typeof solanaRpc.createRpc>);
 }
 
+function mockRecurringTokenRpc(decimals = 6): void {
+  createRpcMock.mockReturnValue({
+    getTokenAccountsByOwner: () => ({
+      send: async () => ({
+        value: [
+          {
+            pubkey: TEST_SOLANA_ADDRESSES.wallet3,
+            account: {
+              data: {
+                parsed: {
+                  info: {
+                    mint: DEVNET_USDC_MINT,
+                    tokenAmount: {
+                      amount: "1000000000",
+                      decimals,
+                      uiAmountString: "1000",
+                    },
+                  },
+                },
+              },
+            },
+          },
+        ],
+      }),
+    }),
+    getTokenSupply: () => ({
+      send: async () => ({ value: { decimals } }),
+    }),
+  } as unknown as ReturnType<typeof solanaRpc.createRpc>);
+}
+
+function mockRecurringActivationAccounts(): void {
+  fetchMaybePlanMock
+    .mockResolvedValueOnce({
+      exists: false,
+      address: TEST_SOLANA_ADDRESSES.wallet2,
+    } as Awaited<ReturnType<typeof subscriptionsSdk.fetchMaybePlan>>)
+    .mockResolvedValueOnce({
+      exists: true,
+      address: TEST_SOLANA_ADDRESSES.wallet2,
+      data: {
+        status: subscriptionsSdk.PlanStatus.Active,
+        data: { terms: { createdAt: 1_700_000_000n } },
+      },
+    } as Awaited<ReturnType<typeof subscriptionsSdk.fetchMaybePlan>>);
+  fetchMaybeSubscriptionAuthorityMock.mockResolvedValueOnce({
+    exists: false,
+    address: TEST_SOLANA_ADDRESSES.wallet2,
+  } as Awaited<ReturnType<typeof subscriptionsSdk.fetchMaybeSubscriptionAuthority>>);
+  fetchMaybeSubscriptionDelegationMock
+    .mockResolvedValueOnce({
+      exists: false,
+      address: TEST_SOLANA_ADDRESSES.wallet2,
+    } as Awaited<ReturnType<typeof subscriptionsSdk.fetchMaybeSubscriptionDelegation>>)
+    .mockResolvedValueOnce({
+      exists: true,
+      address: TEST_SOLANA_ADDRESSES.wallet2,
+      data: {
+        terms: { amount: 500000n, periodHours: 24n, createdAt: 1_700_000_000n },
+        amountPulledInPeriod: 0n,
+        currentPeriodStartTs: 1_700_000_000n,
+        expiresAtTs: 0n,
+      },
+    } as Awaited<ReturnType<typeof subscriptionsSdk.fetchMaybeSubscriptionDelegation>>);
+}
+
+function mockRecurringCollectionAccounts(): void {
+  fetchMaybePlanMock.mockResolvedValueOnce({
+    exists: true,
+    address: TEST_SOLANA_ADDRESSES.wallet2,
+    data: {
+      status: subscriptionsSdk.PlanStatus.Active,
+      data: { terms: { createdAt: 1_700_000_000n } },
+    },
+  } as Awaited<ReturnType<typeof subscriptionsSdk.fetchMaybePlan>>);
+  fetchMaybeSubscriptionDelegationMock.mockResolvedValueOnce({
+    exists: true,
+    address: TEST_SOLANA_ADDRESSES.wallet2,
+    data: {
+      terms: { amount: 500000n, periodHours: 24n, createdAt: 1_700_000_000n },
+      amountPulledInPeriod: 0n,
+      currentPeriodStartTs: 1_700_000_000n,
+      expiresAtTs: 0n,
+    },
+  } as Awaited<ReturnType<typeof subscriptionsSdk.fetchMaybeSubscriptionDelegation>>);
+}
+
 function expectPreparedSubscriptionTransaction(
   preparedTransaction: {
     serialized: string;
@@ -544,6 +642,288 @@ describe("Payments routes", () => {
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { message: string } };
     expect(body.error.message).toContain("Recurring payments are not enabled");
+  });
+
+  it("executes the outbound recurring payment backend flow through SDP API routes", async () => {
+    env.PAYMENTS_RECURRING_ENABLED = "true";
+    mockRecurringTokenRpc();
+    mockRecurringActivationAccounts();
+    const authHeaders = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+    };
+    const jsonHeaders = {
+      ...authHeaders,
+      "Content-Type": "application/json",
+    };
+    const firstCollectionAt = new Date(Date.now() - 60_000).toISOString();
+
+    const counterpartyRes = await app.request(
+      "/v1/counterparties",
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          externalId: "recurring_payment_counterparty_001",
+          entityType: "individual",
+          displayName: "Recurring Payment Counterparty",
+          email: "recurring-payment-counterparty@example.com",
+        }),
+      },
+      env
+    );
+    expect(counterpartyRes.status).toBe(201);
+    const counterpartyBody = (await counterpartyRes.json()) as {
+      data: { counterparty: { id: string } };
+    };
+    const counterpartyId = counterpartyBody.data.counterparty.id;
+
+    const accountRes = await app.request(
+      `/v1/counterparties/${counterpartyId}/accounts`,
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          accountKind: "crypto_wallet",
+          label: "Recipient wallet",
+          details: {
+            network: "solana",
+            address: TEST_SOLANA_ADDRESSES.wallet2,
+          },
+        }),
+      },
+      env
+    );
+    expect(accountRes.status).toBe(201);
+    const accountBody = (await accountRes.json()) as {
+      data: { counterpartyAccount: { id: string; accountKind: string } };
+    };
+    expect(accountBody.data.counterpartyAccount.accountKind).toBe("crypto_wallet");
+    const counterpartyAccountId = accountBody.data.counterpartyAccount.id;
+
+    const createRecurringRes = await app.request(
+      "/v1/payments/recurring-payments",
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          sourceWalletId: TEST_WALLET_ID,
+          counterpartyId,
+          counterpartyAccountId,
+          token: DEVNET_USDC_MINT,
+          amount: "0.50",
+          periodHours: 24,
+          firstCollectionAt,
+          metadataUri: "https://sdp.dev/recurring.json",
+        }),
+      },
+      env
+    );
+    expect(createRecurringRes.status).toBe(201);
+    const createRecurringBody = (await createRecurringRes.json()) as {
+      data: {
+        recurringPayment: {
+          id: string;
+          status: string;
+          destinationAddress: string;
+          planPda: string | null;
+        };
+      };
+    };
+    const recurringPaymentId = createRecurringBody.data.recurringPayment.id;
+    expect(createRecurringBody.data.recurringPayment).toMatchObject({
+      status: "pending_activation",
+      destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      planPda: null,
+    });
+
+    await seedCachedKey({
+      walletBindings: [
+        { walletId: "wal_other_wallet", permissions: ["payments:read", "payments:write"] },
+      ],
+    });
+
+    const unauthorizedGetRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}`,
+      {
+        method: "GET",
+        headers: authHeaders,
+      },
+      env
+    );
+    expect(unauthorizedGetRes.status).toBe(403);
+
+    const scopedListRes = await app.request(
+      "/v1/payments/recurring-payments",
+      {
+        method: "GET",
+        headers: authHeaders,
+      },
+      env
+    );
+    expect(scopedListRes.status).toBe(200);
+    const scopedListBody = (await scopedListRes.json()) as {
+      data: { recurringPayments: Array<{ id: string }>; total: number };
+    };
+    expect(scopedListBody.data.recurringPayments).toEqual([]);
+    expect(scopedListBody.data.total).toBe(0);
+
+    const unauthorizedActivateRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: "{}",
+      },
+      env
+    );
+    expect(unauthorizedActivateRes.status).toBe(403);
+
+    await seedCachedKey({
+      walletBindings: [{ walletId: TEST_WALLET_ID, permissions: ["payments:write"] }],
+    });
+
+    const writeOnlyListRes = await app.request(
+      "/v1/payments/recurring-payments",
+      {
+        method: "GET",
+        headers: authHeaders,
+      },
+      env
+    );
+    expect(writeOnlyListRes.status).toBe(200);
+    const writeOnlyListBody = (await writeOnlyListRes.json()) as {
+      data: { recurringPayments: Array<{ id: string }>; total: number };
+    };
+    expect(writeOnlyListBody.data.recurringPayments).toEqual([]);
+    expect(writeOnlyListBody.data.total).toBe(0);
+
+    await seedCachedKey({
+      walletBindings: [
+        { walletId: TEST_WALLET_ID, permissions: ["payments:read", "payments:write"] },
+      ],
+    });
+
+    const activateRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: "{}",
+      },
+      env
+    );
+    expect(activateRes.status).toBe(200);
+    const activateBody = (await activateRes.json()) as {
+      data: {
+        recurringPayment: {
+          status: string;
+          planId: string | null;
+          subscriptionId: string | null;
+          planPda: string | null;
+          subscriptionPda: string | null;
+          nextCollectionDueAt: string | null;
+        };
+      };
+    };
+    expect(activateBody.data.recurringPayment).toMatchObject({
+      status: "active",
+      nextCollectionDueAt: firstCollectionAt,
+    });
+    expect(activateBody.data.recurringPayment.planId).toBeTruthy();
+    expect(activateBody.data.recurringPayment.subscriptionId).toBeTruthy();
+    expect(activateBody.data.recurringPayment.planPda).toBeTruthy();
+    expect(activateBody.data.recurringPayment.subscriptionPda).toBeTruthy();
+
+    const originalCreatePaymentsRepository = repositories.createPaymentsRepository;
+    const createPaymentsRepositorySpy = vi
+      .spyOn(repositories, "createPaymentsRepository")
+      .mockImplementation((repoEnv) => ({
+        ...originalCreatePaymentsRepository(repoEnv),
+        createTransfer: vi.fn().mockResolvedValue(null),
+      }));
+    try {
+      const failedCollectRes = await app.request(
+        `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
+        {
+          method: "POST",
+          headers: jsonHeaders,
+          body: "{}",
+        },
+        env
+      );
+      expect(failedCollectRes.status).toBe(500);
+    } finally {
+      createPaymentsRepositorySpy.mockRestore();
+    }
+
+    const failedAttemptsRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/collection-attempts?status=failed`,
+      {
+        method: "GET",
+        headers: authHeaders,
+      },
+      env
+    );
+    expect(failedAttemptsRes.status).toBe(200);
+    const failedAttemptsBody = (await failedAttemptsRes.json()) as {
+      data: {
+        collectionAttempts: Array<{
+          recurringPaymentId: string | null;
+          status: string;
+          transferId: string | null;
+        }>;
+      };
+    };
+    expect(failedAttemptsBody.data.collectionAttempts).toEqual([
+      expect.objectContaining({
+        recurringPaymentId,
+        status: "failed",
+        transferId: null,
+      }),
+    ]);
+
+    mockRecurringCollectionAccounts();
+    const collectRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: "{}",
+      },
+      env
+    );
+    expect(collectRes.status).toBe(200);
+    const collectBody = (await collectRes.json()) as {
+      data: {
+        recurringPayment: { nextCollectionDueAt: string | null };
+        collectionAttempt: { status: string; recurringPaymentId: string | null };
+        transfer: { status: string; signature: string | null };
+      };
+    };
+    expect(collectBody.data.collectionAttempt).toMatchObject({
+      status: "confirmed",
+      recurringPaymentId,
+    });
+    expect(collectBody.data.transfer).toMatchObject({
+      status: "confirmed",
+      signature: expect.any(String),
+    });
+    expect(new Date(collectBody.data.recurringPayment.nextCollectionDueAt ?? "").getTime()).toBe(
+      new Date(firstCollectionAt).getTime() + 24 * 60 * 60 * 1000
+    );
+
+    const earlyCollectRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: "{}",
+      },
+      env
+    );
+    expect(earlyCollectRes.status).toBe(400);
+    const earlyCollectBody = (await earlyCollectRes.json()) as { error: { message: string } };
+    expect(earlyCollectBody.error.message).toContain("not due");
   });
 
   it("exercises the recurring subscription lifecycle through SDP API routes", async () => {

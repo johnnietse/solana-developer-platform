@@ -1,5 +1,10 @@
-import { COUNTERPARTY_ENTITY_TYPES, COUNTERPARTY_ID_TYPES } from "@sdp/types";
+import {
+  COUNTERPARTY_ACCOUNT_KINDS,
+  COUNTERPARTY_ENTITY_TYPES,
+  COUNTERPARTY_ID_TYPES,
+} from "@sdp/types";
 import { z } from "zod";
+import { isAddress } from "@/lib/solana";
 
 // TODO: strict country / subdivision validation deferred — see follow-up ticket
 // under PRO-1217. Until then, accept any string and let downstream providers
@@ -50,6 +55,10 @@ export const counterpartyIdParamsSchema = z.object({
   counterpartyId: counterpartyIdSchema,
 });
 
+export const counterpartyAccountIdParamsSchema = counterpartyIdParamsSchema.extend({
+  accountId: z.string().min(1),
+});
+
 export const createCounterpartySchema = z.object({
   externalId: z.string().min(1).max(256).optional(),
   entityType: counterpartyEntityTypeSchema,
@@ -72,6 +81,66 @@ export const updateCounterpartySchema = updateCounterpartyObjectSchema.refine(
 );
 
 export const listCounterpartiesQuerySchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  includeArchived: z.coerce.boolean().default(false),
+});
+
+const solanaAddressSchema = z
+  .string()
+  .trim()
+  .refine((value) => value.length >= 32 && value.length <= 44 && isAddress(value), {
+    message: "details.address must be a base58 Solana address",
+  });
+
+export const counterpartyAccountKindSchema = z.enum(COUNTERPARTY_ACCOUNT_KINDS);
+
+export const cryptoWalletAccountDetailsSchema = z
+  .object({
+    network: z.literal("solana"),
+    address: solanaAddressSchema,
+  })
+  .catchall(z.unknown());
+
+const accountDetailsSchema = z.record(z.string(), z.unknown());
+const createAccountDetailsSchema = accountDetailsSchema.default({});
+
+function requireCryptoWalletDetails(value: {
+  accountKind?: string;
+  details?: Record<string, unknown>;
+}) {
+  if (value.accountKind !== "crypto_wallet") {
+    return true;
+  }
+
+  return cryptoWalletAccountDetailsSchema.safeParse(value.details).success;
+}
+
+export const createCounterpartyAccountSchema = z
+  .object({
+    accountKind: counterpartyAccountKindSchema,
+    label: z.string().min(1).max(256).nullable().optional(),
+    details: createAccountDetailsSchema,
+    providerAccountData: z.record(z.string(), z.unknown()).default({}),
+  })
+  .refine(requireCryptoWalletDetails, {
+    message:
+      'crypto_wallet accounts require details.network = "solana" and details.address as a Solana wallet address',
+    path: ["details"],
+  });
+
+export const updateCounterpartyAccountSchema = z
+  .object({
+    label: z.string().min(1).max(256).nullable().optional(),
+    details: accountDetailsSchema.optional(),
+    providerAccountData: z.record(z.string(), z.unknown()).optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one field must be provided",
+  });
+
+export const listCounterpartyAccountsQuerySchema = z.object({
+  accountKind: counterpartyAccountKindSchema.optional(),
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
   includeArchived: z.coerce.boolean().default(false),

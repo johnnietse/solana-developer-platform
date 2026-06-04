@@ -133,6 +133,7 @@ function mapCollectionAttempt(
     organizationId: row.organization_id,
     projectId: row.project_id,
     subscriptionId: row.subscription_id,
+    recurringPaymentId: row.recurring_payment_id,
     transferId: row.transfer_id,
     token: row.token,
     amount: row.amount,

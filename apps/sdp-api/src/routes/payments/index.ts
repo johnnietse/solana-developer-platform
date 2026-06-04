@@ -6,13 +6,18 @@ import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import type { Env } from "@/types/env";
 import {
+  activateRecurringPayment,
+  cancelRecurringPayment,
+  collectRecurringPayment,
   createOnrampQuote,
+  createRecurringPayment,
   createSubscription,
   createSubscriptionCollectionAttempt,
   createSubscriptionPlan,
   createTransfer,
   executeOfframp,
   executeOnramp,
+  getRecurringPayment,
   getSubscription,
   getSubscriptionPlan,
   getTransfer,
@@ -20,6 +25,8 @@ import {
   getWalletPolicy,
   listOfframpCurrencies,
   listOnrampCurrencies,
+  listRecurringPaymentCollectionAttempts,
+  listRecurringPayments,
   listSubscriptionCollectionAttempts,
   listSubscriptionPlans,
   listSubscriptions,
@@ -30,6 +37,7 @@ import {
   prepareSubscriptionAuthorization,
   prepareSubscriptionCollection,
   prepareTransfer,
+  resumeRecurringPayment,
   simulateSandboxTransfer,
   updateSubscription,
   updateSubscriptionPlan,
@@ -52,6 +60,8 @@ payments.use("/subscription-plans", requireRecurringPaymentsFeature);
 payments.use("/subscription-plans/*", requireRecurringPaymentsFeature);
 payments.use("/subscriptions", requireRecurringPaymentsFeature);
 payments.use("/subscriptions/*", requireRecurringPaymentsFeature);
+payments.use("/recurring-payments", requireRecurringPaymentsFeature);
+payments.use("/recurring-payments/*", requireRecurringPaymentsFeature);
 
 payments.get(
   "/wallets/:walletId/balances",
@@ -78,6 +88,38 @@ payments.post(
   requirePermissions("payments:write", "wallets:read"),
   createSubscriptionPlan
 );
+payments.post(
+  "/recurring-payments",
+  requirePermissions("payments:write", "wallets:read", "counterparties:read"),
+  createRecurringPayment
+);
+payments.get("/recurring-payments", requirePermissions("payments:read"), listRecurringPayments);
+payments.post(
+  "/recurring-payments/:id/activate",
+  requirePermissions("payments:write", "wallets:read"),
+  activateRecurringPayment
+);
+payments.post(
+  "/recurring-payments/:id/collect",
+  requirePermissions("payments:write", "wallets:read"),
+  collectRecurringPayment
+);
+payments.post(
+  "/recurring-payments/:id/cancel",
+  requirePermissions("payments:write", "wallets:read"),
+  cancelRecurringPayment
+);
+payments.post(
+  "/recurring-payments/:id/resume",
+  requirePermissions("payments:write", "wallets:read"),
+  resumeRecurringPayment
+);
+payments.get(
+  "/recurring-payments/:id/collection-attempts",
+  requirePermissions("payments:read"),
+  listRecurringPaymentCollectionAttempts
+);
+payments.get("/recurring-payments/:id", requirePermissions("payments:read"), getRecurringPayment);
 payments.get("/subscription-plans", requirePermissions("payments:read"), listSubscriptionPlans);
 payments.post(
   "/subscription-plans/:planId/prepare-create",

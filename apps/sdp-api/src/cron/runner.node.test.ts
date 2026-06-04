@@ -3,6 +3,7 @@ import type { BackgroundRunner } from "@/runtime/background";
 import type { Observability } from "@/runtime/observability";
 import type { Env } from "@/types/env";
 import { PENDING_TRANSFERS_CRON, runPendingTransfersReconciliation } from "./pending-transfers";
+import { runRecurringPaymentsCollection } from "./recurring-payments";
 import { startCron } from "./runner";
 
 const scheduleMock = vi.fn();
@@ -32,6 +33,10 @@ vi.mock("./pending-transfers", async (importOriginal) => {
   };
 });
 
+vi.mock("./recurring-payments", () => ({
+  runRecurringPaymentsCollection: vi.fn(),
+}));
+
 function makeBg(): BackgroundRunner {
   return { run: vi.fn(), awaitAll: vi.fn(async () => {}), draining: false };
 }
@@ -50,6 +55,7 @@ describe("startCron", () => {
     stopMock.mockReset();
     scheduleMock.mockReturnValue(fakeTask);
     vi.mocked(runPendingTransfersReconciliation).mockReset();
+    vi.mocked(runRecurringPaymentsCollection).mockReset();
   });
 
   it("returns null and does not schedule when DISABLE_CRON=true", () => {
@@ -107,6 +113,7 @@ describe("startCron", () => {
     const tick = scheduleMock.mock.calls[0][1] as () => void;
     tick();
     expect(runPendingTransfersReconciliation).toHaveBeenCalledWith({ env, bg, observability });
+    expect(runRecurringPaymentsCollection).toHaveBeenCalledWith({ env, bg, observability });
   });
 
   it("tick passes observability=undefined through when caller did not supply one", () => {
@@ -120,6 +127,11 @@ describe("startCron", () => {
       bg,
       observability: undefined,
     });
+    expect(runRecurringPaymentsCollection).toHaveBeenCalledWith({
+      env,
+      bg,
+      observability: undefined,
+    });
   });
 
   it("tick is a no-op after stop() has been called, even if the scheduler fires once more", async () => {
@@ -128,6 +140,7 @@ describe("startCron", () => {
     const tick = scheduleMock.mock.calls[0][1] as () => void;
     tick();
     expect(runPendingTransfersReconciliation).not.toHaveBeenCalled();
+    expect(runRecurringPaymentsCollection).not.toHaveBeenCalled();
   });
 
   it("returned handle.stop() delegates to the underlying scheduled task", async () => {

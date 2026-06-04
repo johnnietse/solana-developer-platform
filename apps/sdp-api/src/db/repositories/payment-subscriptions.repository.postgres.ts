@@ -13,6 +13,7 @@ import type {
   PaymentSubscriptionPlanRow,
   PaymentSubscriptionRow,
   PaymentSubscriptionsRepository,
+  UpdatePaymentSubscriptionCollectionAttemptInput,
   UpdatePaymentSubscriptionInput,
   UpdatePaymentSubscriptionPlanInput,
 } from "./payment-subscriptions.repository";
@@ -70,6 +71,7 @@ function mapAttemptRow(row: Record<string, unknown>): PaymentSubscriptionCollect
     organization_id: row.organization_id as string,
     project_id: row.project_id as string,
     subscription_id: row.subscription_id as string,
+    recurring_payment_id: (row.recurring_payment_id as string | null | undefined) ?? null,
     transfer_id: (row.transfer_id as string | null | undefined) ?? null,
     token: row.token as string,
     amount: row.amount as string,
@@ -449,7 +451,8 @@ export function createPostgresPaymentSubscriptionsRepository(
              id,
              organization_id,
              project_id,
-             subscription_id,
+           subscription_id,
+             recurring_payment_id,
              transfer_id,
              token,
              amount,
@@ -461,13 +464,14 @@ export function createPostgresPaymentSubscriptionsRepository(
              metadata,
              created_at,
              updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .bind(
           input.id,
           input.organizationId,
           input.projectId,
           input.subscriptionId,
+          input.recurringPaymentId ?? null,
           input.transferId,
           input.token,
           input.amount,
@@ -485,9 +489,69 @@ export function createPostgresPaymentSubscriptionsRepository(
       return getAttemptByIdInternal(db, input.id);
     },
 
+    async updateCollectionAttempt(input: UpdatePaymentSubscriptionCollectionAttemptInput) {
+      const existing = await getAttemptByIdInternal(db, input.attemptId);
+      if (!existing) return null;
+
+      await db
+        .prepare(
+          `UPDATE payment_subscription_collection_attempts
+              SET transfer_id = CASE WHEN ?::boolean THEN ? ELSE transfer_id END,
+                  attempted_at = CASE WHEN ?::boolean THEN ? ELSE attempted_at END,
+                  status = COALESCE(?, status),
+                  signature = CASE WHEN ?::boolean THEN ? ELSE signature END,
+                  error = CASE WHEN ?::boolean THEN ? ELSE error END,
+                  metadata = COALESCE(?, metadata),
+                  updated_at = ?
+            WHERE id = ?`
+        )
+        .bind(
+          input.transferId !== undefined,
+          input.transferId ?? null,
+          input.attemptedAt !== undefined,
+          input.attemptedAt ?? null,
+          input.status ?? null,
+          input.signature !== undefined,
+          input.signature ?? null,
+          input.error !== undefined,
+          input.error ?? null,
+          input.metadata ?? null,
+          input.updatedAt,
+          input.attemptId
+        )
+        .run();
+
+      return getAttemptByIdInternal(db, input.attemptId);
+    },
+
+    async getCollectionAttemptByRecurringDue(params) {
+      const row = await db
+        .prepare(
+          `SELECT *
+             FROM payment_subscription_collection_attempts
+            WHERE recurring_payment_id = ?
+              AND due_at = ?
+              AND status IN ('pending', 'processing', 'confirmed')
+            ORDER BY created_at DESC
+            LIMIT 1`
+        )
+        .bind(params.recurringPaymentId, params.dueAt)
+        .first<Record<string, unknown>>();
+
+      return row ? mapAttemptRow(row) : null;
+    },
+
     async listCollectionAttempts(params: ListPaymentSubscriptionCollectionAttemptsInput) {
-      const clauses = ["organization_id = ?", "project_id = ?", "subscription_id = ?"];
-      const values: unknown[] = [params.organizationId, params.projectId, params.subscriptionId];
+      const clauses = ["organization_id = ?", "project_id = ?"];
+      const values: unknown[] = [params.organizationId, params.projectId];
+
+      if (params.recurringPaymentId) {
+        clauses.push("recurring_payment_id = ?");
+        values.push(params.recurringPaymentId);
+      } else {
+        clauses.push("subscription_id = ?");
+        values.push(params.subscriptionId);
+      }
 
       if (params.status) {
         clauses.push("status = ?");

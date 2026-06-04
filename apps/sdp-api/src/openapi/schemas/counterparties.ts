@@ -1,4 +1,6 @@
 import {
+  counterpartyAccountIdParamsSchema as counterpartyAccountIdParamsSchemaBase,
+  counterpartyAccountKindSchema as counterpartyAccountKindSchemaBase,
   counterpartyAddressSchema as counterpartyAddressSchemaBase,
   counterpartyEntityTypeSchema as counterpartyEntityTypeSchemaBase,
   counterpartyGovernmentIdSchema as counterpartyGovernmentIdSchemaBase,
@@ -6,8 +8,11 @@ import {
   counterpartyIdSchema as counterpartyIdSchemaBase,
   counterpartyIdTypeSchema as counterpartyIdTypeSchemaBase,
   counterpartyStatusSchema as counterpartyStatusSchemaBase,
+  createCounterpartyAccountSchema as createCounterpartyAccountSchemaBase,
   createCounterpartySchema as createCounterpartySchemaBase,
   listCounterpartiesQuerySchema as listCounterpartiesQuerySchemaBase,
+  listCounterpartyAccountsQuerySchema as listCounterpartyAccountsQuerySchemaBase,
+  updateCounterpartyAccountSchema as updateCounterpartyAccountSchemaBase,
   updateCounterpartyObjectSchema as updateCounterpartyObjectSchemaBase,
 } from "../../routes/counterparties/schemas";
 import {
@@ -34,6 +39,15 @@ export const counterpartyStatusSchema = withOpenApi(counterpartyStatusSchemaBase
   description: "Counterparty status.",
   example: "active",
 });
+
+export const counterpartyAccountKindSchema = withOpenApi(counterpartyAccountKindSchemaBase, {
+  description: "Counterparty account kind.",
+  example: "crypto_wallet",
+});
+
+export const counterpartyAccountStatusSchema = z
+  .enum(["active", "archived"])
+  .openapi({ description: "Counterparty account status.", example: "active" });
 
 export const counterpartyIdTypeSchema = withOpenApi(counterpartyIdTypeSchemaBase, {
   description:
@@ -188,6 +202,90 @@ export const counterpartyResponseSchema = withOpenApi(
   { description: "Counterparty response payload." }
 );
 
+export const counterpartyAccountPathParamsSchema = counterpartyAccountIdParamsSchemaBase
+  .extend({
+    counterpartyId: withOpenApi(counterpartyAccountIdParamsSchemaBase.shape.counterpartyId, {
+      description: "Counterparty identifier.",
+      example: "cp_example",
+    }),
+    accountId: withOpenApi(counterpartyAccountIdParamsSchemaBase.shape.accountId, {
+      description: "Counterparty account identifier.",
+      example: "cpa_example",
+    }),
+  })
+  .openapi({ description: "Counterparty account path parameters." });
+
+export const counterpartyAccountDetailsSchema = z.record(z.string(), z.unknown()).openapi({
+  description:
+    'Account details. For crypto_wallet accounts, include network: "solana" and address as a Solana wallet address.',
+  example: {
+    network: "solana",
+    address: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+  },
+});
+
+export const counterpartyAccountProviderDataSchema = z.record(z.string(), z.unknown()).openapi({
+  description: "Provider-specific account metadata preserved by SDP.",
+  example: {},
+});
+
+export const counterpartyAccountSchema = withOpenApi(
+  z.object({
+    id: withOpenApi(z.string(), {
+      description: "Counterparty account identifier.",
+      example: "cpa_example",
+    }),
+    organizationId: orgIdParamSchema,
+    projectId: projectIdParamSchema,
+    counterpartyId: counterpartyIdParamSchema,
+    accountKind: counterpartyAccountKindSchema,
+    label: withOpenApi(z.string().nullable(), {
+      description: "Optional human-readable account label.",
+      example: "USDC wallet",
+    }),
+    details: counterpartyAccountDetailsSchema,
+    providerAccountData: counterpartyAccountProviderDataSchema,
+    status: counterpartyAccountStatusSchema,
+    createdAt: withOpenApi(isoDateTimeSchema, {
+      description: "Creation timestamp.",
+      example: "2025-01-01T00:00:00.000Z",
+    }),
+    updatedAt: withOpenApi(isoDateTimeSchema, {
+      description: "Last update timestamp.",
+      example: "2025-01-02T00:00:00.000Z",
+    }),
+  }),
+  { description: "Counterparty payment account record." }
+);
+
+export const counterpartyAccountResponseSchema = withOpenApi(
+  z.object({
+    counterpartyAccount: counterpartyAccountSchema,
+  }),
+  { description: "Counterparty account response payload." }
+);
+
+export const listCounterpartyAccountsResponseSchema = withOpenApi(
+  z.object({
+    counterpartyAccounts: withOpenApi(z.array(counterpartyAccountSchema), {
+      description: "Counterparty accounts.",
+    }),
+    total: withOpenApi(z.number().int().nonnegative(), {
+      description: "Total counterparty accounts matching the query.",
+      example: 2,
+    }),
+    page: withOpenApi(z.number().int().positive(), {
+      description: "Current page number.",
+      example: 1,
+    }),
+    pageSize: withOpenApi(z.number().int().positive(), {
+      description: "Items per page.",
+      example: 20,
+    }),
+  }),
+  { description: "Paginated list of counterparty accounts." }
+);
+
 export const listCounterpartiesResponseSchema = withOpenApi(
   z.object({
     counterparties: withOpenApi(z.array(counterpartySchema), {
@@ -224,6 +322,27 @@ export const listCounterpartiesQuerySchema = listCounterpartiesQuerySchemaBase.e
   }),
 });
 
+export const listCounterpartyAccountsQuerySchema = listCounterpartyAccountsQuerySchemaBase
+  .extend({
+    accountKind: withOpenApi(listCounterpartyAccountsQuerySchemaBase.shape.accountKind, {
+      description: "Filter accounts by account kind.",
+      example: "crypto_wallet",
+    }),
+    page: withOpenApi(listCounterpartyAccountsQuerySchemaBase.shape.page, {
+      description: "Page number (1-based).",
+      example: 1,
+    }),
+    pageSize: withOpenApi(listCounterpartyAccountsQuerySchemaBase.shape.pageSize, {
+      description: "Items per page (max 100).",
+      example: 20,
+    }),
+    includeArchived: withOpenApi(listCounterpartyAccountsQuerySchemaBase.shape.includeArchived, {
+      description: "Include archived counterparty accounts in results.",
+      example: false,
+    }),
+  })
+  .openapi({ description: "Counterparty account list filters." });
+
 export const createCounterpartyRequestSchema = withOpenApi(
   createCounterpartySchemaBase.extend({
     externalId: withOpenApi(createCounterpartySchemaBase.shape.externalId, {
@@ -247,6 +366,35 @@ export const createCounterpartyRequestSchema = withOpenApi(
     }),
   }),
   { description: "Create counterparty request body." }
+);
+
+export const createCounterpartyAccountRequestSchema = withOpenApi(
+  createCounterpartyAccountSchemaBase.safeExtend({
+    accountKind: withOpenApi(createCounterpartyAccountSchemaBase.shape.accountKind, {
+      description: "Counterparty account kind.",
+      example: "crypto_wallet",
+    }),
+    label: withOpenApi(createCounterpartyAccountSchemaBase.shape.label, {
+      description: "Optional account label.",
+      example: "USDC wallet",
+    }),
+    details: withOpenApi(createCounterpartyAccountSchemaBase.shape.details, {
+      description:
+        'For crypto_wallet accounts, must include network: "solana" and address as a Solana wallet address.',
+      example: {
+        network: "solana",
+        address: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+      },
+    }),
+    providerAccountData: withOpenApi(
+      createCounterpartyAccountSchemaBase.shape.providerAccountData,
+      {
+        description: "Provider-specific metadata to preserve with the account.",
+        example: {},
+      }
+    ),
+  }),
+  { description: "Create counterparty account request body." }
 );
 
 export const updateCounterpartyRequestSchema = withOpenApi(
@@ -273,6 +421,34 @@ export const updateCounterpartyRequestSchema = withOpenApi(
   }),
   {
     description: "Update counterparty request body. At least one field must be provided.",
+    minProperties: 1,
+  }
+);
+
+export const updateCounterpartyAccountRequestSchema = withOpenApi(
+  updateCounterpartyAccountSchemaBase.safeExtend({
+    label: withOpenApi(updateCounterpartyAccountSchemaBase.shape.label, {
+      description: "Updated account label. Use null to clear.",
+      example: "Primary USDC wallet",
+    }),
+    details: withOpenApi(updateCounterpartyAccountSchemaBase.shape.details, {
+      description:
+        'Updated account details. Crypto-wallet accounts must retain network: "solana" and a valid Solana wallet address.',
+      example: {
+        network: "solana",
+        address: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+      },
+    }),
+    providerAccountData: withOpenApi(
+      updateCounterpartyAccountSchemaBase.shape.providerAccountData,
+      {
+        description: "Updated provider-specific metadata.",
+        example: {},
+      }
+    ),
+  }),
+  {
+    description: "Update counterparty account request body. At least one field must be provided.",
     minProperties: 1,
   }
 );
