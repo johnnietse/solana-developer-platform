@@ -1,4 +1,4 @@
-import type { PaymentRampExecution, SdpEnvironment } from "@sdp/types";
+import type { PaymentRampExecution, PaymentRampQuote, SdpEnvironment } from "@sdp/types";
 import {
   OFFRAMP_SUPPORT,
   ONRAMP_SUPPORT,
@@ -13,7 +13,26 @@ import type {
 } from "@/db/repositories/counterparty.repository";
 import { requireProjectId } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
+import { hashString } from "@/lib/hash";
 import { RAMP_PROVIDER_CLIENTS } from "@/lib/ramps";
+import {
+  type BvnkOnrampEntry,
+  type BvnkOnrampResolution,
+  buildBvnkIndividualPayload,
+  buildBvnkOnrampInstruction,
+  buildBvnkPartyDetails,
+  buildBvnkRuleEntity,
+  bvnkCustomerExternalReference,
+  bvnkOnrampKey,
+  bvnkRuleReference,
+  isBvnkCustomerVerified,
+  isBvnkWalletActive,
+  normalizeBvnkCurrencyAndNetwork,
+  readBvnkCustomer,
+  readBvnkData,
+  readBvnkOnrampEntry,
+  readBvnkWallets,
+} from "@/lib/ramps/providers/bvnk";
 import type { BvnkComplianceInput, RampRuntimeContext } from "@/lib/ramps/types";
 import { success } from "@/lib/response";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
@@ -45,6 +64,7 @@ type OfframpCurrencyPair = {
 
 type ExecuteOnrampInput = {
   provider: RampProviderId;
+  counterpartyId?: string;
   destinationWallet: string;
   cryptoToken: string;
   fiatCurrency?: RampFiatCurrency;
@@ -56,6 +76,7 @@ type ExecuteOnrampInput = {
 
 type ExecuteOfframpInput = {
   provider: RampProviderId;
+  counterpartyId?: string;
   sourceWallet: string;
   cryptoToken: string;
   fiatCurrency?: RampFiatCurrency;
@@ -104,18 +125,6 @@ function rampRuntime(c: AppContext): RampRuntimeContext {
 }
 
 /** Enriches BVNK compliance with the requester IP from request headers. */
-function withRequesterIp(
-  c: AppContext,
-  compliance?: BvnkComplianceInput
-): BvnkComplianceInput | undefined {
-  const ipRaw = c.req.header("cf-connecting-ip") || c.req.header("x-forwarded-for");
-  const requesterIpAddress = ipRaw?.split(",")[0]?.trim();
-  if (!requesterIpAddress) {
-    return compliance;
-  }
-  return { ...compliance, requesterIpAddress };
-}
-
 async function assertRampProviderAvailable(
   c: AppContext,
   providerId: RampProviderId,
@@ -147,14 +156,55 @@ async function executeRampWithProvider(
       scope.auth,
       ["payments:write"]
     );
+    if (input.provider === "bvnk") {
+      if (!input.counterpartyId) {
+        throw new AppError("BAD_REQUEST", "counterpartyId is required for BVNK on-ramp.");
+      }
+      const projectId = requireProjectId(c);
+      const repo = getCounterpartiesRepository(c);
+      const counterparty = await repo.getCounterpartyById({
+        counterpartyId: input.counterpartyId,
+        organizationId: scope.auth.organizationId,
+        projectId,
+      });
+      if (!counterparty) {
+        throw new AppError("NOT_FOUND", "Counterparty not found");
+      }
+      const { instruction, id, reference } = await resolveBvnkOnramp(
+        c,
+        repo,
+        counterparty,
+        projectId,
+        {
+          cryptoToken: input.cryptoToken,
+          fiatCurrency: input.fiatCurrency,
+          destinationWalletAddress,
+        }
+      );
+      return {
+        id,
+        provider: "bvnk",
+        status: "pending",
+        reference,
+        paymentInstructions: [instruction],
+      };
+    }
+
+    const kycReference = await resolveRampKycReference(
+      c,
+      scope,
+      input.provider,
+      input.counterpartyId,
+      input.kycReference
+    );
     return await RAMP_PROVIDER_CLIENTS[input.provider].executeOnramp(ctx, {
       destinationWalletAddress,
       cryptoToken: input.cryptoToken,
       fiatCurrency: input.fiatCurrency,
       fiatAmount: input.fiatAmount,
-      kycReference: input.kycReference,
+      kycReference,
       redirectUrl: input.redirectUrl,
-      bvnkCompliance: withRequesterIp(c, input.bvnkCompliance),
+      bvnkCompliance: input.bvnkCompliance,
     });
   }
 
@@ -181,14 +231,22 @@ async function executeRampWithProvider(
           "payments:write",
         ]);
 
+  const kycReference = await resolveRampKycReference(
+    c,
+    scope,
+    input.provider,
+    input.counterpartyId,
+    input.kycReference
+  );
+
   return await RAMP_PROVIDER_CLIENTS[input.provider].executeOfframp(ctx, {
     sourceWalletAddress,
     cryptoToken: input.cryptoToken,
     fiatCurrency: input.fiatCurrency,
     cryptoAmount: input.cryptoAmount,
-    kycReference: input.kycReference,
+    kycReference,
     redirectUrl: input.redirectUrl,
-    bvnkCompliance: withRequesterIp(c, input.bvnkCompliance),
+    bvnkCompliance: input.bvnkCompliance,
   });
 }
 
@@ -242,6 +300,248 @@ async function ensureLightsparkCustomer(
   });
 
   return customer.id;
+}
+
+function requesterIpAddress(c: AppContext): string {
+  const forwarded = c.req.header("x-forwarded-for");
+  return c.req.header("cf-connecting-ip") ?? forwarded?.split(",")[0]?.trim() ?? "0.0.0.0";
+}
+
+async function ensureBvnkOnramp(
+  c: AppContext,
+  repo: CounterpartiesRepository,
+  counterparty: CounterpartyRow,
+  projectId: string,
+  params: {
+    currency: string;
+    network: string;
+    destinationWalletAddress: string;
+    fiatCurrency: string;
+  }
+): Promise<BvnkOnrampResolution> {
+  if (counterparty.entity_type === "business") {
+    throw new AppError("BAD_REQUEST", "BVNK on-ramp supports individual counterparties only.");
+  }
+  const countryCode = counterparty.identity.address?.countryCode;
+  if (!countryCode) {
+    throw new AppError("BAD_REQUEST", "Counterparty address country is required for BVNK on-ramp.");
+  }
+
+  const ctx = rampRuntime(c);
+  const client = RAMP_PROVIDER_CLIENTS.bvnk;
+  const key = bvnkOnrampKey(
+    params.fiatCurrency,
+    params.currency,
+    params.network,
+    params.destinationWalletAddress
+  );
+
+  let customer = readBvnkCustomer(counterparty.provider_data);
+  let entry: BvnkOnrampEntry = readBvnkOnrampEntry(counterparty.provider_data, key);
+
+  const persist = async () => {
+    const latest =
+      (await repo.getCounterpartyById({
+        counterpartyId: counterparty.id,
+        organizationId: counterparty.organization_id,
+        projectId,
+      })) ?? counterparty;
+    const bvnk = readBvnkData(latest.provider_data);
+    const wallets = readBvnkWallets(latest.provider_data);
+    await repo.updateCounterparty({
+      counterpartyId: counterparty.id,
+      organizationId: counterparty.organization_id,
+      projectId,
+      providerData: {
+        ...latest.provider_data,
+        bvnk: {
+          ...bvnk,
+          customer: { ...readBvnkCustomer(latest.provider_data), ...customer },
+          wallets: { ...wallets, [key]: { ...wallets[key], ...entry } },
+        },
+      },
+    });
+  };
+
+  if (!customer.customerReference) {
+    const individual = buildBvnkIndividualPayload(counterparty);
+    const session = await client.createAgreementSession(ctx, {
+      customerType: "INDIVIDUAL",
+      countryCode,
+      useCase: "EMBEDDED_FIAT_ACCOUNTS",
+    });
+    await client.signAgreement(ctx, {
+      reference: session.reference,
+      ipAddress: requesterIpAddress(c),
+    });
+    const externalReference =
+      customer.externalReference ?? bvnkCustomerExternalReference(counterparty.id);
+    const created = await client.createBvnkCustomer(ctx, {
+      externalReference,
+      signedAgreementSessionReference: session.reference,
+      individual,
+    });
+    customer = {
+      externalReference,
+      customerReference: created.reference,
+      status: created.status,
+      verificationStatus: created.verificationStatus,
+      verificationUrl: created.verificationUrl,
+    };
+    await persist();
+  }
+
+  if (entry.walletId && entry.bankAccount?.accountNumber && entry.ruleId) {
+    return { customer, entry, onboardingStatus: "ready" };
+  }
+
+  if (customer.customerReference && !isBvnkCustomerVerified(customer.status)) {
+    const latest = await client.getBvnkCustomer(ctx, { reference: customer.customerReference });
+    customer = {
+      ...customer,
+      status: latest.status,
+      verificationStatus: latest.verificationStatus,
+      verificationUrl: latest.verificationUrl ?? customer.verificationUrl,
+    };
+    await persist();
+  }
+
+  if (!isBvnkCustomerVerified(customer.status) || !customer.customerReference) {
+    return {
+      customer,
+      entry,
+      onboardingStatus: customer.verificationUrl ? "verification_required" : "verifying",
+    };
+  }
+
+  if (!entry.walletId) {
+    const walletProfile = await client.getFiatWalletProfile(ctx, {
+      customerReference: customer.customerReference,
+      currency: params.fiatCurrency,
+    });
+    const wallet = await client.createFiatWallet(ctx, {
+      customerReference: customer.customerReference,
+      name: `SDP onramp ${customer.externalReference}`,
+      currencyCode: params.fiatCurrency,
+      walletProfile,
+      idempotencyKey: (await hashString(`bvnk-wallet:${counterparty.id}:${key}`)).slice(0, 36),
+    });
+    entry = {
+      ...entry,
+      walletId: wallet.id,
+      walletStatus: wallet.status,
+      bankAccount: wallet.bankAccount,
+    };
+    await persist();
+  }
+
+  if (entry.walletId && !isBvnkWalletActive(entry.walletStatus)) {
+    try {
+      const wallet = await client.getFiatWallet(ctx, { walletId: entry.walletId });
+      entry = {
+        ...entry,
+        walletStatus: wallet.status ?? entry.walletStatus,
+        bankAccount: wallet.bankAccount ?? entry.bankAccount,
+      };
+      await persist();
+    } catch (error) {
+      console.warn(
+        `[bvnk onramp] wallet ${entry.walletId} status refresh failed; relying on webhook: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  if (!entry.ruleId && entry.walletId && isBvnkWalletActive(entry.walletStatus)) {
+    const rule = await client.createOnrampRule(ctx, {
+      reference: await bvnkRuleReference(counterparty.id, key),
+      walletId: entry.walletId,
+      currency: params.currency,
+      network: params.network,
+      beneficiaryAddress: params.destinationWalletAddress,
+      entity: {
+        ...buildBvnkRuleEntity(counterparty),
+        customerIdentifier: customer.customerReference,
+      },
+    });
+    entry = { ...entry, ruleId: rule.id ?? entry.ruleId, ruleStatus: rule.status };
+    await persist();
+  }
+
+  return {
+    customer,
+    entry,
+    onboardingStatus: entry.ruleId && entry.bankAccount?.accountNumber ? "ready" : "provisioning",
+  };
+}
+
+async function resolveBvnkOnramp(
+  c: AppContext,
+  repo: CounterpartiesRepository,
+  counterparty: CounterpartyRow,
+  projectId: string,
+  input: { cryptoToken: string; fiatCurrency?: string; destinationWalletAddress: string }
+) {
+  if (!input.fiatCurrency) {
+    throw new AppError("BAD_REQUEST", "fiatCurrency is required for BVNK on-ramp.");
+  }
+  const { currency, network } = normalizeBvnkCurrencyAndNetwork(input.cryptoToken);
+  const fiatCurrency = input.fiatCurrency;
+  const resolution = await ensureBvnkOnramp(c, repo, counterparty, projectId, {
+    currency,
+    network,
+    destinationWalletAddress: input.destinationWalletAddress,
+    fiatCurrency,
+  });
+  const instruction = buildBvnkOnrampInstruction(resolution, {
+    network,
+    destinationWalletAddress: input.destinationWalletAddress,
+    fiatCurrency,
+  });
+  const reference = resolution.entry.ruleId ?? resolution.customer.customerReference;
+  if (!reference) {
+    throw new AppError("INTERNAL_ERROR", "BVNK on-ramp resolution is missing a reference.");
+  }
+  return { instruction, id: reference, reference };
+}
+
+async function createBvnkOnrampQuote(
+  c: AppContext,
+  repo: CounterpartiesRepository,
+  counterparty: CounterpartyRow,
+  projectId: string,
+  input: { cryptoToken: string; fiatCurrency?: string; destinationWalletAddress: string }
+): Promise<PaymentRampQuote> {
+  const { instruction, id } = await resolveBvnkOnramp(c, repo, counterparty, projectId, input);
+  return {
+    provider: "bvnk",
+    id,
+    status: "pending",
+    deliveryMode: "manual_instructions",
+    paymentInstructions: [instruction],
+  };
+}
+
+async function resolveRampKycReference(
+  c: AppContext,
+  scope: Awaited<ReturnType<typeof resolveScope>>,
+  provider: RampProviderId,
+  counterpartyId: string | undefined,
+  fallback: string | undefined
+): Promise<string | undefined> {
+  if (!counterpartyId || provider !== "lightspark") {
+    return fallback;
+  }
+  const projectId = requireProjectId(c);
+  const repo = getCounterpartiesRepository(c);
+  const counterparty = await repo.getCounterpartyById({
+    counterpartyId,
+    organizationId: scope.auth.organizationId,
+    projectId,
+  });
+  if (!counterparty) {
+    throw new AppError("NOT_FOUND", "Counterparty not found");
+  }
+  return ensureLightsparkCustomer(c, repo, counterparty, projectId);
 }
 
 export async function createOnrampQuote(c: AppContext) {
@@ -302,6 +602,14 @@ export async function createOnrampQuote(c: AppContext) {
       });
       return success(c, { quote });
     }
+    case "bvnk": {
+      const quote = await createBvnkOnrampQuote(c, repo, counterparty, projectId, {
+        cryptoToken: input.cryptoToken,
+        fiatCurrency: input.fiatCurrency,
+        destinationWalletAddress,
+      });
+      return success(c, { quote });
+    }
     default: {
       const exhaustive: never = input.provider;
       throw new AppError(
@@ -351,6 +659,28 @@ export async function createOfframpQuote(c: AppContext) {
       cryptoAmount: input.cryptoAmount,
       sourceWalletAddress,
       externalCustomerId: counterparty.external_id ?? counterparty.id,
+      redirectUrl: input.redirectUrl,
+    });
+
+    return success(c, { quote });
+  }
+
+  if (input.provider === "bvnk") {
+    const sourceWalletAddress = resolveWalletAddress(
+      scope.wallets,
+      input.sourceWallet,
+      "sourceWallet",
+      scope.auth,
+      ["payments:write"]
+    );
+    const quote = await RAMP_PROVIDER_CLIENTS.bvnk.createOfframpQuote(rampRuntime(c), {
+      cryptoToken: input.cryptoToken,
+      fiatCurrency: input.fiatCurrency,
+      cryptoAmount: input.cryptoAmount,
+      sourceWalletAddress,
+      externalCustomerId: counterparty.external_id ?? counterparty.id,
+      customerId: counterparty.id,
+      bvnkCompliance: buildBvnkPartyDetails(counterparty, "BENEFICIARY"),
       redirectUrl: input.redirectUrl,
     });
 
@@ -474,6 +804,49 @@ export async function simulateSandboxTransfer(c: AppContext) {
         parsed.data.payload
       );
       break;
+    case "bvnk": {
+      const payload = parsed.data.payload;
+      const scope = await resolveScope(c);
+      const projectId = requireProjectId(c);
+      const counterparty = await getCounterpartiesRepository(c).getCounterpartyById({
+        counterpartyId: payload.counterpartyId,
+        organizationId: scope.auth.organizationId,
+        projectId,
+      });
+      if (!counterparty) {
+        throw new AppError("NOT_FOUND", "Counterparty not found");
+      }
+      const destinationWalletAddress = resolveWalletAddress(
+        scope.wallets,
+        payload.destinationWallet,
+        "destinationWallet",
+        scope.auth,
+        ["payments:write"]
+      );
+      const { currency, network } = normalizeBvnkCurrencyAndNetwork(payload.cryptoToken);
+      const key = bvnkOnrampKey(payload.fiatCurrency, currency, network, destinationWalletAddress);
+      const entry = readBvnkOnrampEntry(counterparty.provider_data, key);
+      if (!entry.walletId) {
+        throw new AppError(
+          "BAD_REQUEST",
+          "BVNK funding wallet is not provisioned yet for this destination."
+        );
+      }
+      if (!isBvnkWalletActive(entry.walletStatus)) {
+        throw new AppError(
+          "BAD_REQUEST",
+          "BVNK funding wallet is not active for this destination."
+        );
+      }
+      transaction = await RAMP_PROVIDER_CLIENTS.bvnk.simulatePayin(rampRuntime(c), {
+        walletId: entry.walletId,
+        amount: payload.amount,
+        currency: payload.fiatCurrency,
+        originatorName: counterparty.display_name,
+        remittanceInformation: entry.bankAccount?.paymentReference,
+      });
+      break;
+    }
   }
 
   return success(c, { transaction });
