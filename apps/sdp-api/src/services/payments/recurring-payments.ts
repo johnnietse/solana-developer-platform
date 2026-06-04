@@ -641,9 +641,10 @@ export async function collectRecurringPayment(input: {
       recurringPaymentId: recurringPayment.id,
       dueAt,
     });
-    if (!attempt || ["pending", "processing", "confirmed"].includes(attempt.status)) {
-      throw error;
+    if (attempt && ["pending", "processing", "confirmed"].includes(attempt.status)) {
+      throw new AppError("CONFLICT", "Collection attempt already exists for this due time");
     }
+    throw error;
   }
 
   if (!attempt) {
