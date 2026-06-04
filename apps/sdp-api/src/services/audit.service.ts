@@ -54,7 +54,8 @@ export type ResourceType =
   // Transaction resources
   | "transaction"
   | "signing_request"
-  | "counterparty";
+  | "counterparty"
+  | "counterparty_account";
 
 export interface AuditLogEntry {
   organizationId?: string;

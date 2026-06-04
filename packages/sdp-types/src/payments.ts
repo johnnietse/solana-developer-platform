@@ -398,7 +398,31 @@ export interface LightsparkPaymentRampInstruction {
   isPlatformAccount?: boolean;
 }
 
-export type PaymentRampInstruction = LightsparkPaymentRampInstruction;
+export type BvnkOnboardingStatus = "verification_required" | "verifying" | "provisioning" | "ready";
+
+export interface BvnkBankFundingDetails {
+  accountNumber?: string;
+  code?: string;
+  accountNumberFormat?: string;
+  paymentReference?: string;
+  bankName?: string;
+}
+
+export interface BvnkPaymentRampInstruction {
+  provider: "bvnk";
+  onboardingStatus: BvnkOnboardingStatus;
+  verificationUrl?: string;
+  ruleId?: string;
+  ruleStatus?: string;
+  fundingWalletId?: string;
+  fiatCurrency: string;
+  beneficiaryAddress: string;
+  network: string;
+  bankAccount?: BvnkBankFundingDetails;
+  instructionsNotes?: string;
+}
+
+export type PaymentRampInstruction = LightsparkPaymentRampInstruction | BvnkPaymentRampInstruction;
 
 export type PaymentRampQuoteDeliveryMode = "manual_instructions" | "hosted";
 
@@ -415,7 +439,11 @@ export type PaymentRampExecution =
       paymentInstructions?: LightsparkPaymentRampInstruction[];
     })
   | (BasePaymentRampExecution & {
-      provider: Exclude<RampProviderId, "lightspark">;
+      provider: "bvnk";
+      paymentInstructions?: BvnkPaymentRampInstruction[];
+    })
+  | (BasePaymentRampExecution & {
+      provider: Exclude<RampProviderId, "lightspark" | "bvnk">;
       paymentInstructions?: never;
     });
 
@@ -430,6 +458,8 @@ export type PaymentRampQuote =
   | (BasePaymentRampQuote & {
       provider: "lightspark";
       deliveryMode: "manual_instructions";
+      /** Bank/wallet funding instructions to send the fiat to. */
+      paymentInstructions?: LightsparkPaymentRampInstruction[];
       /** Units of destination crypto per unit of source fiat. */
       exchangeRate?: number;
       /** Total sending amount in the fiat currency's smallest unit, including provider fees. */
@@ -440,10 +470,15 @@ export type PaymentRampQuote =
       feesIncluded?: number;
       /** ISO timestamp after which the locked rate is no longer valid. */
       expiresAt?: string;
-      paymentInstructions?: LightsparkPaymentRampInstruction[];
     })
   | (BasePaymentRampQuote & {
-      provider: "moonpay";
+      provider: "bvnk";
+      deliveryMode: "manual_instructions";
+      /** BVNK fiat virtual-account funding instructions; fund these to receive crypto. */
+      paymentInstructions: BvnkPaymentRampInstruction[];
+    })
+  | (BasePaymentRampQuote & {
+      provider: Exclude<RampProviderId, "lightspark">;
       deliveryMode: "hosted";
       hostedUrl: string;
     });

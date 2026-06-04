@@ -9,6 +9,7 @@ import {
   activateRecurringPayment,
   cancelRecurringPayment,
   collectRecurringPayment,
+  createOfframpQuote,
   createOnrampQuote,
   createRecurringPayment,
   createSubscription,
@@ -196,6 +197,11 @@ payments.post(
   "/ramps/onramp/execute",
   requirePermissions("payments:write", "wallets:read"),
   executeOnramp
+);
+payments.post(
+  "/ramps/offramp/quote",
+  requirePermissions("payments:write", "wallets:read"),
+  createOfframpQuote
 );
 payments.post(
   "/ramps/offramp/execute",

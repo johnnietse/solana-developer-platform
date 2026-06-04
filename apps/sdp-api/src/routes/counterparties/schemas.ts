@@ -1,15 +1,18 @@
 import {
-  COUNTERPARTY_ACCOUNT_KINDS,
+  COUNTERPARTY_EMPLOYMENT_STATUSES,
   COUNTERPARTY_ENTITY_TYPES,
   COUNTERPARTY_ID_TYPES,
+  COUNTERPARTY_INDUSTRY_SECTORS,
+  COUNTERPARTY_INTENDED_USE,
+  COUNTERPARTY_PEP_STATUSES,
+  COUNTERPARTY_SOURCE_OF_FUNDS,
+  COUNTERPARTY_YEARLY_INCOME,
+  COUNTRY_CODES,
 } from "@sdp/types";
 import { z } from "zod";
-import { isAddress } from "@/lib/solana";
 
-// TODO: strict country / subdivision validation deferred — see follow-up ticket
-// under PRO-1217. Until then, accept any string and let downstream providers
-// reject invalid codes.
-const countryCodeSchema = z.string().min(2).max(8);
+const countryCodeSchema = z.enum(COUNTRY_CODES);
+const currencyCodeSchema = z.string().trim().toUpperCase().length(3);
 const subdivisionCodeSchema = z.string().min(1).max(16);
 
 export const counterpartyAddressSchema = z.object({
@@ -32,6 +35,33 @@ export const counterpartyGovernmentIdSchema = z.object({
   expiryDate: z.iso.date().optional(),
 });
 
+export const counterpartyMonetaryAmountSchema = z.object({
+  amount: z.string().min(1).max(32),
+  currency: currencyCodeSchema,
+});
+
+export const counterpartyComplianceCddSchema = z.object({
+  employmentStatus: z.enum(COUNTERPARTY_EMPLOYMENT_STATUSES),
+  sourceOfFunds: z.enum(COUNTERPARTY_SOURCE_OF_FUNDS),
+  pepStatus: z.enum(COUNTERPARTY_PEP_STATUSES),
+  intendedUseOfAccount: z.enum(COUNTERPARTY_INTENDED_USE),
+  expectedMonthlyVolume: counterpartyMonetaryAmountSchema,
+  estimatedYearlyIncome: z.enum(COUNTERPARTY_YEARLY_INCOME),
+  employmentIndustrySector: z.enum(COUNTERPARTY_INDUSTRY_SECTORS),
+});
+
+export const counterpartyTaxIdentificationSchema = z.object({
+  number: z.string().min(1).max(64),
+  residenceCountryCode: countryCodeSchema,
+});
+
+export const counterpartyComplianceSchema = z.object({
+  taxIdentification: counterpartyTaxIdentificationSchema.optional(),
+  nationality: countryCodeSchema.optional(),
+  birthCountryCode: countryCodeSchema.optional(),
+  cdd: counterpartyComplianceCddSchema.optional(),
+});
+
 export const counterpartyIdentitySchema = z.looseObject({
   firstName: z.string().min(1).max(256).optional(),
   middleName: z.string().max(256).optional(),
@@ -43,6 +73,7 @@ export const counterpartyIdentitySchema = z.looseObject({
   birthCountryCode: countryCodeSchema.optional(),
   citizenshipCountryCode: countryCodeSchema.optional(),
   governmentId: counterpartyGovernmentIdSchema.optional(),
+  compliance: counterpartyComplianceSchema.optional(),
 });
 
 export const counterpartyEntityTypeSchema = z.enum(COUNTERPARTY_ENTITY_TYPES);
@@ -81,66 +112,6 @@ export const updateCounterpartySchema = updateCounterpartyObjectSchema.refine(
 );
 
 export const listCounterpartiesQuerySchema = z.object({
-  page: z.coerce.number().int().positive().default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(20),
-  includeArchived: z.coerce.boolean().default(false),
-});
-
-const solanaAddressSchema = z
-  .string()
-  .trim()
-  .refine((value) => value.length >= 32 && value.length <= 44 && isAddress(value), {
-    message: "details.address must be a base58 Solana address",
-  });
-
-export const counterpartyAccountKindSchema = z.enum(COUNTERPARTY_ACCOUNT_KINDS);
-
-export const cryptoWalletAccountDetailsSchema = z
-  .object({
-    network: z.literal("solana"),
-    address: solanaAddressSchema,
-  })
-  .catchall(z.unknown());
-
-const accountDetailsSchema = z.record(z.string(), z.unknown());
-const createAccountDetailsSchema = accountDetailsSchema.default({});
-
-function requireCryptoWalletDetails(value: {
-  accountKind?: string;
-  details?: Record<string, unknown>;
-}) {
-  if (value.accountKind !== "crypto_wallet") {
-    return true;
-  }
-
-  return cryptoWalletAccountDetailsSchema.safeParse(value.details).success;
-}
-
-export const createCounterpartyAccountSchema = z
-  .object({
-    accountKind: counterpartyAccountKindSchema,
-    label: z.string().min(1).max(256).nullable().optional(),
-    details: createAccountDetailsSchema,
-    providerAccountData: z.record(z.string(), z.unknown()).default({}),
-  })
-  .refine(requireCryptoWalletDetails, {
-    message:
-      'crypto_wallet accounts require details.network = "solana" and details.address as a Solana wallet address',
-    path: ["details"],
-  });
-
-export const updateCounterpartyAccountSchema = z
-  .object({
-    label: z.string().min(1).max(256).nullable().optional(),
-    details: accountDetailsSchema.optional(),
-    providerAccountData: z.record(z.string(), z.unknown()).optional(),
-  })
-  .refine((value) => Object.keys(value).length > 0, {
-    message: "At least one field must be provided",
-  });
-
-export const listCounterpartyAccountsQuerySchema = z.object({
-  accountKind: counterpartyAccountKindSchema.optional(),
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
   includeArchived: z.coerce.boolean().default(false),

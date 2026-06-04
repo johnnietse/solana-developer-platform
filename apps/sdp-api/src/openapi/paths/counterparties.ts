@@ -15,12 +15,34 @@ import {
 import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
 import {
   counterpartyAccountResponse,
+  counterpartyFieldOptionsResponse,
   counterpartyResponse,
   listCounterpartiesResponse,
   listCounterpartyAccountsResponse,
 } from "./responses";
 
 export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
+  registry.registerPath({
+    method: "get",
+    path: "/v1/counterparties/metadata",
+    tags: ["Counterparties"],
+    summary: "Get counterparty field options",
+    operationId: "getCounterpartyFieldOptions",
+    description:
+      "Returns the enum option sets and country list needed to build a counterparty form.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+    },
+    responses: {
+      200: {
+        description: "Counterparty field options",
+        content: jsonContent(counterpartyFieldOptionsResponse),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 500]),
+    },
+  });
+
   registry.registerPath({
     method: "get",
     path: "/v1/counterparties",
@@ -195,7 +217,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "get",
-    path: "/v1/counterparties/{counterpartyId}/accounts/{accountId}",
+    path: "/v1/counterparties/{counterpartyId}/accounts/{counterpartyAccountId}",
     tags: ["Counterparties"],
     summary: "Get counterparty account",
     operationId: "getCounterpartyAccount",
@@ -216,7 +238,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "patch",
-    path: "/v1/counterparties/{counterpartyId}/accounts/{accountId}",
+    path: "/v1/counterparties/{counterpartyId}/accounts/{counterpartyAccountId}",
     tags: ["Counterparties"],
     summary: "Update counterparty account",
     operationId: "updateCounterpartyAccount",
@@ -241,7 +263,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "delete",
-    path: "/v1/counterparties/{counterpartyId}/accounts/{accountId}",
+    path: "/v1/counterparties/{counterpartyId}/accounts/{counterpartyAccountId}",
     tags: ["Counterparties"],
     summary: "Archive counterparty account",
     operationId: "archiveCounterpartyAccount",

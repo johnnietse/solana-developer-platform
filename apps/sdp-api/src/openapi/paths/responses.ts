@@ -8,6 +8,7 @@ import {
   apiKeyDetailSchema,
   apiKeyResponseSchema,
   counterpartyAccountResponseSchema,
+  counterpartyFieldOptionsResponseSchema,
   counterpartyResponseSchema,
   currentUserResponseSchema,
   custodyConfigResponseSchema,
@@ -100,6 +101,9 @@ export const apiKeyRotateResponse = successResponseSchema(rotateApiKeyResponseSc
 export const apiKeyRevokeResponse = successResponseSchema(revokeApiKeyResponseSchema);
 
 export const counterpartyResponse = successResponseSchema(counterpartyResponseSchema);
+export const counterpartyFieldOptionsResponse = successResponseSchema(
+  counterpartyFieldOptionsResponseSchema
+);
 export const listCounterpartiesResponse = successResponseSchema(listCounterpartiesResponseSchema);
 export const counterpartyAccountResponse = successResponseSchema(counterpartyAccountResponseSchema);
 export const listCounterpartyAccountsResponse = successResponseSchema(

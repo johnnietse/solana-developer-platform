@@ -2,8 +2,10 @@
 
 import type {
   Counterparty,
+  CounterpartyAccount,
   CustodyWalletAggregate,
   ListCounterpartiesResponse,
+  ListCounterpartyAccountsResponse,
   PaymentRampExecution,
   PaymentsWalletAggregateEnvelope,
   PaymentTransferEnvelope as TransferEnvelope,
@@ -154,6 +156,11 @@ function resolveRiskTone(result: ComplianceProviderResult): RiskTone {
   }
 
   return "neutral";
+}
+
+/** Providers that flagged the address as high risk (red tone). */
+export function getHighRiskProviders(snapshot: ComplianceSnapshot): ComplianceProviderResult[] {
+  return snapshot.providers.filter((result) => resolveRiskTone(result) === "red");
 }
 
 export function riskToneClassName(result: ComplianceProviderResult): string {
@@ -439,6 +446,22 @@ export async function createTransfer(input: {
   return body.data.transfer;
 }
 
+export async function fetchCounterpartyAccounts(
+  counterpartyId: string
+): Promise<CounterpartyAccount[]> {
+  const response = await fetch(
+    `/api/dashboard/counterparty/${encodeURIComponent(counterpartyId)}/accounts?pageSize=100`
+  );
+  const body = (await response.json().catch(() => ({}))) as {
+    data?: ListCounterpartyAccountsResponse;
+    error?: { message?: string };
+  };
+  if (!response.ok) {
+    throw new Error(getApiError(body, `Failed to load accounts (${response.status}).`));
+  }
+  return body.data?.accounts ?? [];
+}
+
 export async function executeRampFlow(
   direction: "onramp" | "offramp",
   payload: Record<string, unknown>
@@ -463,14 +486,25 @@ export async function executeRampFlow(
   return body.data.ramp;
 }
 
-type SandboxTransferSimulationInput = {
-  provider: "lightspark";
-  payload: {
-    quoteId: string;
-    currencyCode?: "USD";
-    currencyAmount?: number;
-  };
-};
+type SandboxTransferSimulationInput =
+  | {
+      provider: "lightspark";
+      payload: {
+        quoteId: string;
+        currencyCode?: "USD";
+        currencyAmount?: number;
+      };
+    }
+  | {
+      provider: "bvnk";
+      payload: {
+        counterpartyId: string;
+        amount: number;
+        fiatCurrency: string;
+        cryptoToken: string;
+        destinationWallet: string;
+      };
+    };
 
 export async function simulateSandboxTransfer(input: SandboxTransferSimulationInput) {
   const response = await fetch("/api/dashboard/payments/ramps/sandbox/simulate", {
