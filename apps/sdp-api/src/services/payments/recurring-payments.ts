@@ -1040,7 +1040,7 @@ export async function collectRecurringPayment(input: {
     throw error;
   }
 
-  const submitted = await markRecurringCollectionSubmitted({
+  let submitted = await markRecurringCollectionSubmitted({
     env: input.env,
     attempt,
     transfer,
@@ -1068,15 +1068,27 @@ export async function collectRecurringPayment(input: {
       destinationTokenAccount: String(executed.destinationTokenAccount),
     });
   } catch (error) {
-    if (submitted.hasRecoveryMarker) {
-      console.error("Recurring collection finalized on-chain but DB finalization failed", {
-        recurringPaymentId: recurringPayment.id,
-        attemptId: attempt.id,
-        transferId: transfer.id,
+    if (!submitted.hasRecoveryMarker) {
+      submitted = await markRecurringCollectionSubmitted({
+        env: input.env,
+        attempt,
+        transfer,
         signature: executed.signature,
-        error: error instanceof Error ? error.message : String(error),
+        slot: executed.slot,
+        blockTime: executed.blockTime,
+        destinationTokenAccount: String(executed.destinationTokenAccount),
       });
+      attempt = submitted.attempt;
+      transfer = submitted.transfer;
     }
+    console.error("Recurring collection finalized on-chain but DB finalization failed", {
+      recurringPaymentId: recurringPayment.id,
+      attemptId: attempt.id,
+      transferId: transfer.id,
+      signature: executed.signature,
+      hasRecoveryMarker: submitted.hasRecoveryMarker,
+      error: error instanceof Error ? error.message : String(error),
+    });
 
     throw error;
   }
