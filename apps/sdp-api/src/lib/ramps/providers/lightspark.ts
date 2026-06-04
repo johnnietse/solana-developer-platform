@@ -98,7 +98,8 @@ function toLightsparkMinorUnitsInteger(value: bigint, fieldName: string): number
   return Number(value);
 }
 
-function mapLightsparkQuoteStatus(status: string): PaymentRampExecution["status"] {
+function mapLightsparkQuoteStatus(status: string | undefined): PaymentRampExecution["status"] {
+  if (!status) return "pending";
   const normalized = status.trim().toUpperCase();
   if (normalized === "COMPLETED") return "completed";
   if (normalized === "PROCESSING") return "processing";
@@ -194,7 +195,7 @@ interface GridPaymentInstruction {
 
 interface GridQuoteResponse {
   id: string;
-  quoteStatus: string;
+  quoteStatus?: string;
   paymentInstructions?: GridPaymentInstruction[];
   exchangeRate: number;
   totalSendingAmount: number;
@@ -227,7 +228,7 @@ export interface CreateLightsparkOnrampQuoteInput {
 
 export interface LightsparkQuote {
   id: string;
-  quoteStatus: string;
+  quoteStatus?: string;
   paymentInstructions?: LightsparkPaymentRampInstruction[];
   exchangeRate?: number;
   totalSendingAmount?: number;
@@ -586,12 +587,12 @@ export class LightsparkRampClient implements RampProvider {
       id: quote.id,
       status: mapLightsparkQuoteStatus(quote.quoteStatus),
       deliveryMode: "manual_instructions",
+      paymentInstructions: quote.paymentInstructions,
       exchangeRate: quote.exchangeRate,
       totalSendingAmount: quote.totalSendingAmount,
       totalReceivingAmount: quote.totalReceivingAmount,
       feesIncluded: quote.feesIncluded,
       expiresAt: quote.expiresAt,
-      paymentInstructions: quote.paymentInstructions,
     };
   }
 
