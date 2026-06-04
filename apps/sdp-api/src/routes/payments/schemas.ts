@@ -132,6 +132,7 @@ export const paymentSubscriptionCollectionAttemptStatusSchema = z.enum([
 
 export const paymentRecurringPaymentStatusSchema = z.enum([
   "pending_activation",
+  "activating",
   "active",
   "paused",
   "canceled",

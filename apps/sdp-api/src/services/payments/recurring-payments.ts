@@ -5,12 +5,14 @@ import {
   createPaymentsRepository,
   createPostgresPaymentRecurringPaymentsRepository,
   createPostgresPaymentSubscriptionsRepository,
+  createPostgresPaymentsRepository,
 } from "@/db/repositories";
+import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recurring-payments.repository";
 import type {
-  PaymentRecurringPaymentRow,
-  UpdatePaymentRecurringPaymentInput,
-} from "@/db/repositories/payment-recurring-payments.repository";
-import type { PaymentSubscriptionCollectionAttemptRow } from "@/db/repositories/payment-subscriptions.repository";
+  PaymentSubscriptionCollectionAttemptRow,
+  PaymentSubscriptionPlanRow,
+  PaymentSubscriptionRow,
+} from "@/db/repositories/payment-subscriptions.repository";
 import type {
   PaymentTransferRow,
   PaymentTransferStatus,
@@ -48,6 +50,12 @@ export type CollectionResult = {
 
 function addPeriodHours(timestamp: string, periodHours: number): string {
   return new Date(new Date(timestamp).getTime() + periodHours * 60 * 60 * 1000).toISOString();
+}
+
+const ACTIVATION_CLAIM_TTL_MS = 10 * 60 * 1000;
+
+function isFreshActivationClaim(updatedAt: string): boolean {
+  return Date.now() - new Date(updatedAt).getTime() < ACTIVATION_CLAIM_TTL_MS;
 }
 
 async function getSourceSigner(input: {
@@ -125,6 +133,164 @@ async function createTransferRecord(input: {
   }
 
   return transfer;
+}
+
+async function claimActivationRecords(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  recurringPaymentId: string;
+  destinationTokenAccount: string;
+  subscriberTokenAccount: string;
+}): Promise<
+  | {
+      alreadyActive: true;
+      recurringPayment: PaymentRecurringPaymentRow;
+      plan?: never;
+      subscription?: never;
+    }
+  | {
+      alreadyActive: false;
+      recurringPayment: PaymentRecurringPaymentRow;
+      plan: PaymentSubscriptionPlanRow;
+      subscription: PaymentSubscriptionRow;
+    }
+> {
+  return getDb(input.env).transaction(async (tx) => {
+    const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+    const txSubscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
+
+    await tx
+      .prepare(
+        `SELECT id
+           FROM payment_recurring_payments
+          WHERE id = ?
+            AND organization_id = ?
+            AND project_id = ?
+          FOR UPDATE`
+      )
+      .bind(input.recurringPaymentId, input.organizationId, input.projectId)
+      .first();
+
+    const recurringPayment = await txRecurringRepo.getRecurringPaymentById({
+      recurringPaymentId: input.recurringPaymentId,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+    });
+
+    if (!recurringPayment) {
+      throw new AppError("NOT_FOUND", "Recurring payment not found");
+    }
+    if (recurringPayment.status === "active") {
+      return { alreadyActive: true, recurringPayment };
+    }
+    if (
+      recurringPayment.status === "activating" &&
+      isFreshActivationClaim(recurringPayment.updated_at)
+    ) {
+      throw new AppError("CONFLICT", "Recurring payment activation is already in progress");
+    }
+    if (
+      recurringPayment.status !== "pending_activation" &&
+      recurringPayment.status !== "activating"
+    ) {
+      throw new AppError(
+        "BAD_REQUEST",
+        "Recurring payment cannot be activated from its current status"
+      );
+    }
+
+    const now = new Date().toISOString();
+    let plan = recurringPayment.plan_id
+      ? await txSubscriptionsRepo.getPlanById({
+          planId: recurringPayment.plan_id,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+        })
+      : null;
+
+    if (!plan) {
+      plan = await txSubscriptionsRepo.createPlan({
+        id: `psp_${crypto.randomUUID()}`,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        ownerWalletId: recurringPayment.source_wallet_id,
+        ownerAddress: recurringPayment.source_address,
+        token: recurringPayment.token,
+        amount: recurringPayment.amount,
+        periodHours: recurringPayment.period_hours,
+        programPlanId: generateProgramPlanId(),
+        planPda: null,
+        destinationAddress: input.destinationTokenAccount,
+        pullerWalletId: recurringPayment.source_wallet_id,
+        pullerAddress: recurringPayment.source_address,
+        metadataUri: recurringPayment.metadata_uri,
+        status: "draft",
+        createdBy: recurringPayment.created_by,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    if (!plan) {
+      throw new AppError("INTERNAL_ERROR", "Failed to create subscription plan");
+    }
+
+    let subscription = recurringPayment.subscription_id
+      ? await txSubscriptionsRepo.getSubscriptionById({
+          subscriptionId: recurringPayment.subscription_id,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+        })
+      : null;
+
+    if (!subscription) {
+      subscription = await txSubscriptionsRepo.createSubscription({
+        id: `psub_${crypto.randomUUID()}`,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        planId: plan.id,
+        counterpartyId: recurringPayment.counterparty_id,
+        subscriberAddress: recurringPayment.source_address,
+        subscriberTokenAccount: input.subscriberTokenAccount,
+        subscriptionPda: null,
+        subscriptionAuthorityAddress: null,
+        authorizationSignature: null,
+        status: "pending_authorization",
+        currentPeriodStartAt: null,
+        nextCollectionDueAt: null,
+        createdBy: recurringPayment.created_by,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    if (!subscription) {
+      throw new AppError("INTERNAL_ERROR", "Failed to create subscription");
+    }
+
+    const claimedPayment = await txRecurringRepo.updateRecurringPayment({
+      recurringPaymentId: recurringPayment.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      destinationTokenAccount: input.destinationTokenAccount,
+      planId: plan.id,
+      subscriptionId: subscription.id,
+      status: "activating",
+      updatedAt: now,
+    });
+
+    if (!claimedPayment) {
+      throw new AppError("INTERNAL_ERROR", "Failed to claim recurring payment activation");
+    }
+
+    return {
+      alreadyActive: false,
+      recurringPayment: claimedPayment,
+      plan,
+      subscription,
+    };
+  });
 }
 
 async function updateTransferRecord(input: {
@@ -221,7 +387,6 @@ export async function activateRecurringPayment(input: {
   recurringPaymentId: string;
 }): Promise<ActivationResult> {
   const recurringRepo = createPaymentRecurringPaymentsRepository(input.env);
-  const subscriptionsRepo = createPaymentSubscriptionsRepository(input.env);
   let recurringPayment = await recurringRepo.getRecurringPaymentById({
     recurringPaymentId: input.recurringPaymentId,
     organizationId: input.organizationId,
@@ -234,7 +399,10 @@ export async function activateRecurringPayment(input: {
   if (recurringPayment.status === "active") {
     return { recurringPayment };
   }
-  if (recurringPayment.status !== "pending_activation") {
+  if (
+    recurringPayment.status !== "pending_activation" &&
+    recurringPayment.status !== "activating"
+  ) {
     throw new AppError(
       "BAD_REQUEST",
       "Recurring payment cannot be activated from its current status"
@@ -258,85 +426,34 @@ export async function activateRecurringPayment(input: {
     owner: destinationAddress,
     runtime,
   });
-  const now = new Date().toISOString();
-  const createdBy = recurringPayment.created_by;
-  const planRecord = recurringPayment.plan_id
-    ? await subscriptionsRepo.getPlanById({
-        planId: recurringPayment.plan_id,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-      })
-    : null;
-  const programPlanId = planRecord?.program_plan_id ?? generateProgramPlanId();
-  const plan =
-    planRecord ??
-    (await subscriptionsRepo.createPlan({
-      id: `psp_${crypto.randomUUID()}`,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      ownerWalletId: recurringPayment.source_wallet_id,
-      ownerAddress: recurringPayment.source_address,
-      token: recurringPayment.token,
-      amount: recurringPayment.amount,
-      periodHours: recurringPayment.period_hours,
-      programPlanId,
-      planPda: null,
-      destinationAddress: destinationTokenAccount,
-      pullerWalletId: recurringPayment.source_wallet_id,
-      pullerAddress: recurringPayment.source_address,
-      metadataUri: recurringPayment.metadata_uri,
-      status: "draft",
-      createdBy,
-      createdAt: now,
-      updatedAt: now,
-    }));
 
-  if (!plan) {
-    throw new AppError("INTERNAL_ERROR", "Failed to create subscription plan");
+  const activation = await claimActivationRecords({
+    env: input.env,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    recurringPaymentId: recurringPayment.id,
+    destinationTokenAccount,
+    subscriberTokenAccount: runtime.sourceTokenAccount,
+  });
+
+  if (activation.alreadyActive) {
+    return { recurringPayment: activation.recurringPayment };
   }
+
+  recurringPayment = activation.recurringPayment;
+  const { plan, subscription } = activation;
 
   const onChainPlan = await ensureSubscriptionPlanOnChain({
     env: input.env,
     sourceSigner,
     sourceAddress,
     destinationTokenAccount,
-    programPlanId,
+    programPlanId: plan.program_plan_id,
     metadataUri: recurringPayment.metadata_uri ?? "",
     runtime,
     periodHours: recurringPayment.period_hours,
     existingSignature: recurringPayment.plan_creation_signature,
   });
-  const subscriptionRecord = recurringPayment.subscription_id
-    ? await subscriptionsRepo.getSubscriptionById({
-        subscriptionId: recurringPayment.subscription_id,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-      })
-    : null;
-  const subscription =
-    subscriptionRecord ??
-    (await subscriptionsRepo.createSubscription({
-      id: `psub_${crypto.randomUUID()}`,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      planId: plan.id,
-      counterpartyId: recurringPayment.counterparty_id,
-      subscriberAddress: recurringPayment.source_address,
-      subscriberTokenAccount: runtime.sourceTokenAccount,
-      subscriptionPda: null,
-      subscriptionAuthorityAddress: null,
-      authorizationSignature: null,
-      status: "pending_authorization",
-      currentPeriodStartAt: null,
-      nextCollectionDueAt: null,
-      createdBy,
-      createdAt: now,
-      updatedAt: now,
-    }));
-
-  if (!subscription) {
-    throw new AppError("INTERNAL_ERROR", "Failed to create subscription");
-  }
 
   const onChainAuthorization = await ensureSubscriptionAuthorizationOnChain({
     env: input.env,
@@ -349,63 +466,68 @@ export async function activateRecurringPayment(input: {
     runtime,
     periodHours: recurringPayment.period_hours,
     existingSignature:
-      recurringPayment.authorization_signature ?? subscriptionRecord?.authorization_signature,
+      recurringPayment.authorization_signature ?? subscription.authorization_signature,
   });
   const dueAt = recurringPayment.first_collection_at ?? new Date().toISOString();
-  const updatedPlan = await subscriptionsRepo.updatePlan({
-    planId: plan.id,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    planPda: onChainPlan.planPda,
-    destinationAddress: destinationTokenAccount,
-    pullerWalletId: recurringPayment.source_wallet_id,
-    pullerAddress: recurringPayment.source_address,
-    status: "active",
-    updatedAt: new Date().toISOString(),
-  });
-  const updatedSubscription = await subscriptionsRepo.updateSubscription({
-    subscriptionId: subscription.id,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    subscriberTokenAccount: runtime.sourceTokenAccount,
-    subscriptionPda: onChainAuthorization.subscriptionPda,
-    subscriptionAuthorityAddress: onChainAuthorization.subscriptionAuthorityAddress,
-    authorizationSignature: onChainAuthorization.signature ?? null,
-    status: "active",
-    currentPeriodStartAt: dueAt,
-    nextCollectionDueAt: dueAt,
-    updatedAt: new Date().toISOString(),
-  });
+  const claimedRecurringPayment = recurringPayment;
+  recurringPayment = await getDb(input.env).transaction(async (tx) => {
+    const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+    const txSubscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
+    const updatedAt = new Date().toISOString();
+    const updatedPlan = await txSubscriptionsRepo.updatePlan({
+      planId: plan.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      planPda: onChainPlan.planPda,
+      destinationAddress: destinationTokenAccount,
+      pullerWalletId: claimedRecurringPayment.source_wallet_id,
+      pullerAddress: claimedRecurringPayment.source_address,
+      status: "active",
+      updatedAt,
+    });
+    const updatedSubscription = await txSubscriptionsRepo.updateSubscription({
+      subscriptionId: subscription.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      subscriberTokenAccount: runtime.sourceTokenAccount,
+      subscriptionPda: onChainAuthorization.subscriptionPda,
+      subscriptionAuthorityAddress: onChainAuthorization.subscriptionAuthorityAddress,
+      authorizationSignature:
+        onChainAuthorization.signature ?? subscription.authorization_signature,
+      status: "active",
+      currentPeriodStartAt: dueAt,
+      nextCollectionDueAt: dueAt,
+      updatedAt,
+    });
+    const updatedRecurringPayment = await txRecurringRepo.updateRecurringPayment({
+      recurringPaymentId: claimedRecurringPayment.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      destinationTokenAccount,
+      nextCollectionDueAt: dueAt,
+      planId: plan.id,
+      subscriptionId: subscription.id,
+      planPda: onChainPlan.planPda,
+      planCreatedAt: onChainPlan.planCreatedAt.toString(),
+      planCreationSignature:
+        onChainPlan.signature ?? claimedRecurringPayment.plan_creation_signature ?? null,
+      subscriptionPda: onChainAuthorization.subscriptionPda,
+      subscriptionAuthorityAddress: onChainAuthorization.subscriptionAuthorityAddress,
+      authorizationSignature:
+        onChainAuthorization.signature ??
+        claimedRecurringPayment.authorization_signature ??
+        subscription.authorization_signature ??
+        null,
+      status: "active",
+      updatedAt,
+    });
 
-  if (!updatedPlan || !updatedSubscription) {
-    throw new AppError("INTERNAL_ERROR", "Failed to activate subscription records");
-  }
+    if (!updatedPlan || !updatedSubscription || !updatedRecurringPayment) {
+      throw new AppError("INTERNAL_ERROR", "Failed to activate subscription records");
+    }
 
-  recurringPayment = await recurringRepo.updateRecurringPayment({
-    recurringPaymentId: recurringPayment.id,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    destinationTokenAccount,
-    nextCollectionDueAt: dueAt,
-    planId: plan.id,
-    subscriptionId: subscription.id,
-    planPda: onChainPlan.planPda,
-    planCreatedAt: onChainPlan.planCreatedAt.toString(),
-    planCreationSignature: onChainPlan.signature ?? null,
-    subscriptionPda: onChainAuthorization.subscriptionPda,
-    subscriptionAuthorityAddress: onChainAuthorization.subscriptionAuthorityAddress,
-    authorizationSignature:
-      onChainAuthorization.signature ??
-      recurringPayment.authorization_signature ??
-      subscriptionRecord?.authorization_signature ??
-      null,
-    status: "active",
-    updatedAt: new Date().toISOString(),
+    return updatedRecurringPayment;
   });
-
-  if (!recurringPayment) {
-    throw new AppError("INTERNAL_ERROR", "Failed to update recurring payment");
-  }
 
   return {
     recurringPayment,
@@ -448,6 +570,7 @@ export async function collectRecurringPayment(input: {
     throw new AppError("BAD_REQUEST", "Recurring payment has no due collection");
   }
 
+  const subscriptionId = recurringPayment.subscription_id;
   const dueAt = recurringPayment.next_collection_due_at;
   if (input.enforceDue !== false && new Date(dueAt).getTime() > Date.now()) {
     throw new AppError("BAD_REQUEST", "Recurring payment is not due for collection");
@@ -572,8 +695,9 @@ export async function collectRecurringPayment(input: {
     throw new AppError("INTERNAL_ERROR", "Failed to create payment transfer record");
   }
 
+  let executed: Awaited<ReturnType<typeof collectSubscriptionOnChain>>;
   try {
-    const executed = await collectSubscriptionOnChain({
+    executed = await collectSubscriptionOnChain({
       env: input.env,
       sourceSigner,
       sourceAddress,
@@ -582,51 +706,6 @@ export async function collectRecurringPayment(input: {
       subscriptionPda,
       runtime,
     });
-    const updatedTransfer = await updateTransferRecord({
-      env: input.env,
-      transferId: transfer.id,
-      status: "confirmed",
-      signature: executed.signature,
-      slot: executed.slot,
-      blockTime: executed.blockTime,
-      error: null,
-    });
-    const nextDueAt = addPeriodHours(dueAt, recurringPayment.period_hours);
-    const updatedAttempt = await subscriptionsRepo.updateCollectionAttempt({
-      attemptId: attempt.id,
-      transferId: transfer.id,
-      status: "confirmed",
-      signature: executed.signature,
-      attemptedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    });
-    const update: UpdatePaymentRecurringPaymentInput = {
-      recurringPaymentId: recurringPayment.id,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      destinationTokenAccount: executed.destinationTokenAccount,
-      nextCollectionDueAt: nextDueAt,
-      updatedAt: new Date().toISOString(),
-    };
-    const updatedRecurringPayment = await recurringRepo.updateRecurringPayment(update);
-    await subscriptionsRepo.updateSubscription({
-      subscriptionId: recurringPayment.subscription_id,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      currentPeriodStartAt: dueAt,
-      nextCollectionDueAt: nextDueAt,
-      updatedAt: new Date().toISOString(),
-    });
-
-    if (!updatedAttempt || !updatedRecurringPayment) {
-      throw new AppError("INTERNAL_ERROR", "Failed to update recurring payment collection state");
-    }
-
-    return {
-      recurringPayment: updatedRecurringPayment,
-      collectionAttempt: updatedAttempt,
-      transfer: updatedTransfer,
-    };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await updateTransferRecord({
@@ -650,6 +729,57 @@ export async function collectRecurringPayment(input: {
 
     throw error;
   }
+
+  const nextDueAt = addPeriodHours(dueAt, recurringPayment.period_hours);
+  return getDb(input.env).transaction(async (tx) => {
+    const txPaymentsRepo = createPostgresPaymentsRepository(tx);
+    const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+    const txSubscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
+    const updatedAt = new Date().toISOString();
+    const updatedTransfer = await txPaymentsRepo.updateTransfer({
+      transferId: transfer.id,
+      status: "confirmed",
+      signature: executed.signature,
+      slot: executed.slot,
+      blockTime: executed.blockTime,
+      error: null,
+      updatedAt,
+    });
+    const updatedAttempt = await txSubscriptionsRepo.updateCollectionAttempt({
+      attemptId: attempt.id,
+      transferId: transfer.id,
+      status: "confirmed",
+      signature: executed.signature,
+      attemptedAt: updatedAt,
+      updatedAt,
+    });
+    const updatedRecurringPayment = await txRecurringRepo.updateRecurringPayment({
+      recurringPaymentId: recurringPayment.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      destinationTokenAccount: executed.destinationTokenAccount,
+      nextCollectionDueAt: nextDueAt,
+      updatedAt,
+    });
+    const updatedSubscription = await txSubscriptionsRepo.updateSubscription({
+      subscriptionId,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      currentPeriodStartAt: dueAt,
+      nextCollectionDueAt: nextDueAt,
+      updatedAt,
+    });
+
+    if (!updatedTransfer || !updatedAttempt || !updatedRecurringPayment || !updatedSubscription) {
+      throw new AppError("INTERNAL_ERROR", "Failed to update recurring payment collection state");
+    }
+
+    return {
+      recurringPayment: updatedRecurringPayment,
+      collectionAttempt: updatedAttempt,
+      transfer: updatedTransfer,
+    };
+  });
 }
 
 export async function executeRecurringPaymentLifecycle(input: {

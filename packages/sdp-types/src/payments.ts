@@ -141,6 +141,7 @@ export type PaymentSubscriptionCollectionAttemptStatus =
 
 export type PaymentRecurringPaymentStatus =
   | "pending_activation"
+  | "activating"
   | "active"
   | "paused"
   | "canceled"
