@@ -1235,14 +1235,30 @@ export async function collectRecurringPayment(input: {
     recurringPayment.destination_address,
     "destinationAddress"
   );
-  const sourceWallet =
-    input.sourceWallet ??
-    (await resolveSourceWalletForExecution({
+  let sourceWallet: CustodyWallet;
+  try {
+    sourceWallet =
+      input.sourceWallet ??
+      (await resolveSourceWalletForExecution({
+        env: input.env,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        sourceWalletId: recurringPayment.source_wallet_id,
+      }));
+  } catch (error) {
+    await createFailedCollectionAttemptForRetry({
       env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,
-      sourceWalletId: recurringPayment.source_wallet_id,
-    }));
+      recurringPayment,
+      subscriptionId,
+      dueAt,
+      error: toErrorMessage(error),
+      initiatedByKeyId: input.initiatedByKeyId ?? null,
+    });
+
+    throw error;
+  }
   try {
     await assertWalletPolicyAllowsTransferWithRepository(createPaymentsRepository(input.env), {
       organizationId: input.organizationId,

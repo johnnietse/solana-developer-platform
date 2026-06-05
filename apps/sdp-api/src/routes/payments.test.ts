@@ -103,6 +103,9 @@ const TEST_MAGICBLOCK_API_BASE_URL = "https://payments.magicblock.test";
 const TEST_MAGICBLOCK_AUTH_TOKEN = "magicblock_auth_token";
 const TEST_MAGICBLOCK_SPONSOR_FEE_PAYER = "CrankS2fXgMGvQJ3VBrZmRfGrfogDY6pq5YcgkPEpSNf";
 const DEVNET_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+const MOCK_SIGNATURE_TAIL =
+  "hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy";
+const MOCK_SIGNATURE_PREFIXES = "456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 const MOONPAY_PARAM_BASE_CURRENCY_AMOUNT = "baseCurrencyAmount";
 const MOONPAY_PARAM_EXTERNAL_CUSTOMER_ID = "externalCustomerId";
 const MOONPAY_PARAM_QUOTE_CURRENCY_CODE = "quoteCurrencyCode";
@@ -570,15 +573,17 @@ describe("Payments routes", () => {
     getSignaturesForAddressMock.mockResolvedValue([]);
     getSplTokenBalancesMock.mockResolvedValue([]);
     getSplTokenAccountAddressesMock.mockResolvedValue([]);
+    let feePaymentSignatureIndex = 0;
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
       signAsFeePayer: vi.fn(),
-      signAndSend: vi
-        .fn()
-        .mockResolvedValue(
-          "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
-        ),
+      signAndSend: vi.fn(async () => {
+        const prefix =
+          MOCK_SIGNATURE_PREFIXES[feePaymentSignatureIndex % MOCK_SIGNATURE_PREFIXES.length] ?? "4";
+        feePaymentSignatureIndex += 1;
+        return `${prefix}${MOCK_SIGNATURE_TAIL}` as Signature;
+      }),
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     createOrgSignerMock.mockResolvedValue(
       createNoopSigner(address("8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ"))
@@ -1288,16 +1293,6 @@ describe("Payments routes", () => {
       updatedAt: overdueCollectionAt,
     });
     await clearRateLimits();
-    createFeePaymentAdapterMock.mockReturnValueOnce({
-      providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
-      signAsFeePayer: vi.fn(),
-      signAndSend: vi
-        .fn()
-        .mockResolvedValue(
-          "5hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
-        ),
-    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     mockRecurringCollectionAccounts();
 
     const overdueCollectRes = await app.request(
@@ -2030,7 +2025,11 @@ describe("Payments routes", () => {
       },
       env
     );
-    expect(pastDuePatchRes.status).toBe(400);
+    expect(pastDuePatchRes.status).toBe(200);
+    const pastDuePatchBody = (await pastDuePatchRes.json()) as {
+      data: { subscription: { nextCollectionDueAt: string | null } };
+    };
+    expect(pastDuePatchBody.data.subscription.nextCollectionDueAt).toBe(pastNextCollectionAt);
     await clearRateLimits();
 
     const dueSubscriptionsRes = await app.request(

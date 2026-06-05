@@ -2,10 +2,10 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import type { z } from "zod";
 import {
   createSubscriptionCollectionAttemptSchema,
+  createSubscriptionSchema,
   createTransferSchema,
   PAYMENT_TOKEN_VALIDATION_MESSAGE,
   prepareTransferSchema,
-  updateSubscriptionSchema,
   updateWalletPolicySchema,
 } from "./schemas";
 
@@ -190,7 +190,10 @@ describe("wallet policy destinationAllowlist schema", () => {
 
 describe("payment subscription schemas", () => {
   it("uses the nextCollectionDueAt field name in future timestamp errors", () => {
-    const result = updateSubscriptionSchema.safeParse({
+    const result = createSubscriptionSchema.safeParse({
+      planId: "psp_test",
+      counterpartyId: "cp_test",
+      subscriberAddress: VALID_DESTINATION,
       nextCollectionDueAt: new Date(Date.now() - 60_000).toISOString(),
     });
 
