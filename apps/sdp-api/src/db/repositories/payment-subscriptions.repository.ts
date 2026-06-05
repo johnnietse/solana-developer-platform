@@ -103,6 +103,7 @@ export interface UpdatePaymentSubscriptionPlanInput {
 export interface ListPaymentSubscriptionPlansInput {
   organizationId: string;
   projectId: string;
+  planWalletIds?: string[];
   status?: PaymentSubscriptionPlanStatus;
   limit: number;
   offset: number;
@@ -148,6 +149,7 @@ export interface UpdatePaymentSubscriptionInput {
 export interface ListPaymentSubscriptionsInput {
   organizationId: string;
   projectId: string;
+  planWalletIds?: string[];
   planId?: string;
   counterpartyId?: string;
   status?: PaymentSubscriptionStatus;

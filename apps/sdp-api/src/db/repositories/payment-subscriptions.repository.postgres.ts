@@ -18,6 +18,10 @@ import type {
   UpdatePaymentSubscriptionPlanInput,
 } from "./payment-subscriptions.repository";
 
+function buildInClause(length: number): string {
+  return Array.from({ length }, () => "?").join(", ");
+}
+
 function mapPlanRow(row: Record<string, unknown>): PaymentSubscriptionPlanRow {
   return {
     id: row.id as string,
@@ -244,22 +248,33 @@ export function createPostgresPaymentSubscriptionsRepository(
     },
 
     async listPlans(params: ListPaymentSubscriptionPlansInput) {
-      const clauses = ["organization_id = ?", "project_id = ?"];
+      const clauses = ["p.organization_id = ?", "p.project_id = ?"];
       const values: unknown[] = [params.organizationId, params.projectId];
 
       if (params.status) {
-        clauses.push("status = ?");
+        clauses.push("p.status = ?");
         values.push(params.status);
+      }
+      if (params.planWalletIds) {
+        if (params.planWalletIds.length === 0) {
+          clauses.push("1 = 0");
+        } else {
+          const walletClause = buildInClause(params.planWalletIds.length);
+          clauses.push(
+            `(p.owner_wallet_id IN (${walletClause}) OR p.puller_wallet_id IN (${walletClause}))`
+          );
+          values.push(...params.planWalletIds, ...params.planWalletIds);
+        }
       }
 
       const whereClause = clauses.join(" AND ");
       const [rows, countRow] = await Promise.all([
         db
           .prepare(
-            `SELECT *
-               FROM payment_subscription_plans
+            `SELECT p.*
+               FROM payment_subscription_plans p
               WHERE ${whereClause}
-              ORDER BY created_at DESC
+              ORDER BY p.created_at DESC
               LIMIT ? OFFSET ?`
           )
           .bind(...values, params.limit, params.offset)
@@ -267,7 +282,7 @@ export function createPostgresPaymentSubscriptionsRepository(
         db
           .prepare(
             `SELECT COUNT(*)::int AS total
-               FROM payment_subscription_plans
+               FROM payment_subscription_plans p
               WHERE ${whereClause}`
           )
           .bind(...values)
@@ -405,34 +420,50 @@ export function createPostgresPaymentSubscriptionsRepository(
     },
 
     async listSubscriptions(params: ListPaymentSubscriptionsInput) {
-      const clauses = ["organization_id = ?", "project_id = ?"];
+      const clauses = ["s.organization_id = ?", "s.project_id = ?"];
       const values: unknown[] = [params.organizationId, params.projectId];
 
       if (params.planId) {
-        clauses.push("plan_id = ?");
+        clauses.push("s.plan_id = ?");
         values.push(params.planId);
       }
       if (params.counterpartyId) {
-        clauses.push("counterparty_id = ?");
+        clauses.push("s.counterparty_id = ?");
         values.push(params.counterpartyId);
       }
       if (params.status) {
-        clauses.push("status = ?");
+        clauses.push("s.status = ?");
         values.push(params.status);
       }
       if (params.dueBefore) {
-        clauses.push("next_collection_due_at <= ?");
+        clauses.push("s.next_collection_due_at <= ?");
         values.push(params.dueBefore);
+      }
+      if (params.planWalletIds) {
+        if (params.planWalletIds.length === 0) {
+          clauses.push("1 = 0");
+        } else {
+          const walletClause = buildInClause(params.planWalletIds.length);
+          clauses.push(`EXISTS (
+            SELECT 1
+              FROM payment_subscription_plans p
+             WHERE p.id = s.plan_id
+               AND p.organization_id = s.organization_id
+               AND p.project_id = s.project_id
+               AND (p.owner_wallet_id IN (${walletClause}) OR p.puller_wallet_id IN (${walletClause}))
+          )`);
+          values.push(...params.planWalletIds, ...params.planWalletIds);
+        }
       }
 
       const whereClause = clauses.join(" AND ");
       const [rows, countRow] = await Promise.all([
         db
           .prepare(
-            `SELECT *
-               FROM payment_subscriptions
+            `SELECT s.*
+               FROM payment_subscriptions s
               WHERE ${whereClause}
-              ORDER BY created_at DESC
+              ORDER BY s.created_at DESC
               LIMIT ? OFFSET ?`
           )
           .bind(...values, params.limit, params.offset)
@@ -440,7 +471,7 @@ export function createPostgresPaymentSubscriptionsRepository(
         db
           .prepare(
             `SELECT COUNT(*)::int AS total
-               FROM payment_subscriptions
+               FROM payment_subscriptions s
               WHERE ${whereClause}`
           )
           .bind(...values)

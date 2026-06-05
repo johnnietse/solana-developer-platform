@@ -50,7 +50,10 @@ import { resolveCreatorUserId } from "@/lib/creator";
 import { AppError, badRequest, badRequestParams, badRequestQuery } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { assertValidAddress } from "@/lib/solana";
-import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
+import {
+  assertApiKeyWalletAccess,
+  getAllowedApiKeyWalletIdsForPermissions,
+} from "@/services/api-key-scope.service";
 import * as solanaRpc from "@/services/solana/rpc";
 import {
   type AppContext,
@@ -526,19 +529,31 @@ export const listSubscriptionPlans = async (c: AppContext) => {
   }
 
   const { page, pageSize, status } = parsed.data;
+  const allowedWalletIds = getAllowedApiKeyWalletIdsForPermissions(auth, ["payments:read"]);
+
+  if (allowedWalletIds?.length === 0) {
+    const response: ListPaymentSubscriptionPlansResponse = {
+      subscriptionPlans: [],
+      total: 0,
+      page,
+      pageSize,
+    };
+    return success(c, response);
+  }
+
   const repo = getPaymentSubscriptionsRepository(c);
   const { rows, total } = await repo.listPlans({
     organizationId: auth.organizationId,
     projectId,
+    planWalletIds: allowedWalletIds ?? undefined,
     status,
     limit: pageSize,
     offset: (page - 1) * pageSize,
   });
-  const visibleRows = rows.filter((plan) => hasPlanWalletAccess(auth, plan, ["payments:read"]));
 
   const response: ListPaymentSubscriptionPlansResponse = {
-    subscriptionPlans: visibleRows.map(mapPlan),
-    total: visibleRows.length === rows.length ? total : visibleRows.length,
+    subscriptionPlans: rows.map(mapPlan),
+    total,
     page,
     pageSize,
   };
@@ -885,10 +900,23 @@ export const listSubscriptions = async (c: AppContext) => {
   }
 
   const { page, pageSize, planId, counterpartyId, status, dueBefore } = parsed.data;
+  const allowedWalletIds = getAllowedApiKeyWalletIdsForPermissions(auth, ["payments:read"]);
+
+  if (allowedWalletIds?.length === 0) {
+    const response: ListPaymentSubscriptionsResponse = {
+      subscriptions: [],
+      total: 0,
+      page,
+      pageSize,
+    };
+    return success(c, response);
+  }
+
   const repo = getPaymentSubscriptionsRepository(c);
   const { rows, total } = await repo.listSubscriptions({
     organizationId: auth.organizationId,
     projectId,
+    planWalletIds: allowedWalletIds ?? undefined,
     planId,
     counterpartyId,
     status,
@@ -896,21 +924,10 @@ export const listSubscriptions = async (c: AppContext) => {
     limit: pageSize,
     offset: (page - 1) * pageSize,
   });
-  const visibleRows: PaymentSubscriptionRow[] = [];
-  for (const subscription of rows) {
-    const plan = await repo.getPlanById({
-      planId: subscription.plan_id,
-      organizationId: auth.organizationId,
-      projectId,
-    });
-    if (plan && hasPlanWalletAccess(auth, plan, ["payments:read"])) {
-      visibleRows.push(subscription);
-    }
-  }
 
   const response: ListPaymentSubscriptionsResponse = {
-    subscriptions: visibleRows.map(mapSubscription),
-    total: visibleRows.length === rows.length ? total : visibleRows.length,
+    subscriptions: rows.map(mapSubscription),
+    total,
     page,
     pageSize,
   };
