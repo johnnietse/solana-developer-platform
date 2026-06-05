@@ -35,11 +35,7 @@ import { AppError } from "@/lib/errors";
 import { assertValidAddress } from "@/lib/solana";
 import { createFeePaymentAdapter } from "@/services/adapters/fee-payment";
 import { normalizePaymentToken, SOL_MINT } from "@/services/payment-operation.service";
-import {
-  resolveMintDecimals,
-  resolveMintTokenProgram,
-  resolveSourceTokenAccount,
-} from "@/services/payments/token-accounts";
+import { resolveMintDecimals, resolveMintTokenProgram } from "@/services/payments/token-accounts";
 import * as solanaRpc from "@/services/solana/rpc";
 import type { Env } from "@/types/env";
 
@@ -127,15 +123,26 @@ export async function resolveRecurringSubscriptionRuntime(
   const mint = assertSubscriptionTokenMint(recurringPayment.token);
   const rpc = solanaRpc.createRpc(env);
   const tokenProgram = await resolveMintTokenProgram(rpc, mint);
-  const [sourceTokenAccount, decimals] = await Promise.all([
-    resolveSourceTokenAccount(
-      rpc,
-      assertValidAddress(recurringPayment.source_address, "sourceAddress"),
-      mint,
-      tokenProgram
-    ),
+  const sourceAddress = assertValidAddress(recurringPayment.source_address, "sourceAddress");
+  const [sourceTokenAccount] = await findAssociatedTokenPda({
+    owner: sourceAddress,
+    tokenProgram,
+    mint,
+  });
+  const [sourceTokenAccountInfo, decimals] = await Promise.all([
+    solanaRpc.getAccountInfo(rpc, sourceTokenAccount),
     resolveMintDecimals(rpc, mint),
   ]);
+
+  if (!sourceTokenAccountInfo) {
+    throw new AppError(
+      "BAD_REQUEST",
+      "Source wallet has no associated token account for this mint"
+    );
+  }
+  if (String(sourceTokenAccountInfo.owner) !== String(tokenProgram)) {
+    throw new AppError("BAD_REQUEST", "Source associated token account uses an unsupported owner");
+  }
   const amountBaseUnits = parseDecimalAmount(recurringPayment.amount, decimals);
 
   if (amountBaseUnits <= 0n) {
@@ -145,7 +152,7 @@ export async function resolveRecurringSubscriptionRuntime(
   return {
     amountBaseUnits,
     mint,
-    sourceTokenAccount: sourceTokenAccount.tokenAccount,
+    sourceTokenAccount,
     tokenProgram,
   };
 }

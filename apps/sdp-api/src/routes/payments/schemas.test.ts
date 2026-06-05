@@ -214,16 +214,18 @@ describe("payment subscription schemas", () => {
   });
 
   it("parses explicit low-level subscription create statuses for compatibility", () => {
-    const result = createSubscriptionSchema.safeParse({
-      planId: "psp_test",
-      counterpartyId: "cp_test",
-      subscriberAddress: VALID_DESTINATION,
-      status: "paused",
-    });
+    for (const status of ["paused", "canceled", "expired"] as const) {
+      const result = createSubscriptionSchema.safeParse({
+        planId: "psp_test",
+        counterpartyId: "cp_test",
+        subscriberAddress: VALID_DESTINATION,
+        status,
+      });
 
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.status).toBe("paused");
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.status).toBe(status);
+      }
     }
   });
 

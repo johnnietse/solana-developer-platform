@@ -17,6 +17,7 @@ import {
 } from "@solana/kit";
 import * as subscriptionsSdk from "@solana/subscriptions";
 import { getTransferSolInstruction } from "@solana-program/system";
+import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import * as repositories from "@/db/repositories";
@@ -103,6 +104,7 @@ const TEST_MAGICBLOCK_API_BASE_URL = "https://payments.magicblock.test";
 const TEST_MAGICBLOCK_AUTH_TOKEN = "magicblock_auth_token";
 const TEST_MAGICBLOCK_SPONSOR_FEE_PAYER = "CrankS2fXgMGvQJ3VBrZmRfGrfogDY6pq5YcgkPEpSNf";
 const DEVNET_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+const SPL_TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 const MOCK_SIGNATURE_TAIL =
   "hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy";
 const MOCK_SIGNATURE_PREFIXES = "456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -1019,6 +1021,25 @@ describe("Payments routes", () => {
     expect(recurringSubscriptionId).toBeTruthy();
     expect(recurringPlanPda).toBeTruthy();
     expect(recurringSubscriptionPda).toBeTruthy();
+    const [expectedSourceTokenAccount] = await findAssociatedTokenPda({
+      owner: address(TEST_SOLANA_ADDRESSES.wallet1),
+      tokenProgram: address(SPL_TOKEN_PROGRAM_ID),
+      mint: address(DEVNET_USDC_MINT),
+    });
+    const activatedSubscription = await repositories
+      .createPaymentSubscriptionsRepository(env)
+      .getSubscriptionById({
+        subscriptionId: recurringSubscriptionId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+      });
+    expect(activatedSubscription?.subscriber_token_account).toBe(
+      String(expectedSourceTokenAccount)
+    );
+    expect(activatedSubscription?.next_collection_due_at).toBe(firstCollectionAt);
+    expect(new Date(activatedSubscription?.current_period_start_at ?? "").getTime()).toBe(
+      new Date(firstCollectionAt).getTime() - 24 * 60 * 60 * 1000
+    );
 
     const managedSubscriptionPauseRes = await app.request(
       `/v1/payments/subscriptions/${recurringSubscriptionId}`,

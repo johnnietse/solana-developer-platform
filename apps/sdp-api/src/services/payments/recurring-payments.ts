@@ -1955,6 +1955,7 @@ export async function activateRecurringPayment(input: {
         after: activationNow,
       })
     : activationNow;
+  const currentPeriodStartAt = addPeriodHours(dueAt, -recurringPayment.period_hours);
   const claimedRecurringPayment = recurringPayment;
   recurringPayment = await getDb(input.env).transaction(async (tx) => {
     const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
@@ -1981,7 +1982,7 @@ export async function activateRecurringPayment(input: {
       authorizationSignature:
         onChainAuthorization.signature ?? subscription.authorization_signature,
       status: "active",
-      currentPeriodStartAt: dueAt,
+      currentPeriodStartAt,
       nextCollectionDueAt: dueAt,
       updatedAt,
     });
