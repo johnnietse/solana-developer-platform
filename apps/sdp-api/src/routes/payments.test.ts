@@ -2203,7 +2203,11 @@ describe("Payments routes", () => {
       },
       env
     );
-    expect(terminalCreateRes.status).toBe(400);
+    expect(terminalCreateRes.status).toBe(201);
+    const terminalCreateBody = (await terminalCreateRes.json()) as {
+      data: { subscription: { status: string } };
+    };
+    expect(terminalCreateBody.data.subscription.status).toBe("canceled");
     await clearRateLimits();
 
     const subscriptionRes = await app.request(
