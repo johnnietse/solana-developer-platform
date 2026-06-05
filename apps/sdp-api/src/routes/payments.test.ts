@@ -1508,6 +1508,22 @@ describe("Payments routes", () => {
     );
     expect(activeWithoutProofRes.status).toBe(400);
 
+    const terminalCreateRes = await app.request(
+      "/v1/payments/subscriptions",
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          planId,
+          counterpartyId,
+          subscriberAddress: TEST_SOLANA_ADDRESSES.wallet2,
+          status: "canceled",
+        }),
+      },
+      env
+    );
+    expect(terminalCreateRes.status).toBe(400);
+
     const subscriptionRes = await app.request(
       "/v1/payments/subscriptions",
       {
@@ -1928,6 +1944,19 @@ describe("Payments routes", () => {
       env
     );
     expect(clearCanceledAtRes.status).toBe(400);
+
+    const replaceCanceledAtRes = await app.request(
+      `/v1/payments/subscriptions/${subscriptionId}`,
+      {
+        method: "PATCH",
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          canceledAt: "2026-02-04T00:00:00.000Z",
+        }),
+      },
+      env
+    );
+    expect(replaceCanceledAtRes.status).toBe(400);
   });
 
   it("falls back to a zero SOL balance when RPC balance lookups fail", async () => {

@@ -209,6 +209,10 @@ export const listSubscriptionPlansQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
 
+const createSubscriptionStatusSchema = z
+  .enum(["pending_authorization", "active"])
+  .default("pending_authorization");
+
 export const createSubscriptionSchema = z.object({
   planId: z.string().min(1),
   counterpartyId: z.string().min(1),
@@ -217,7 +221,7 @@ export const createSubscriptionSchema = z.object({
   subscriptionPda: solanaAddressSchema("subscriptionPda").optional(),
   subscriptionAuthorityAddress: solanaAddressSchema("subscriptionAuthorityAddress").optional(),
   authorizationSignature: z.string().min(1).max(128).optional(),
-  status: paymentSubscriptionStatusSchema.default("pending_authorization"),
+  status: createSubscriptionStatusSchema,
   currentPeriodStartAt: recurringTimestampSchema.optional(),
   nextCollectionDueAt: recurringTimestampSchema.optional(),
 });

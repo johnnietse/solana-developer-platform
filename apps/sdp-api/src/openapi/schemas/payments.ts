@@ -875,7 +875,11 @@ export const createSubscriptionRequestSchema = createSubscriptionSchemaBase
       description: "Signature for the customer authorization transaction.",
       example: "sig_example",
     }),
-    status: paymentSubscriptionStatusSchema.optional(),
+    status: withOpenApi(createSubscriptionSchemaBase.shape.status, {
+      description:
+        "Initial subscription status. Defaults to pending_authorization; active requires authorization proof fields.",
+      example: "pending_authorization",
+    }),
   })
   .openapi({
     description:
