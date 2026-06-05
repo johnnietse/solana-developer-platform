@@ -1304,8 +1304,9 @@ describe("Payments routes", () => {
       "Content-Type": "application/json",
     };
     const subscriberTokenAccount = TEST_SOLANA_ADDRESSES.wallet3;
-    const currentPeriodStartAt = "2026-01-01T00:00:00.000Z";
-    const nextCollectionDueAt = "2026-02-01T00:00:00.000Z";
+    const currentPeriodStartAt = new Date().toISOString();
+    const nextCollectionDueAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const dueBefore = new Date(new Date(nextCollectionDueAt).getTime() + 60_000).toISOString();
 
     const counterpartyRes = await app.request(
       "/v1/counterparties",
@@ -1526,6 +1527,29 @@ describe("Payments routes", () => {
     );
     expect(activeWithoutProofRes.status).toBe(400);
 
+    const pastNextCollectionAt = new Date(Date.now() - 60_000).toISOString();
+    const activeWithPastDueRes = await app.request(
+      "/v1/payments/subscriptions",
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          planId,
+          counterpartyId,
+          subscriberAddress: TEST_SOLANA_ADDRESSES.wallet2,
+          subscriberTokenAccount,
+          subscriptionPda: TEST_SOLANA_ADDRESSES.wallet1,
+          subscriptionAuthorityAddress: TEST_SOLANA_ADDRESSES.wallet3,
+          authorizationSignature: "sig_subscription_authorization_test",
+          currentPeriodStartAt,
+          nextCollectionDueAt: pastNextCollectionAt,
+          status: "active",
+        }),
+      },
+      env
+    );
+    expect(activeWithPastDueRes.status).toBe(400);
+
     const terminalCreateRes = await app.request(
       "/v1/payments/subscriptions",
       {
@@ -1541,6 +1565,7 @@ describe("Payments routes", () => {
       env
     );
     expect(terminalCreateRes.status).toBe(400);
+    await clearRateLimits();
 
     const subscriptionRes = await app.request(
       "/v1/payments/subscriptions",
@@ -1747,8 +1772,22 @@ describe("Payments routes", () => {
       status: "active",
     });
 
+    const pastDuePatchRes = await app.request(
+      `/v1/payments/subscriptions/${subscriptionId}`,
+      {
+        method: "PATCH",
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          nextCollectionDueAt: pastNextCollectionAt,
+        }),
+      },
+      env
+    );
+    expect(pastDuePatchRes.status).toBe(400);
+    await clearRateLimits();
+
     const dueSubscriptionsRes = await app.request(
-      `/v1/payments/subscriptions?status=active&dueBefore=${encodeURIComponent("2026-02-02T00:00:00.000Z")}`,
+      `/v1/payments/subscriptions?status=active&dueBefore=${encodeURIComponent(dueBefore)}`,
       {
         headers: authHeaders,
       },

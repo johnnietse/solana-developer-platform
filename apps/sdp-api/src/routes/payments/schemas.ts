@@ -226,7 +226,7 @@ export const createSubscriptionSchema = z.object({
   authorizationSignature: z.string().min(1).max(128).optional(),
   status: createSubscriptionStatusSchema,
   currentPeriodStartAt: recurringTimestampSchema.optional(),
-  nextCollectionDueAt: recurringTimestampSchema.optional(),
+  nextCollectionDueAt: futureRecurringTimestampSchema.optional(),
 });
 
 export const updateSubscriptionSchema = z
@@ -239,7 +239,7 @@ export const updateSubscriptionSchema = z
     authorizationSignature: z.string().min(1).max(128).nullable().optional(),
     status: updateSubscriptionStatusSchema.optional(),
     currentPeriodStartAt: recurringTimestampSchema.nullable().optional(),
-    nextCollectionDueAt: recurringTimestampSchema.nullable().optional(),
+    nextCollectionDueAt: futureRecurringTimestampSchema.nullable().optional(),
     cancelAt: recurringTimestampSchema.nullable().optional(),
     canceledAt: recurringTimestampSchema.nullable().optional(),
   })
