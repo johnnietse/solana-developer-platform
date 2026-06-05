@@ -1268,6 +1268,49 @@ describe("Payments routes", () => {
       new Date(firstCollectionAt).getTime() + 24 * 60 * 60 * 1000
     );
 
+    const overdueCollectionAt = new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString();
+    const overduePeriodStartAt = new Date(
+      new Date(overdueCollectionAt).getTime() - 24 * 60 * 60 * 1000
+    ).toISOString();
+    await repositories.createPaymentRecurringPaymentsRepository(env).updateRecurringPayment({
+      recurringPaymentId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      nextCollectionDueAt: overdueCollectionAt,
+      updatedAt: overdueCollectionAt,
+    });
+    await repositories.createPaymentSubscriptionsRepository(env).updateSubscription({
+      subscriptionId: recurringSubscriptionId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      currentPeriodStartAt: overduePeriodStartAt,
+      nextCollectionDueAt: overdueCollectionAt,
+      updatedAt: overdueCollectionAt,
+    });
+    await clearRateLimits();
+    mockRecurringCollectionAccounts();
+
+    const overdueCollectRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: "{}",
+      },
+      env
+    );
+    expect(overdueCollectRes.status).toBe(200);
+    const overdueCollectBody = (await overdueCollectRes.json()) as {
+      data: { recurringPayment: { nextCollectionDueAt: string | null } };
+    };
+    const overdueNextDueAt = new Date(
+      overdueCollectBody.data.recurringPayment.nextCollectionDueAt ?? ""
+    ).getTime();
+    expect(overdueNextDueAt).toBeGreaterThan(Date.now());
+    expect(overdueNextDueAt).toBeGreaterThan(
+      new Date(overdueCollectionAt).getTime() + 24 * 60 * 60 * 1000
+    );
+
     const earlyCollectRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
       {

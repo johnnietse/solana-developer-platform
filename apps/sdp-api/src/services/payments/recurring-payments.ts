@@ -495,13 +495,18 @@ async function finalizeRecurringCollection(input: {
   blockTime: string | null;
   destinationTokenAccount: string;
 }): Promise<CollectionResult> {
-  const nextDueAt = addPeriodHours(input.dueAt, input.recurringPayment.period_hours);
+  const updatedAt = new Date().toISOString();
+  const nextDueAt = advanceCollectionDueAtAfter({
+    nextCollectionDueAt: input.dueAt,
+    periodHours: input.recurringPayment.period_hours,
+    after: updatedAt,
+  });
+  const currentPeriodStartAt = addPeriodHours(nextDueAt, -input.recurringPayment.period_hours);
 
   return getDb(input.env).transaction(async (tx) => {
     const txPaymentsRepo = createPostgresPaymentsRepository(tx);
     const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
     const txSubscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
-    const updatedAt = new Date().toISOString();
     const lockedRecurringPayment = await tx.queryOne<{
       status: string;
       next_collection_due_at: string | null;
@@ -576,7 +581,7 @@ async function finalizeRecurringCollection(input: {
       projectId: input.projectId,
       expectedStatus: "active",
       expectedNextCollectionDueAt: input.dueAt,
-      currentPeriodStartAt: input.dueAt,
+      currentPeriodStartAt,
       nextCollectionDueAt: nextDueAt,
       updatedAt,
     });
