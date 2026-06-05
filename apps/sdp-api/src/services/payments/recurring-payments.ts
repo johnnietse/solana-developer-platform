@@ -1325,10 +1325,24 @@ async function resolveStaleUnsignedProcessingAttempt(input: {
   const message =
     "Stale recurring collection attempt has a linked transfer but no submission signature; paused for reconciliation";
 
-  await getDb(input.env).transaction(async (tx) => {
+  const cleanupResult = await getDb(input.env).transaction(async (tx) => {
     const txPaymentsRepo = createPostgresPaymentsRepository(tx);
     const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
     const txSubscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
+    const currentRecurringPayment = await txRecurringRepo.getRecurringPaymentById({
+      recurringPaymentId: input.recurringPayment.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+    });
+    const currentSubscription = await txSubscriptionsRepo.getSubscriptionById({
+      subscriptionId: input.subscriptionId,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+    });
+    if (!currentRecurringPayment || !currentSubscription) {
+      throw new AppError("NOT_FOUND", "Recurring payment collection state not found");
+    }
+
     const updatedTransfer = await txPaymentsRepo.updateTransfer({
       transferId: input.attempt.transfer_id ?? "",
       status: "failed",
@@ -1343,22 +1357,31 @@ async function resolveStaleUnsignedProcessingAttempt(input: {
       attemptedAt: now,
       updatedAt: now,
     });
-    const pausedRecurringPayment = await txRecurringRepo.updateRecurringPayment({
-      recurringPaymentId: input.recurringPayment.id,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      expectedStatus: input.recurringPayment.status,
-      status: "paused",
-      updatedAt: now,
-    });
-    const pausedSubscription = await txSubscriptionsRepo.updateSubscription({
-      subscriptionId: input.subscriptionId,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      expectedStatus: "active",
-      status: "paused",
-      updatedAt: now,
-    });
+    const shouldPauseForReconciliation =
+      currentRecurringPayment.status === "active" &&
+      currentRecurringPayment.next_collection_due_at === input.attempt.due_at &&
+      currentSubscription.status === "active" &&
+      currentSubscription.next_collection_due_at === input.attempt.due_at;
+    const pausedRecurringPayment = shouldPauseForReconciliation
+      ? await txRecurringRepo.updateRecurringPayment({
+          recurringPaymentId: input.recurringPayment.id,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          expectedStatus: "active",
+          status: "paused",
+          updatedAt: now,
+        })
+      : currentRecurringPayment;
+    const pausedSubscription = shouldPauseForReconciliation
+      ? await txSubscriptionsRepo.updateSubscription({
+          subscriptionId: input.subscriptionId,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          expectedStatus: "active",
+          status: "paused",
+          updatedAt: now,
+        })
+      : currentSubscription;
 
     if (!updatedTransfer || !failedAttempt || !pausedRecurringPayment || !pausedSubscription) {
       throw new AppError(
@@ -1366,7 +1389,22 @@ async function resolveStaleUnsignedProcessingAttempt(input: {
         "Failed to pause recurring payment with ambiguous collection attempt"
       );
     }
+
+    return { pausedForReconciliation: shouldPauseForReconciliation };
   });
+
+  if (!cleanupResult.pausedForReconciliation) {
+    console.warn("Stale recurring collection attempt expired after lifecycle state changed", {
+      recurringPaymentId: input.recurringPayment.id,
+      attemptId: input.attempt.id,
+      transferId: input.attempt.transfer_id,
+    });
+
+    throw new AppError(
+      "CONFLICT",
+      "Recurring payment collection state changed while expiring stale attempt"
+    );
+  }
 
   console.warn("Recurring payment paused for collection reconciliation", {
     recurringPaymentId: input.recurringPayment.id,

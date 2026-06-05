@@ -1346,6 +1346,152 @@ describe("Payments routes", () => {
       error: "simulated collection submission failure",
     });
 
+    const staleLinkedAttemptUpdatedAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const staleLinkedTransferId = "ptr_stale_linked_cancel_race";
+    const staleLinkedTransfer = await repositories.createPaymentsRepository(env).createTransfer({
+      id: staleLinkedTransferId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      walletId: TEST_WALLET_ID,
+      counterpartyId,
+      sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
+      destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      token: DEVNET_USDC_MINT,
+      amount: "0.50",
+      memo: null,
+      type: "transfer",
+      direction: "outbound",
+      status: "processing",
+      provider: null,
+      providerReference: null,
+      deliveryMode: null,
+      fiatCurrency: null,
+      fiatAmount: null,
+      providerData: { source: "recurring_payments" },
+      serializedTx: "stale-unsigned-transaction",
+      initiatedByKeyId: TEST_API_KEY.id,
+      createdAt: staleLinkedAttemptUpdatedAt,
+      updatedAt: staleLinkedAttemptUpdatedAt,
+    });
+    expect(staleLinkedTransfer?.id).toBe(staleLinkedTransferId);
+    await repositories.createPaymentSubscriptionsRepository(env).createCollectionAttempt({
+      id: "psca_stale_linked_cancel_race",
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      subscriptionId: recurringSubscriptionId,
+      recurringPaymentId,
+      transferId: staleLinkedTransferId,
+      token: DEVNET_USDC_MINT,
+      amount: "0.50",
+      dueAt: firstCollectionAt,
+      attemptedAt: staleLinkedAttemptUpdatedAt,
+      status: "processing",
+      signature: null,
+      error: null,
+      metadata: { source: "recurring_payments" },
+      createdAt: staleLinkedAttemptUpdatedAt,
+      updatedAt: staleLinkedAttemptUpdatedAt,
+    });
+    await repositories.createPaymentRecurringPaymentsRepository(env).updateRecurringPayment({
+      recurringPaymentId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      status: "canceling",
+      updatedAt: staleLinkedAttemptUpdatedAt,
+    });
+    await repositories.createPaymentSubscriptionsRepository(env).updateSubscription({
+      subscriptionId: recurringSubscriptionId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      status: "canceling",
+      updatedAt: staleLinkedAttemptUpdatedAt,
+    });
+    await clearRateLimits();
+
+    const staleLinkedCollectRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: "{}",
+      },
+      env
+    );
+    expect(staleLinkedCollectRes.status).toBe(409);
+    const staleLinkedAttemptsRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/collection-attempts?status=failed`,
+      {
+        method: "GET",
+        headers: authHeaders,
+      },
+      env
+    );
+    expect(staleLinkedAttemptsRes.status).toBe(200);
+    const staleLinkedAttemptsBody = (await staleLinkedAttemptsRes.json()) as {
+      data: {
+        collectionAttempts: Array<{
+          status: string;
+          transferId: string | null;
+          error: string | null;
+        }>;
+      };
+    };
+    expect(staleLinkedAttemptsBody.data.collectionAttempts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          status: "failed",
+          transferId: staleLinkedTransferId,
+          error: expect.stringContaining("linked transfer but no submission signature"),
+        }),
+      ])
+    );
+    const staleLinkedTransferAfter = await repositories
+      .createPaymentsRepository(env)
+      .getTransferById({
+        transferId: staleLinkedTransferId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+      });
+    expect(staleLinkedTransferAfter).toMatchObject({
+      status: "failed",
+      error: expect.stringContaining("linked transfer but no submission signature"),
+    });
+    const cancelingRecurringPayment = await repositories
+      .createPaymentRecurringPaymentsRepository(env)
+      .getRecurringPaymentById({
+        recurringPaymentId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+      });
+    const cancelingSubscription = await repositories
+      .createPaymentSubscriptionsRepository(env)
+      .getSubscriptionById({
+        subscriptionId: recurringSubscriptionId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+      });
+    expect(cancelingRecurringPayment?.status).toBe("canceling");
+    expect(cancelingSubscription?.status).toBe("canceling");
+
+    const restoredActiveAt = new Date().toISOString();
+    await repositories.createPaymentRecurringPaymentsRepository(env).updateRecurringPayment({
+      recurringPaymentId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      status: "active",
+      nextCollectionDueAt: firstCollectionAt,
+      updatedAt: restoredActiveAt,
+    });
+    await repositories.createPaymentSubscriptionsRepository(env).updateSubscription({
+      subscriptionId: recurringSubscriptionId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      status: "active",
+      nextCollectionDueAt: firstCollectionAt,
+      updatedAt: restoredActiveAt,
+    });
+    await clearRateLimits();
+
     mockRecurringCollectionAccounts();
     const originalCreatePostgresRecurringPaymentsRepository =
       repositories.createPostgresPaymentRecurringPaymentsRepository;
