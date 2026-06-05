@@ -102,9 +102,6 @@ export interface PaymentRecurringPaymentsRepository {
     organizationId: string;
     projectId: string;
   }): Promise<PaymentRecurringPaymentRow | null>;
-  getRecurringPaymentByIdAnyScope(
-    recurringPaymentId: string
-  ): Promise<PaymentRecurringPaymentRow | null>;
   listRecurringPayments(
     params: ListPaymentRecurringPaymentsInput
   ): Promise<ListPaymentRecurringPaymentsResult>;

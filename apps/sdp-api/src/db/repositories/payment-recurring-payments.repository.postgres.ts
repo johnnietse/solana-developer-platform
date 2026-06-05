@@ -199,10 +199,6 @@ export function createPostgresPaymentRecurringPaymentsRepository(
       return row ? mapRecurringPaymentRow(row) : null;
     },
 
-    getRecurringPaymentByIdAnyScope(recurringPaymentId) {
-      return getRecurringPaymentByIdInternal(db, recurringPaymentId);
-    },
-
     async listRecurringPayments(params: ListPaymentRecurringPaymentsInput) {
       const clauses = ["organization_id = ?", "project_id = ?"];
       const values: unknown[] = [params.organizationId, params.projectId];

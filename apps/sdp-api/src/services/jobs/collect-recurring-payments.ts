@@ -56,17 +56,26 @@ export async function collectDueRecurringPayments(env: Env): Promise<{
   );
   const now = new Date();
   const retryAfter = new Date(now.getTime() - retryAfterMinutes * 60 * 1000).toISOString();
-  const expiredAttempts = await createPaymentSubscriptionsRepository(
-    env
-  ).expireStaleUnsignedProcessingAttempts({
-    olderThan: retryAfter,
-    updatedAt: now.toISOString(),
-    limit: batchSize,
-  });
-  if (expiredAttempts > 0) {
-    console.warn("Expired stale unsigned recurring collection attempts", {
-      expiredAttempts,
+  let failed = 0;
+  try {
+    const expiredAttempts = await createPaymentSubscriptionsRepository(
+      env
+    ).expireStaleUnsignedProcessingAttempts({
+      olderThan: retryAfter,
+      updatedAt: now.toISOString(),
+      limit: batchSize,
+    });
+    if (expiredAttempts > 0) {
+      console.warn("Expired stale unsigned recurring collection attempts", {
+        expiredAttempts,
+        retryAfter,
+      });
+    }
+  } catch (error) {
+    failed += 1;
+    console.warn("Failed to expire stale unsigned recurring collection attempts", {
       retryAfter,
+      error: error instanceof Error ? error.message : String(error),
     });
   }
   const due = await createPaymentRecurringPaymentsRepository(env).listDueRecurringPayments({
@@ -75,7 +84,6 @@ export async function collectDueRecurringPayments(env: Env): Promise<{
     limit: batchSize,
   });
   let collected = 0;
-  let failed = 0;
 
   for (const recurringPayment of due) {
     try {
