@@ -1,4 +1,10 @@
-import type { PaymentRampExecution, PaymentRampQuote, SdpEnvironment } from "@sdp/types";
+import type {
+  PaymentRampEstimate,
+  PaymentRampExecution,
+  PaymentRampQuote,
+  RampProviderEstimateResult,
+  SdpEnvironment,
+} from "@sdp/types";
 import {
   OFFRAMP_SUPPORT,
   ONRAMP_SUPPORT,
@@ -42,6 +48,8 @@ import { assertWalletPolicyAllowsTransfer } from "../policy";
 import {
   createOfframpQuoteSchema,
   createOnrampQuoteSchema,
+  estimateOfframpSchema,
+  estimateOnrampSchema,
   executeOfframpSchema,
   executeOnrampSchema,
   listOfframpCurrenciesQuerySchema,
@@ -542,6 +550,88 @@ async function resolveRampKycReference(
     throw new AppError("NOT_FOUND", "Counterparty not found");
   }
   return ensureLightsparkCustomer(c, repo, counterparty, projectId);
+}
+
+async function estimateAcrossProviders(
+  c: AppContext,
+  providers: readonly RampProviderId[],
+  runProvider: (provider: RampProviderId, ctx: RampRuntimeContext) => Promise<PaymentRampEstimate>
+): Promise<RampProviderEstimateResult[]> {
+  const scope = await resolveScope(c);
+  const ctx = rampRuntime(c);
+
+  return Promise.all(
+    providers.map(async (provider): Promise<RampProviderEstimateResult> => {
+      try {
+        await assertRampProviderAvailable(c, provider, scope.auth.organizationId);
+        const estimate = await runProvider(provider, ctx);
+        return { provider, status: "ok", estimate };
+      } catch (error) {
+        if (error instanceof AppError && error.code === "ESTIMATE_NOT_AVAILABLE") {
+          return { provider, status: "unsupported" };
+        }
+        return {
+          provider,
+          status: "error",
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    })
+  );
+}
+
+export async function estimateOnramp(c: AppContext) {
+  const body = await c.req.json();
+  const parsed = estimateOnrampSchema.safeParse(body);
+
+  if (!parsed.success) {
+    throw new AppError("BAD_REQUEST", "Invalid request body", {
+      errors: parsed.error.flatten().fieldErrors,
+    });
+  }
+
+  const input = parsed.data;
+  const row = ONRAMP_SUPPORT.find(
+    (pair) => pair.source === input.fiatCurrency && pair.dest === input.assetRail
+  );
+  const providers = row ? row.providers : [];
+
+  const estimates = await estimateAcrossProviders(c, providers, (provider, ctx) =>
+    RAMP_PROVIDER_CLIENTS[provider].estimateOnramp(ctx, {
+      assetRail: input.assetRail,
+      fiatCurrency: input.fiatCurrency,
+      fiatAmount: input.fiatAmount,
+    })
+  );
+
+  return success(c, { estimates });
+}
+
+export async function estimateOfframp(c: AppContext) {
+  const body = await c.req.json();
+  const parsed = estimateOfframpSchema.safeParse(body);
+
+  if (!parsed.success) {
+    throw new AppError("BAD_REQUEST", "Invalid request body", {
+      errors: parsed.error.flatten().fieldErrors,
+    });
+  }
+
+  const input = parsed.data;
+  const row = OFFRAMP_SUPPORT.find(
+    (pair) => pair.source === input.assetRail && pair.dest === input.fiatCurrency
+  );
+  const providers = row ? row.providers : [];
+
+  const estimates = await estimateAcrossProviders(c, providers, (provider, ctx) =>
+    RAMP_PROVIDER_CLIENTS[provider].estimateOfframp(ctx, {
+      assetRail: input.assetRail,
+      fiatCurrency: input.fiatCurrency,
+      cryptoAmount: input.cryptoAmount,
+    })
+  );
+
+  return success(c, { estimates });
 }
 
 export async function createOnrampQuote(c: AppContext) {

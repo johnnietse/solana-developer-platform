@@ -3,11 +3,16 @@
 import type {
   Counterparty,
   CounterpartyAccount,
+  CryptoRailId,
   CustodyWalletAggregate,
   ListCounterpartiesResponse,
   ListCounterpartyAccountsResponse,
+  PaymentRampEstimateEnvelope,
   PaymentRampExecution,
   PaymentsWalletAggregateEnvelope,
+  RampDirection,
+  RampFiatCurrency,
+  RampProviderEstimateResult,
   PaymentTransferEnvelope as TransferEnvelope,
   PaymentTransferSummary as TransferRecord,
   PaymentWalletPolicy as WalletPolicy,
@@ -357,6 +362,38 @@ export async function fetchTransfers(
       ...(transfer.createdAt ? { createdAt: transfer.createdAt } : {}),
       ...(transfer.updatedAt ? { updatedAt: transfer.updatedAt } : {}),
     }));
+}
+
+export async function fetchRampEstimates(input: {
+  direction: RampDirection;
+  assetRail: CryptoRailId;
+  fiatCurrency: RampFiatCurrency;
+  amount: string;
+  signal?: AbortSignal;
+}): Promise<RampProviderEstimateResult[]> {
+  const amountField = input.direction === "onramp" ? "fiatAmount" : "cryptoAmount";
+  const response = await fetch(`/api/dashboard/payments/ramps/${input.direction}/estimate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    cache: "no-store",
+    signal: input.signal,
+    body: JSON.stringify({
+      assetRail: input.assetRail,
+      fiatCurrency: input.fiatCurrency,
+      [amountField]: input.amount,
+    }),
+  });
+  const body = (await response.json().catch(() => ({}))) as PaymentRampEstimateEnvelope;
+  if (!response.ok) {
+    throw new Error(getApiError(body, `Ramp estimate request failed (${response.status}).`));
+  }
+
+  const estimates = body.data?.estimates;
+  if (!estimates) {
+    throw new Error("Ramp estimate response is missing estimates.");
+  }
+
+  return estimates;
 }
 
 export async function fetchWalletBalances(
