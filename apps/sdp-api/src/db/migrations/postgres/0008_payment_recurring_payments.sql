@@ -35,8 +35,8 @@ CREATE TABLE IF NOT EXISTS payment_recurring_payments (
         REFERENCES counterparties(id, organization_id, project_id)
         ON DELETE CASCADE,
     FOREIGN KEY (counterparty_account_id) REFERENCES counterparty_accounts(id) ON DELETE RESTRICT,
-    FOREIGN KEY (plan_id) REFERENCES payment_subscription_plans(id) ON DELETE SET NULL,
-    FOREIGN KEY (subscription_id) REFERENCES payment_subscriptions(id) ON DELETE SET NULL,
+    FOREIGN KEY (plan_id) REFERENCES payment_subscription_plans(id) ON DELETE RESTRICT,
+    FOREIGN KEY (subscription_id) REFERENCES payment_subscriptions(id) ON DELETE RESTRICT,
     CONSTRAINT payment_recurring_payments_period_hours_positive CHECK (period_hours > 0),
     CONSTRAINT payment_recurring_payments_status_check
         CHECK (status IN ('pending_activation', 'activating', 'active', 'paused', 'canceled', 'expired'))

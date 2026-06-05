@@ -14,6 +14,7 @@ import type {
   PaymentSubscriptionRow,
 } from "@/db/repositories/payment-subscriptions.repository";
 import type {
+  PaymentsRepository,
   PaymentTransferRow,
   PaymentTransferStatus,
 } from "@/db/repositories/payments.repository";
@@ -171,9 +172,12 @@ async function createTransferRecord(input: {
   recurringPayment: PaymentRecurringPaymentRow;
   status: PaymentTransferStatus;
   initiatedByKeyId?: string | null;
+  paymentsRepo?: PaymentsRepository;
+  createdAt?: string;
 }) {
-  const now = new Date().toISOString();
-  const transfer = await createPaymentsRepository(input.env).createTransfer({
+  const now = input.createdAt ?? new Date().toISOString();
+  const paymentsRepo = input.paymentsRepo ?? createPaymentsRepository(input.env);
+  const transfer = await paymentsRepo.createTransfer({
     id: `xfr_${crypto.randomUUID()}`,
     organizationId: input.organizationId,
     projectId: input.projectId,
@@ -837,47 +841,67 @@ async function createTransferAndLinkCollectionAttempt(input: {
   attempt: PaymentSubscriptionCollectionAttemptRow;
   transfer: PaymentTransferRow;
 }> {
-  const subscriptionsRepo = createPaymentSubscriptionsRepository(input.env);
-  let transfer: PaymentTransferRow | null = null;
+  let transferId: string | null = null;
 
   try {
-    transfer = await createTransferRecord({
-      env: input.env,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      recurringPayment: input.recurringPayment,
-      status: "processing",
-      initiatedByKeyId: input.initiatedByKeyId ?? null,
-    });
-    const attempt = await subscriptionsRepo.updateCollectionAttempt({
-      attemptId: input.attempt.id,
-      transferId: transfer.id,
-      status: "processing",
-      attemptedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    });
+    return await getDb(input.env).transaction(async (tx) => {
+      const txPaymentsRepo = createPostgresPaymentsRepository(tx);
+      const txSubscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
+      const now = new Date().toISOString();
+      const transfer = await createTransferRecord({
+        env: input.env,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        recurringPayment: input.recurringPayment,
+        status: "processing",
+        initiatedByKeyId: input.initiatedByKeyId ?? null,
+        paymentsRepo: txPaymentsRepo,
+        createdAt: now,
+      });
+      transferId = transfer.id;
+      const attempt = await txSubscriptionsRepo.updateCollectionAttempt({
+        attemptId: input.attempt.id,
+        transferId: transfer.id,
+        status: "processing",
+        attemptedAt: now,
+        updatedAt: now,
+      });
 
-    if (!attempt) {
-      throw new AppError("INTERNAL_ERROR", "Failed to update collection attempt");
-    }
+      if (!attempt) {
+        throw new AppError("INTERNAL_ERROR", "Failed to update collection attempt");
+      }
 
-    return { attempt, transfer };
+      return { attempt, transfer };
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    await subscriptionsRepo.updateCollectionAttempt({
-      attemptId: input.attempt.id,
-      transferId: transfer?.id,
-      status: "failed",
-      error: message,
-      attemptedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    });
-    if (transfer) {
-      await updateTransferRecord({
-        env: input.env,
-        transferId: transfer.id,
-        status: "failed",
-        error: message,
+    try {
+      await getDb(input.env).transaction(async (tx) => {
+        const txPaymentsRepo = createPostgresPaymentsRepository(tx);
+        const txSubscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
+        const now = new Date().toISOString();
+        await txSubscriptionsRepo.updateCollectionAttempt({
+          attemptId: input.attempt.id,
+          transferId,
+          status: "failed",
+          error: message,
+          attemptedAt: now,
+          updatedAt: now,
+        });
+        if (transferId) {
+          await txPaymentsRepo.updateTransfer({
+            transferId,
+            status: "failed",
+            error: message,
+            updatedAt: now,
+          });
+        }
+      });
+    } catch (cleanupError) {
+      console.warn("Failed to mark collection attempt failed after transfer-link error", {
+        recurringPaymentId: input.recurringPayment.id,
+        attemptId: input.attempt.id,
+        error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
       });
     }
 
