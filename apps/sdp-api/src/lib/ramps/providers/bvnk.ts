@@ -373,17 +373,6 @@ function parseBvnkPayoutEstimateResponse(payload: unknown): BvnkPayoutEstimateRe
   return payload as BvnkPayoutEstimateResponse;
 }
 
-interface BvnkConvertResponse {
-  value: number;
-}
-
-function parseBvnkConvertResponse(payload: unknown): BvnkConvertResponse {
-  if (typeof payload !== "object" || payload === null) {
-    throw new AppError("BAD_REQUEST", "BVNK convert response payload is invalid");
-  }
-  return payload as BvnkConvertResponse;
-}
-
 function parseBvnkPaymentSummary(payload: unknown): BvnkPaymentSummary {
   if (typeof payload !== "object" || payload === null) {
     throw new AppError("BAD_REQUEST", "BVNK payment response payload is invalid");
@@ -976,29 +965,12 @@ export class BvnkRampClient implements RampProvider {
    * it, so these interface methods are unreachable for BVNK.
    */
   async estimateOnramp(
-    { env, mode }: RampRuntimeContext,
-    input: RampEstimateOnrampInput
+    _ctx: RampRuntimeContext,
+    _input: RampEstimateOnrampInput
   ): Promise<PaymentRampEstimate> {
-    const config = readBvnkConfig(env, mode);
-    const { currency } = normalizeBvnkCurrencyAndNetwork(getCryptoRailAssetLabel(input.assetRail));
-    const fiatAmount = toPositiveAmount(input.fiatAmount, "fiatAmount");
-    const converted = parseBvnkConvertResponse(
-      await bvnkRequest(
-        config,
-        `/api/currency/convert/${encodeURIComponent(input.fiatCurrency)}/${encodeURIComponent(currency)}?amount=${fiatAmount}`,
-        { method: "GET" }
-      )
-    );
-    return {
+    throw new AppError("ESTIMATE_NOT_AVAILABLE", "BVNK on-ramp rate is only known at quote time.", {
       provider: this.id,
-      direction: "onramp",
-      fiatCurrency: input.fiatCurrency,
-      assetRail: input.assetRail,
-      fiatAmount: input.fiatAmount,
-      cryptoAmount: String(converted.value),
-      exchangeRate: String(converted.value / fiatAmount),
-      fees: { currency: input.fiatCurrency, total: "0" },
-    };
+    });
   }
 
   async estimateOfframp(
