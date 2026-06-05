@@ -1555,6 +1555,8 @@ export async function collectRecurringPayment(input: {
   }
 
   let attempt = await subscriptionsRepo.getCollectionAttemptByRecurringDue({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
     recurringPaymentId: recurringPayment.id,
     dueAt,
   });
@@ -1666,6 +1668,8 @@ export async function collectRecurringPayment(input: {
     });
   } catch (error) {
     const conflictingAttempt = await subscriptionsRepo.getCollectionAttemptByRecurringDue({
+      organizationId: input.organizationId,
+      projectId: input.projectId,
       recurringPaymentId: recurringPayment.id,
       dueAt,
     });

@@ -597,12 +597,14 @@ export function createPostgresPaymentSubscriptionsRepository(
           `SELECT *
              FROM payment_subscription_collection_attempts
             WHERE recurring_payment_id = ?
+              AND organization_id = ?
+              AND project_id = ?
               AND due_at = ?
               AND status IN ('pending', 'processing', 'confirmed')
             ORDER BY created_at DESC
             LIMIT 1`
         )
-        .bind(params.recurringPaymentId, params.dueAt)
+        .bind(params.recurringPaymentId, params.organizationId, params.projectId, params.dueAt)
         .first<Record<string, unknown>>();
 
       return row ? mapAttemptRow(row) : null;

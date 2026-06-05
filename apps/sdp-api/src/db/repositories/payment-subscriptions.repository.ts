@@ -246,6 +246,8 @@ export interface PaymentSubscriptionsRepository {
     limit: number;
   }): Promise<number>;
   getCollectionAttemptByRecurringDue(params: {
+    organizationId: string;
+    projectId: string;
     recurringPaymentId: string;
     dueAt: string;
   }): Promise<PaymentSubscriptionCollectionAttemptRow | null>;

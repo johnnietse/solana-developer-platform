@@ -330,8 +330,8 @@ export interface ListPaymentRecurringPaymentsResponse {
 
 export interface ExecutePaymentRecurringPaymentResponse {
   recurringPayment: PaymentRecurringPayment;
-  collectionAttempt?: PaymentSubscriptionCollectionAttempt;
-  transfer?: PaymentTransferSummary;
+  collectionAttempt: PaymentSubscriptionCollectionAttempt;
+  transfer: PaymentTransferSummary;
 }
 
 export interface PaymentSubscriptionPlanResponse {
