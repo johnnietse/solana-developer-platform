@@ -1176,6 +1176,23 @@ export const createSubscriptionCollectionAttempt = async (c: AppContext) => {
   if (!parsed.success) {
     throw badRequest("Invalid request body", { errors: z.treeifyError(parsed.error) });
   }
+  if (parsed.data.status !== "pending") {
+    throw new AppError(
+      "BAD_REQUEST",
+      "Subscription collection attempts created through this endpoint must start pending"
+    );
+  }
+  if (
+    parsed.data.transferId ||
+    parsed.data.signature ||
+    parsed.data.attemptedAt ||
+    parsed.data.error
+  ) {
+    throw new AppError(
+      "BAD_REQUEST",
+      "Subscription collection attempt execution fields are managed by the settlement worker"
+    );
+  }
 
   const repo = getPaymentSubscriptionsRepository(c);
   const subscription = await repo.getSubscriptionById({

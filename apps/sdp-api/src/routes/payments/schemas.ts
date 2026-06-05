@@ -77,6 +77,10 @@ const paymentAmountSchema = z
   });
 
 const recurringTimestampSchema = z.string().datetime({ offset: true });
+const futureRecurringTimestampSchema = recurringTimestampSchema.refine(
+  (value) => new Date(value).getTime() > Date.now(),
+  { message: "firstCollectionAt must be in the future" }
+);
 const u64StringSchema = z
   .string()
   .regex(/^\d+$/, { message: "Value must be an unsigned integer string" })
@@ -150,7 +154,7 @@ export const createRecurringPaymentSchema = z.object({
     .int()
     .positive()
     .max(24 * 365),
-  firstCollectionAt: recurringTimestampSchema.optional(),
+  firstCollectionAt: futureRecurringTimestampSchema.optional(),
   metadataUri: z.string().url().max(128).optional(),
 });
 

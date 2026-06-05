@@ -1003,12 +1003,18 @@ export const paymentSubscriptionListResponseSchema = z
 
 export const createSubscriptionCollectionAttemptRequestSchema =
   createSubscriptionCollectionAttemptSchemaBase
+    .omit({
+      attemptedAt: true,
+      transferId: true,
+      signature: true,
+      error: true,
+    })
     .extend({
-      status: paymentSubscriptionCollectionAttemptStatusSchema.optional(),
+      status: z.literal("pending").optional(),
     })
     .openapi({
       description:
-        "Creates a collection-attempt record for a due subscription. This endpoint records backend state; the collection worker/Solana transaction submitter owns actual settlement.",
+        "Creates a pending collection-attempt record for a due subscription. Execution fields are managed by the collection worker/Solana transaction submitter.",
     });
 
 export const paymentListSubscriptionCollectionAttemptsQuerySchema =

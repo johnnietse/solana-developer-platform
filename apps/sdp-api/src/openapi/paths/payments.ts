@@ -755,7 +755,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Create subscription collection attempt",
     operationId: "createPaymentSubscriptionCollectionAttempt",
     description:
-      "Creates a collection-attempt record for a due recurring-payment subscription. Actual Solana settlement is owned by the collection worker/transaction submitter.",
+      "Creates a pending collection-attempt record for a due recurring-payment subscription. Actual Solana settlement and execution fields are owned by the collection worker/transaction submitter.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,

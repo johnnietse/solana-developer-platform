@@ -691,8 +691,6 @@ describe("Payments routes", () => {
       ...authHeaders,
       "Content-Type": "application/json",
     };
-    const firstCollectionAt = new Date(Date.now() - 60_000).toISOString();
-
     const counterpartyRes = await app.request(
       "/v1/counterparties",
       {
@@ -736,6 +734,26 @@ describe("Payments routes", () => {
     expect(accountBody.data.account.accountKind).toBe("crypto_wallet");
     const counterpartyAccountId = accountBody.data.account.id;
 
+    const pastFirstCollectionRes = await app.request(
+      "/v1/payments/recurring-payments",
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          sourceWalletId: TEST_WALLET_ID,
+          counterpartyId,
+          counterpartyAccountId,
+          token: DEVNET_USDC_MINT,
+          amount: "0.50",
+          periodHours: 24,
+          firstCollectionAt: new Date(Date.now() - 60_000).toISOString(),
+        }),
+      },
+      env
+    );
+    expect(pastFirstCollectionRes.status).toBe(400);
+    await clearRateLimits();
+
     const createRecurringRes = await app.request(
       "/v1/payments/recurring-payments",
       {
@@ -748,7 +766,6 @@ describe("Payments routes", () => {
           token: DEVNET_USDC_MINT,
           amount: "0.50",
           periodHours: 24,
-          firstCollectionAt,
           metadataUri: "https://sdp.dev/recurring.json",
         }),
       },
@@ -861,10 +878,10 @@ describe("Payments routes", () => {
         };
       };
     };
-    expect(activateBody.data.recurringPayment).toMatchObject({
-      status: "active",
-      nextCollectionDueAt: firstCollectionAt,
-    });
+    expect(activateBody.data.recurringPayment.status).toBe("active");
+    const firstCollectionAt = activateBody.data.recurringPayment.nextCollectionDueAt ?? "";
+    expect(firstCollectionAt).toBeTruthy();
+    expect(new Date(firstCollectionAt).getTime()).toBeLessThanOrEqual(Date.now());
     expect(activateBody.data.recurringPayment.planId).toBeTruthy();
     expect(activateBody.data.recurringPayment.subscriptionId).toBeTruthy();
     const recurringSubscriptionId = activateBody.data.recurringPayment.subscriptionId ?? "";
@@ -1799,6 +1816,22 @@ describe("Payments routes", () => {
       "7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv",
     ]);
 
+    const confirmedAttemptRes = await app.request(
+      `/v1/payments/subscriptions/${subscriptionId}/collection-attempts`,
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          amount: "10.50",
+          dueAt: nextCollectionDueAt,
+          signature: "sig_collection_attempt_test",
+          status: "confirmed",
+        }),
+      },
+      env
+    );
+    expect(confirmedAttemptRes.status).toBe(400);
+
     const attemptRes = await app.request(
       `/v1/payments/subscriptions/${subscriptionId}/collection-attempts`,
       {
@@ -1806,11 +1839,8 @@ describe("Payments routes", () => {
         headers: jsonHeaders,
         body: JSON.stringify({
           amount: "10.50",
-          attemptedAt: "2026-02-01T00:01:00.000Z",
           dueAt: nextCollectionDueAt,
           metadata: { source: "api-lifecycle-test" },
-          signature: "sig_collection_attempt_test",
-          status: "processing",
         }),
       },
       env
@@ -1834,13 +1864,13 @@ describe("Payments routes", () => {
       subscriptionId,
       amount: "10.50",
       token: DEVNET_USDC_MINT,
-      status: "processing",
-      signature: "sig_collection_attempt_test",
+      status: "pending",
+      signature: null,
       metadata: { source: "api-lifecycle-test" },
     });
 
     const attemptsRes = await app.request(
-      `/v1/payments/subscriptions/${subscriptionId}/collection-attempts?status=processing`,
+      `/v1/payments/subscriptions/${subscriptionId}/collection-attempts?status=pending`,
       {
         headers: authHeaders,
       },
@@ -1858,7 +1888,7 @@ describe("Payments routes", () => {
       expect.objectContaining({
         id: attemptBody.data.collectionAttempt.id,
         subscriptionId,
-        status: "processing",
+        status: "pending",
       }),
     ]);
     expect(attemptsBody.data.total).toBe(1);
