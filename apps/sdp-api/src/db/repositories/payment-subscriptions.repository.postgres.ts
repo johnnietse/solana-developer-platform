@@ -1,4 +1,4 @@
-import type { AppDb } from "@/db";
+import type { DatabaseExecutor } from "@/db";
 import type {
   CreatePaymentSubscriptionCollectionAttemptInput,
   CreatePaymentSubscriptionInput,
@@ -13,9 +13,14 @@ import type {
   PaymentSubscriptionPlanRow,
   PaymentSubscriptionRow,
   PaymentSubscriptionsRepository,
+  UpdatePaymentSubscriptionCollectionAttemptInput,
   UpdatePaymentSubscriptionInput,
   UpdatePaymentSubscriptionPlanInput,
 } from "./payment-subscriptions.repository";
+
+function buildInClause(length: number): string {
+  return Array.from({ length }, () => "?").join(", ");
+}
 
 function mapPlanRow(row: Record<string, unknown>): PaymentSubscriptionPlanRow {
   return {
@@ -70,6 +75,7 @@ function mapAttemptRow(row: Record<string, unknown>): PaymentSubscriptionCollect
     organization_id: row.organization_id as string,
     project_id: row.project_id as string,
     subscription_id: row.subscription_id as string,
+    recurring_payment_id: (row.recurring_payment_id as string | null | undefined) ?? null,
     transfer_id: (row.transfer_id as string | null | undefined) ?? null,
     token: row.token as string,
     amount: row.amount as string,
@@ -85,7 +91,7 @@ function mapAttemptRow(row: Record<string, unknown>): PaymentSubscriptionCollect
 }
 
 async function getPlanByIdInternal(
-  db: AppDb,
+  db: DatabaseExecutor,
   params: { planId: string; organizationId: string; projectId: string }
 ): Promise<PaymentSubscriptionPlanRow | null> {
   const row = await db
@@ -103,7 +109,7 @@ async function getPlanByIdInternal(
 }
 
 async function getSubscriptionByIdInternal(
-  db: AppDb,
+  db: DatabaseExecutor,
   params: { subscriptionId: string; organizationId: string; projectId: string }
 ): Promise<PaymentSubscriptionRow | null> {
   const row = await db
@@ -121,7 +127,7 @@ async function getSubscriptionByIdInternal(
 }
 
 async function getAttemptByIdInternal(
-  db: AppDb,
+  db: DatabaseExecutor,
   id: string
 ): Promise<PaymentSubscriptionCollectionAttemptRow | null> {
   const row = await db
@@ -133,7 +139,7 @@ async function getAttemptByIdInternal(
 }
 
 export function createPostgresPaymentSubscriptionsRepository(
-  db: AppDb
+  db: DatabaseExecutor
 ): PaymentSubscriptionsRepository {
   return {
     async createPlan(input: CreatePaymentSubscriptionPlanInput) {
@@ -243,22 +249,33 @@ export function createPostgresPaymentSubscriptionsRepository(
     },
 
     async listPlans(params: ListPaymentSubscriptionPlansInput) {
-      const clauses = ["organization_id = ?", "project_id = ?"];
+      const clauses = ["p.organization_id = ?", "p.project_id = ?"];
       const values: unknown[] = [params.organizationId, params.projectId];
 
       if (params.status) {
-        clauses.push("status = ?");
+        clauses.push("p.status = ?");
         values.push(params.status);
+      }
+      if (params.planWalletIds) {
+        if (params.planWalletIds.length === 0) {
+          clauses.push("1 = 0");
+        } else {
+          const walletClause = buildInClause(params.planWalletIds.length);
+          clauses.push(
+            `(p.owner_wallet_id IN (${walletClause}) OR p.puller_wallet_id IN (${walletClause}))`
+          );
+          values.push(...params.planWalletIds, ...params.planWalletIds);
+        }
       }
 
       const whereClause = clauses.join(" AND ");
       const [rows, countRow] = await Promise.all([
         db
           .prepare(
-            `SELECT *
-               FROM payment_subscription_plans
+            `SELECT p.*
+               FROM payment_subscription_plans p
               WHERE ${whereClause}
-              ORDER BY created_at DESC
+              ORDER BY p.created_at DESC
               LIMIT ? OFFSET ?`
           )
           .bind(...values, params.limit, params.offset)
@@ -266,7 +283,7 @@ export function createPostgresPaymentSubscriptionsRepository(
         db
           .prepare(
             `SELECT COUNT(*)::int AS total
-               FROM payment_subscription_plans
+               FROM payment_subscription_plans p
               WHERE ${whereClause}`
           )
           .bind(...values)
@@ -330,14 +347,23 @@ export function createPostgresPaymentSubscriptionsRepository(
     },
 
     async updateSubscription(input: UpdatePaymentSubscriptionInput) {
-      const existing = await getSubscriptionByIdInternal(db, {
-        subscriptionId: input.subscriptionId,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-      });
-      if (!existing) return null;
+      const whereClauses = ["id = ?", "organization_id = ?", "project_id = ?"];
+      const whereValues: unknown[] = [input.subscriptionId, input.organizationId, input.projectId];
 
-      await db
+      if (input.expectedStatus !== undefined) {
+        whereClauses.push("status = ?");
+        whereValues.push(input.expectedStatus);
+      }
+      if (input.expectedNextCollectionDueAt !== undefined) {
+        if (input.expectedNextCollectionDueAt === null) {
+          whereClauses.push("next_collection_due_at IS NULL");
+        } else {
+          whereClauses.push("next_collection_due_at = ?");
+          whereValues.push(input.expectedNextCollectionDueAt);
+        }
+      }
+
+      const changes = await db
         .prepare(
           `UPDATE payment_subscriptions
               SET subscriber_token_account =
@@ -355,9 +381,7 @@ export function createPostgresPaymentSubscriptionsRepository(
                   cancel_at = CASE WHEN ?::boolean THEN ? ELSE cancel_at END,
                   canceled_at = CASE WHEN ?::boolean THEN ? ELSE canceled_at END,
                   updated_at = ?
-            WHERE id = ?
-              AND organization_id = ?
-              AND project_id = ?`
+            WHERE ${whereClauses.join(" AND ")}`
         )
         .bind(
           input.subscriberTokenAccount !== undefined,
@@ -378,11 +402,13 @@ export function createPostgresPaymentSubscriptionsRepository(
           input.canceledAt !== undefined,
           input.canceledAt ?? null,
           input.updatedAt,
-          input.subscriptionId,
-          input.organizationId,
-          input.projectId
+          ...whereValues
         )
         .run();
+
+      if (changes === 0) {
+        return null;
+      }
 
       return getSubscriptionByIdInternal(db, {
         subscriptionId: input.subscriptionId,
@@ -396,34 +422,50 @@ export function createPostgresPaymentSubscriptionsRepository(
     },
 
     async listSubscriptions(params: ListPaymentSubscriptionsInput) {
-      const clauses = ["organization_id = ?", "project_id = ?"];
+      const clauses = ["s.organization_id = ?", "s.project_id = ?"];
       const values: unknown[] = [params.organizationId, params.projectId];
 
       if (params.planId) {
-        clauses.push("plan_id = ?");
+        clauses.push("s.plan_id = ?");
         values.push(params.planId);
       }
       if (params.counterpartyId) {
-        clauses.push("counterparty_id = ?");
+        clauses.push("s.counterparty_id = ?");
         values.push(params.counterpartyId);
       }
       if (params.status) {
-        clauses.push("status = ?");
+        clauses.push("s.status = ?");
         values.push(params.status);
       }
       if (params.dueBefore) {
-        clauses.push("next_collection_due_at <= ?");
+        clauses.push("s.next_collection_due_at <= ?");
         values.push(params.dueBefore);
+      }
+      if (params.planWalletIds) {
+        if (params.planWalletIds.length === 0) {
+          clauses.push("1 = 0");
+        } else {
+          const walletClause = buildInClause(params.planWalletIds.length);
+          clauses.push(`EXISTS (
+            SELECT 1
+              FROM payment_subscription_plans p
+             WHERE p.id = s.plan_id
+               AND p.organization_id = s.organization_id
+               AND p.project_id = s.project_id
+               AND (p.owner_wallet_id IN (${walletClause}) OR p.puller_wallet_id IN (${walletClause}))
+          )`);
+          values.push(...params.planWalletIds, ...params.planWalletIds);
+        }
       }
 
       const whereClause = clauses.join(" AND ");
       const [rows, countRow] = await Promise.all([
         db
           .prepare(
-            `SELECT *
-               FROM payment_subscriptions
+            `SELECT s.*
+               FROM payment_subscriptions s
               WHERE ${whereClause}
-              ORDER BY created_at DESC
+              ORDER BY s.created_at DESC
               LIMIT ? OFFSET ?`
           )
           .bind(...values, params.limit, params.offset)
@@ -431,7 +473,7 @@ export function createPostgresPaymentSubscriptionsRepository(
         db
           .prepare(
             `SELECT COUNT(*)::int AS total
-               FROM payment_subscriptions
+               FROM payment_subscriptions s
               WHERE ${whereClause}`
           )
           .bind(...values)
@@ -452,6 +494,7 @@ export function createPostgresPaymentSubscriptionsRepository(
              organization_id,
              project_id,
              subscription_id,
+             recurring_payment_id,
              transfer_id,
              token,
              amount,
@@ -463,7 +506,7 @@ export function createPostgresPaymentSubscriptionsRepository(
              metadata,
              created_at,
              updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT DO NOTHING`
         )
         .bind(
@@ -471,6 +514,7 @@ export function createPostgresPaymentSubscriptionsRepository(
           input.organizationId,
           input.projectId,
           input.subscriptionId,
+          input.recurringPaymentId ?? null,
           input.transferId,
           input.token,
           input.amount,
@@ -488,9 +532,94 @@ export function createPostgresPaymentSubscriptionsRepository(
       return getAttemptByIdInternal(db, input.id);
     },
 
+    async updateCollectionAttempt(input: UpdatePaymentSubscriptionCollectionAttemptInput) {
+      const existing = await getAttemptByIdInternal(db, input.attemptId);
+      if (!existing) return null;
+
+      await db
+        .prepare(
+          `UPDATE payment_subscription_collection_attempts
+              SET transfer_id = CASE WHEN ?::boolean THEN ? ELSE transfer_id END,
+                  attempted_at = CASE WHEN ?::boolean THEN ? ELSE attempted_at END,
+                  status = COALESCE(?, status),
+                  signature = CASE WHEN ?::boolean THEN ? ELSE signature END,
+                  error = CASE WHEN ?::boolean THEN ? ELSE error END,
+                  metadata = COALESCE(?, metadata),
+                  updated_at = ?
+            WHERE id = ?`
+        )
+        .bind(
+          input.transferId !== undefined,
+          input.transferId ?? null,
+          input.attemptedAt !== undefined,
+          input.attemptedAt ?? null,
+          input.status ?? null,
+          input.signature !== undefined,
+          input.signature ?? null,
+          input.error !== undefined,
+          input.error ?? null,
+          input.metadata === undefined ? null : JSON.stringify(input.metadata),
+          input.updatedAt,
+          input.attemptId
+        )
+        .run();
+
+      return getAttemptByIdInternal(db, input.attemptId);
+    },
+
+    expireStaleUnsignedProcessingAttempts(params) {
+      return db
+        .prepare(
+          `UPDATE payment_subscription_collection_attempts
+              SET status = 'failed',
+                  error = COALESCE(error, 'Stale recurring collection attempt expired before transfer submission'),
+                  attempted_at = COALESCE(attempted_at, ?),
+                  updated_at = ?
+            WHERE id IN (
+                  SELECT id
+                    FROM payment_subscription_collection_attempts
+                   WHERE status = 'processing'
+                     AND transfer_id IS NULL
+                     AND signature IS NULL
+                     AND updated_at <= ?
+                   ORDER BY updated_at ASC
+                   LIMIT ?
+            )`
+        )
+        .bind(params.updatedAt, params.updatedAt, params.olderThan, params.limit)
+        .run();
+    },
+
+    async getCollectionAttemptByRecurringDue(params) {
+      const row = await db
+        .prepare(
+          `SELECT *
+             FROM payment_subscription_collection_attempts
+            WHERE recurring_payment_id = ?
+              AND due_at = ?
+              AND status IN ('pending', 'processing', 'confirmed')
+            ORDER BY created_at DESC
+            LIMIT 1`
+        )
+        .bind(params.recurringPaymentId, params.dueAt)
+        .first<Record<string, unknown>>();
+
+      return row ? mapAttemptRow(row) : null;
+    },
+
     async listCollectionAttempts(params: ListPaymentSubscriptionCollectionAttemptsInput) {
-      const clauses = ["organization_id = ?", "project_id = ?", "subscription_id = ?"];
-      const values: unknown[] = [params.organizationId, params.projectId, params.subscriptionId];
+      const clauses = ["organization_id = ?", "project_id = ?"];
+      const values: unknown[] = [params.organizationId, params.projectId];
+
+      if (params.recurringPaymentId) {
+        clauses.push("recurring_payment_id = ?");
+        values.push(params.recurringPaymentId);
+      } else if (params.subscriptionId) {
+        clauses.push("subscription_id = ?");
+        values.push(params.subscriptionId);
+      } else {
+        clauses.push("1 = 0");
+      }
 
       if (params.status) {
         clauses.push("status = ?");

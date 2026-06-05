@@ -77,6 +77,10 @@ const paymentAmountSchema = z
   });
 
 const recurringTimestampSchema = z.string().datetime({ offset: true });
+const futureRecurringTimestampSchema = recurringTimestampSchema.refine(
+  (value) => new Date(value).getTime() > Date.now(),
+  { message: "firstCollectionAt must be in the future" }
+);
 const u64StringSchema = z
   .string()
   .regex(/^\d+$/, { message: "Value must be an unsigned integer string" })
@@ -107,6 +111,10 @@ export const subscriptionIdParamsSchema = z.object({
   subscriptionId: z.string().min(1),
 });
 
+export const recurringPaymentIdParamsSchema = z.object({
+  id: z.string().min(1),
+});
+
 export const paymentSubscriptionPlanStatusSchema = z.enum(["draft", "active", "archived"]);
 
 export const paymentSubscriptionStatusSchema = z.enum([
@@ -126,6 +134,41 @@ export const paymentSubscriptionCollectionAttemptStatusSchema = z.enum([
   "skipped",
 ]);
 
+export const paymentRecurringPaymentStatusSchema = z.enum([
+  "pending_activation",
+  "activating",
+  "active",
+  "paused",
+  "canceled",
+  "expired",
+]);
+
+export const createRecurringPaymentSchema = z.object({
+  sourceWalletId: z.string().min(1),
+  counterpartyId: z.string().min(1),
+  counterpartyAccountId: z.string().min(1),
+  token: paymentTokenSchema,
+  amount: paymentAmountSchema,
+  periodHours: z
+    .number()
+    .int()
+    .positive()
+    .max(24 * 365),
+  firstCollectionAt: futureRecurringTimestampSchema.optional(),
+  metadataUri: z.string().url().max(128).optional(),
+});
+
+export const listRecurringPaymentsQuerySchema = z.object({
+  counterpartyId: z.string().min(1).optional(),
+  status: paymentRecurringPaymentStatusSchema.optional(),
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+export const recurringPaymentLifecycleSchema = z.object({});
+
+const createSubscriptionPlanStatusSchema = z.literal("draft").default("draft");
+
 export const createSubscriptionPlanSchema = z.object({
   ownerWalletId: z.string().min(1),
   token: paymentTokenSchema,
@@ -140,7 +183,7 @@ export const createSubscriptionPlanSchema = z.object({
   destinationAddress: solanaAddressSchema("destinationAddress").optional(),
   pullerWalletId: z.string().min(1).optional(),
   metadataUri: z.string().url().max(128).optional(),
-  status: paymentSubscriptionPlanStatusSchema.default("draft"),
+  status: createSubscriptionPlanStatusSchema,
 });
 
 export const updateSubscriptionPlanSchema = z
@@ -168,6 +211,11 @@ export const listSubscriptionPlansQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
 
+const createSubscriptionStatusSchema = z
+  .enum(["pending_authorization", "active"])
+  .default("pending_authorization");
+const updateSubscriptionStatusSchema = z.enum(["pending_authorization", "active", "paused"]);
+
 export const createSubscriptionSchema = z.object({
   planId: z.string().min(1),
   counterpartyId: z.string().min(1),
@@ -176,9 +224,9 @@ export const createSubscriptionSchema = z.object({
   subscriptionPda: solanaAddressSchema("subscriptionPda").optional(),
   subscriptionAuthorityAddress: solanaAddressSchema("subscriptionAuthorityAddress").optional(),
   authorizationSignature: z.string().min(1).max(128).optional(),
-  status: paymentSubscriptionStatusSchema.default("pending_authorization"),
+  status: createSubscriptionStatusSchema,
   currentPeriodStartAt: recurringTimestampSchema.optional(),
-  nextCollectionDueAt: recurringTimestampSchema.optional(),
+  nextCollectionDueAt: futureRecurringTimestampSchema.optional(),
 });
 
 export const updateSubscriptionSchema = z
@@ -189,9 +237,9 @@ export const updateSubscriptionSchema = z
       .nullable()
       .optional(),
     authorizationSignature: z.string().min(1).max(128).nullable().optional(),
-    status: paymentSubscriptionStatusSchema.optional(),
+    status: updateSubscriptionStatusSchema.optional(),
     currentPeriodStartAt: recurringTimestampSchema.nullable().optional(),
-    nextCollectionDueAt: recurringTimestampSchema.nullable().optional(),
+    nextCollectionDueAt: futureRecurringTimestampSchema.nullable().optional(),
     cancelAt: recurringTimestampSchema.nullable().optional(),
     canceledAt: recurringTimestampSchema.nullable().optional(),
   })
@@ -216,17 +264,15 @@ export const listSubscriptionsQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
 
-export const createSubscriptionCollectionAttemptSchema = z.object({
-  amount: paymentAmountSchema.optional(),
-  token: paymentTokenSchema.optional(),
-  dueAt: recurringTimestampSchema.optional(),
-  attemptedAt: recurringTimestampSchema.optional(),
-  status: paymentSubscriptionCollectionAttemptStatusSchema.default("pending"),
-  transferId: z.string().min(1).optional(),
-  signature: z.string().min(1).max(128).optional(),
-  error: z.string().min(1).max(2048).optional(),
-  metadata: z.record(z.string(), z.unknown()).optional(),
-});
+export const createSubscriptionCollectionAttemptSchema = z
+  .object({
+    amount: paymentAmountSchema.optional(),
+    token: paymentTokenSchema.optional(),
+    dueAt: recurringTimestampSchema.optional(),
+    status: z.literal("pending").default("pending"),
+    metadata: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict();
 
 export const prepareSubscriptionCollectionSchema = z.object({
   amount: paymentAmountSchema.optional(),
