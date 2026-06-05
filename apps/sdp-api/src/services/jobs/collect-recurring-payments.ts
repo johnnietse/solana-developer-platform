@@ -2,6 +2,7 @@ import {
   createPaymentRecurringPaymentsRepository,
   createPaymentSubscriptionsRepository,
 } from "@/db/repositories";
+import { parsePositiveIntegerConfig } from "@/lib/config";
 import {
   isRecurringPaymentCollectionEnabled,
   isRecurringPaymentsEnabled,
@@ -13,29 +14,18 @@ const DEFAULT_BATCH_SIZE = 20;
 const MAX_BATCH_SIZE = 20;
 const DEFAULT_RETRY_AFTER_MINUTES = 30;
 
-function parsePositiveInteger(value: string | undefined, fallback: number): number {
-  if (!value) {
-    return fallback;
-  }
-
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    return fallback;
-  }
-
-  return parsed;
-}
-
 export async function collectDueRecurringPayments(env: Env): Promise<{
   scanned: number;
   collected: number;
   failed: number;
+  expirationFailures: number;
+  collectionFailures: number;
 }> {
   if (!isRecurringPaymentsEnabled(env) || !isRecurringPaymentCollectionEnabled(env)) {
-    return { scanned: 0, collected: 0, failed: 0 };
+    return { scanned: 0, collected: 0, failed: 0, expirationFailures: 0, collectionFailures: 0 };
   }
 
-  const requestedBatchSize = parsePositiveInteger(
+  const requestedBatchSize = parsePositiveIntegerConfig(
     env.PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE,
     DEFAULT_BATCH_SIZE
   );
@@ -50,13 +40,13 @@ export async function collectDueRecurringPayments(env: Env): Promise<{
       cronIntervalMinutes: 5,
     });
   }
-  const retryAfterMinutes = parsePositiveInteger(
+  const retryAfterMinutes = parsePositiveIntegerConfig(
     env.PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES,
     DEFAULT_RETRY_AFTER_MINUTES
   );
   const now = new Date();
   const retryAfter = new Date(now.getTime() - retryAfterMinutes * 60 * 1000).toISOString();
-  let failed = 0;
+  let expirationFailures = 0;
   try {
     const expiredAttempts = await createPaymentSubscriptionsRepository(
       env
@@ -72,7 +62,7 @@ export async function collectDueRecurringPayments(env: Env): Promise<{
       });
     }
   } catch (error) {
-    failed += 1;
+    expirationFailures += 1;
     console.warn("Failed to expire stale unsigned recurring collection attempts", {
       retryAfter,
       error: error instanceof Error ? error.message : String(error),
@@ -84,6 +74,7 @@ export async function collectDueRecurringPayments(env: Env): Promise<{
     limit: batchSize,
   });
   let collected = 0;
+  let collectionFailures = 0;
 
   for (const recurringPayment of due) {
     try {
@@ -97,7 +88,7 @@ export async function collectDueRecurringPayments(env: Env): Promise<{
       });
       collected += 1;
     } catch (error) {
-      failed += 1;
+      collectionFailures += 1;
       console.warn("Recurring payment collection failed", {
         recurringPaymentId: recurringPayment.id,
         error: error instanceof Error ? error.message : String(error),
@@ -105,5 +96,11 @@ export async function collectDueRecurringPayments(env: Env): Promise<{
     }
   }
 
-  return { scanned: due.length, collected, failed };
+  return {
+    scanned: due.length,
+    collected,
+    failed: expirationFailures + collectionFailures,
+    expirationFailures,
+    collectionFailures,
+  };
 }

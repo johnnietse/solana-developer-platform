@@ -18,6 +18,7 @@ import type {
   PaymentTransferRow,
   PaymentTransferStatus,
 } from "@/db/repositories/payments.repository";
+import { parsePositiveIntegerConfig } from "@/lib/config";
 import { AppError } from "@/lib/errors";
 import { assertValidAddress } from "@/lib/solana";
 import { createSigningService } from "@/services/domain/signing.service";
@@ -82,21 +83,8 @@ const ACTIVATION_CLAIM_TTL_MS = 10 * 60 * 1000;
 const ACTIVE_COLLECTION_ATTEMPT_STATUSES = new Set(["pending", "processing", "confirmed"]);
 const DEFAULT_COLLECTION_RETRY_AFTER_MINUTES = 30;
 
-function parsePositiveInteger(value: string | undefined, fallback: number): number {
-  if (!value) {
-    return fallback;
-  }
-
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    return fallback;
-  }
-
-  return parsed;
-}
-
 function getCollectionRetryAfter(env: Env, now = new Date()): string {
-  const retryAfterMinutes = parsePositiveInteger(
+  const retryAfterMinutes = parsePositiveIntegerConfig(
     env.PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES,
     DEFAULT_COLLECTION_RETRY_AFTER_MINUTES
   );

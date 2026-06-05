@@ -82,7 +82,13 @@ describe("collectDueRecurringPayments", () => {
 
     const result = await collectDueRecurringPayments(enabledEnv);
 
-    expect(result).toEqual({ scanned: 1, collected: 1, failed: 1 });
+    expect(result).toEqual({
+      scanned: 1,
+      collected: 1,
+      failed: 1,
+      expirationFailures: 1,
+      collectionFailures: 0,
+    });
     expect(listDueRecurringPayments).toHaveBeenCalledWith(
       expect.objectContaining({
         limit: 20,

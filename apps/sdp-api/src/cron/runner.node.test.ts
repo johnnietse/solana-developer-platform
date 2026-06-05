@@ -53,6 +53,14 @@ function makeObservability(): Observability {
   };
 }
 
+function makeEnv(overrides: Partial<Env> = {}): Env {
+  return {
+    PAYMENTS_RECURRING_ENABLED: "true",
+    PAYMENTS_RECURRING_COLLECTION_ENABLED: "true",
+    ...overrides,
+  } as Env;
+}
+
 describe("startCron", () => {
   beforeEach(() => {
     scheduleMock.mockReset();
@@ -75,15 +83,21 @@ describe("startCron", () => {
   });
 
   it("schedules pending transfers and recurring payments with their own cron expressions", () => {
-    startCron({ env: {} as Env, bg: makeBg() });
+    startCron({ env: makeEnv(), bg: makeBg() });
     expect(scheduleMock).toHaveBeenCalledTimes(2);
     expect(scheduleMock.mock.calls[0][0]).toBe(PENDING_TRANSFERS_CRON);
     expect(scheduleMock.mock.calls[1][0]).toBe(RECURRING_PAYMENTS_COLLECTION_CRON);
   });
 
+  it("does not schedule recurring payments when collection is feature-disabled", () => {
+    startCron({ env: {} as Env, bg: makeBg() });
+    expect(scheduleMock).toHaveBeenCalledTimes(1);
+    expect(scheduleMock.mock.calls[0][0]).toBe(PENDING_TRANSFERS_CRON);
+  });
+
   it("schedules when DISABLE_CRON is set to a recognised falsy value ('false' / '0')", () => {
-    startCron({ env: { DISABLE_CRON: "false" } as Env, bg: makeBg() });
-    startCron({ env: { DISABLE_CRON: "0" } as Env, bg: makeBg() });
+    startCron({ env: makeEnv({ DISABLE_CRON: "false" }), bg: makeBg() });
+    startCron({ env: makeEnv({ DISABLE_CRON: "0" }), bg: makeBg() });
     expect(scheduleMock).toHaveBeenCalledTimes(4);
   });
 
@@ -112,7 +126,7 @@ describe("startCron", () => {
 
   it("tick invokes runPendingTransfersReconciliation with the supplied deps", () => {
     const bg = makeBg();
-    const env = {} as Env;
+    const env = makeEnv();
     const observability = makeObservability();
     startCron({ env, bg, observability });
     const pendingTick = scheduleMock.mock.calls[0][1] as () => void;
@@ -125,7 +139,7 @@ describe("startCron", () => {
 
   it("tick passes observability=undefined through when caller did not supply one", () => {
     const bg = makeBg();
-    const env = {} as Env;
+    const env = makeEnv();
     startCron({ env, bg });
     const pendingTick = scheduleMock.mock.calls[0][1] as () => void;
     const recurringTick = scheduleMock.mock.calls[1][1] as () => void;
@@ -144,7 +158,7 @@ describe("startCron", () => {
   });
 
   it("tick is a no-op after stop() has been called, even if the scheduler fires once more", async () => {
-    const handle = startCron({ env: {} as Env, bg: makeBg() });
+    const handle = startCron({ env: makeEnv(), bg: makeBg() });
     await handle?.stop();
     const pendingTick = scheduleMock.mock.calls[0][1] as () => void;
     const recurringTick = scheduleMock.mock.calls[1][1] as () => void;
@@ -155,7 +169,7 @@ describe("startCron", () => {
   });
 
   it("returned handle.stop() delegates to the underlying scheduled task", async () => {
-    const handle = startCron({ env: {} as Env, bg: makeBg() });
+    const handle = startCron({ env: makeEnv(), bg: makeBg() });
     expect(handle).not.toBeNull();
     await handle?.stop();
     expect(stopMock).toHaveBeenCalledTimes(2);

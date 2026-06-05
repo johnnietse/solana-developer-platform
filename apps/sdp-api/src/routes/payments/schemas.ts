@@ -167,7 +167,7 @@ export const listRecurringPaymentsQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
 
-export const recurringPaymentLifecycleSchema = z.object({});
+export const recurringPaymentLifecycleSchema = z.object({}).strict();
 
 const createSubscriptionPlanStatusSchema = z.literal("draft").default("draft");
 
