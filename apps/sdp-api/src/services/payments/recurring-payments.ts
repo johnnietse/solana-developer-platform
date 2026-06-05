@@ -120,6 +120,30 @@ function isLifecycleClaimStatus(
   return status === "canceling" || status === "resuming";
 }
 
+function isRecurringPaymentLifecycleFinalized(input: {
+  recurringPayment: PaymentRecurringPaymentRow;
+  subscription: PaymentSubscriptionRow;
+  operation: RecurringLifecycleOperation;
+}): boolean {
+  const targetStatus = getLifecycleTargetStatus(input.operation);
+  if (
+    input.recurringPayment.status !== targetStatus ||
+    input.subscription.status !== targetStatus
+  ) {
+    return false;
+  }
+
+  if (input.operation === "cancel") {
+    return input.subscription.canceled_at !== null;
+  }
+
+  return (
+    input.subscription.canceled_at === null &&
+    input.recurringPayment.next_collection_due_at !== null &&
+    input.recurringPayment.next_collection_due_at === input.subscription.next_collection_due_at
+  );
+}
+
 function assertRecurringPaymentCanClaimLifecycle(input: {
   recurringPayment: PaymentRecurringPaymentRow;
   operation: RecurringLifecycleOperation;
@@ -675,6 +699,36 @@ async function finalizeRecurringPaymentLifecycle(input: {
   });
 }
 
+async function readRecurringPaymentLifecycleRecords(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  recurringPaymentId: string;
+  subscriptionId: string;
+}): Promise<{
+  recurringPayment: PaymentRecurringPaymentRow;
+  subscription: PaymentSubscriptionRow;
+}> {
+  const [recurringPayment, subscription] = await Promise.all([
+    createPaymentRecurringPaymentsRepository(input.env).getRecurringPaymentById({
+      recurringPaymentId: input.recurringPaymentId,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+    }),
+    createPaymentSubscriptionsRepository(input.env).getSubscriptionById({
+      subscriptionId: input.subscriptionId,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+    }),
+  ]);
+
+  if (!recurringPayment || !subscription) {
+    throw new AppError("NOT_FOUND", "Recurring payment lifecycle state not found");
+  }
+
+  return { recurringPayment, subscription };
+}
+
 async function finalizeRecurringPaymentLifecycleAfterChain(input: {
   env: Env;
   organizationId: string;
@@ -692,7 +746,53 @@ async function finalizeRecurringPaymentLifecycleAfterChain(input: {
       operation: input.operation,
       error: toErrorMessage(error),
     });
-    return finalizeRecurringPaymentLifecycle(input);
+
+    const current = await readRecurringPaymentLifecycleRecords({
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPaymentId: input.recurringPayment.id,
+      subscriptionId: input.subscription.id,
+    });
+    if (isRecurringPaymentLifecycleFinalized({ ...current, operation: input.operation })) {
+      return current.recurringPayment;
+    }
+
+    try {
+      return await finalizeRecurringPaymentLifecycle({
+        ...input,
+        recurringPayment: current.recurringPayment,
+        subscription: current.subscription,
+      });
+    } catch (retryError) {
+      const reconciled = await readRecurringPaymentLifecycleRecords({
+        env: input.env,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        recurringPaymentId: input.recurringPayment.id,
+        subscriptionId: input.subscription.id,
+      });
+      if (
+        isRecurringPaymentLifecycleFinalized({
+          ...reconciled,
+          operation: input.operation,
+        })
+      ) {
+        return reconciled.recurringPayment;
+      }
+
+      throw new AppError(
+        "INTERNAL_ERROR",
+        "Recurring payment lifecycle finalized on-chain but DB finalization could not be recovered",
+        {
+          recurringPaymentId: input.recurringPayment.id,
+          subscriptionId: input.subscription.id,
+          operation: input.operation,
+          originalError: toErrorMessage(error),
+          retryError: toErrorMessage(retryError),
+        }
+      );
+    }
   }
 }
 
@@ -822,6 +922,69 @@ async function markRecurringCollectionSubmitted(input: {
     hasRecoveryMarker: transferHasSubmissionMarker || attemptHasSubmissionMarker,
     hasAttemptRecoveryMarker: attemptHasSubmissionMarker,
   };
+}
+
+async function markRecurringCollectionFailedBeforeSubmission(input: {
+  env: Env;
+  attempt: PaymentSubscriptionCollectionAttemptRow;
+  transfer: PaymentTransferRow;
+  error: string;
+}): Promise<{
+  attempt: PaymentSubscriptionCollectionAttemptRow;
+  transfer: PaymentTransferRow;
+}> {
+  const failRecords = async () =>
+    getDb(input.env).transaction(async (tx) => {
+      const txPaymentsRepo = createPostgresPaymentsRepository(tx);
+      const txSubscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
+      const now = new Date().toISOString();
+      const [updatedTransfer, failedAttempt] = await Promise.all([
+        txPaymentsRepo.updateTransfer({
+          transferId: input.transfer.id,
+          status: "failed",
+          error: input.error,
+          updatedAt: now,
+        }),
+        txSubscriptionsRepo.updateCollectionAttempt({
+          attemptId: input.attempt.id,
+          transferId: input.transfer.id,
+          status: "failed",
+          error: input.error,
+          attemptedAt: now,
+          updatedAt: now,
+        }),
+      ]);
+
+      if (!updatedTransfer || !failedAttempt) {
+        throw new AppError("INTERNAL_ERROR", "Failed to mark recurring collection failed");
+      }
+
+      return { attempt: failedAttempt, transfer: updatedTransfer };
+    });
+
+  try {
+    return await failRecords();
+  } catch (error) {
+    console.error("Failed to mark recurring collection failed before submission; retrying", {
+      attemptId: input.attempt.id,
+      transferId: input.transfer.id,
+      error: toErrorMessage(error),
+    });
+    try {
+      return await failRecords();
+    } catch (retryError) {
+      throw new AppError(
+        "INTERNAL_ERROR",
+        "Recurring collection failed before submission and cleanup could not be persisted",
+        {
+          attemptId: input.attempt.id,
+          transferId: input.transfer.id,
+          collectionError: input.error,
+          cleanupError: toErrorMessage(retryError),
+        }
+      );
+    }
+  }
 }
 
 async function finalizeRecurringCollection(input: {
@@ -1713,25 +1876,15 @@ export async function collectRecurringPayment(input: {
       runtime,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    await updateTransferRecord({
+    const message = toErrorMessage(error);
+    const failed = await markRecurringCollectionFailedBeforeSubmission({
       env: input.env,
-      transferId: transfer.id,
-      status: "failed",
+      attempt,
+      transfer,
       error: message,
     });
-    const failedAttempt = await subscriptionsRepo.updateCollectionAttempt({
-      attemptId: attempt.id,
-      transferId: transfer.id,
-      status: "failed",
-      error: message,
-      attemptedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    });
-
-    if (failedAttempt) {
-      attempt = failedAttempt;
-    }
+    attempt = failed.attempt;
+    transfer = failed.transfer;
 
     throw error;
   }

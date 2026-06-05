@@ -1140,6 +1140,85 @@ describe("Payments routes", () => {
     );
 
     mockRecurringCollectionAccounts();
+    createFeePaymentAdapterMock.mockReturnValueOnce({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+      signAsFeePayer: vi.fn(),
+      signAndSend: vi.fn().mockRejectedValue(new Error("simulated collection submission failure")),
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    let failFailedTransferCleanup = true;
+    const failedTransferCleanupRepoSpy = vi
+      .spyOn(repositories, "createPostgresPaymentsRepository")
+      .mockImplementation((db) => {
+        const repo = originalCreatePostgresPaymentsRepository(db);
+
+        return {
+          ...repo,
+          updateTransfer: vi.fn(async (input) => {
+            if (failFailedTransferCleanup && input.status === "failed") {
+              failFailedTransferCleanup = false;
+              throw new Error("simulated failed-transfer cleanup write failure");
+            }
+
+            return repo.updateTransfer(input);
+          }),
+        };
+      });
+    try {
+      const failedSubmissionRes = await app.request(
+        `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
+        {
+          method: "POST",
+          headers: jsonHeaders,
+          body: "{}",
+        },
+        env
+      );
+      expect(failedSubmissionRes.status).toBe(500);
+    } finally {
+      failedTransferCleanupRepoSpy.mockRestore();
+    }
+    expect(failFailedTransferCleanup).toBe(false);
+
+    const failedSubmissionAttemptsRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/collection-attempts?status=failed`,
+      {
+        method: "GET",
+        headers: authHeaders,
+      },
+      env
+    );
+    expect(failedSubmissionAttemptsRes.status).toBe(200);
+    const failedSubmissionAttemptsBody = (await failedSubmissionAttemptsRes.json()) as {
+      data: {
+        collectionAttempts: Array<{
+          status: string;
+          transferId: string | null;
+          error: string | null;
+        }>;
+      };
+    };
+    const failedSubmissionAttempt =
+      failedSubmissionAttemptsBody.data.collectionAttempts.find(
+        (attempt) => attempt.error === "simulated collection submission failure"
+      ) ?? null;
+    expect(failedSubmissionAttempt).toMatchObject({
+      status: "failed",
+      transferId: expect.any(String),
+    });
+    const failedSubmissionTransfer = await repositories
+      .createPaymentsRepository(env)
+      .getTransferById({
+        transferId: failedSubmissionAttempt?.transferId ?? "",
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+      });
+    expect(failedSubmissionTransfer).toMatchObject({
+      status: "failed",
+      error: "simulated collection submission failure",
+    });
+
+    mockRecurringCollectionAccounts();
     const originalCreatePostgresRecurringPaymentsRepository =
       repositories.createPostgresPaymentRecurringPaymentsRepository;
     const originalCreatePaymentSubscriptionsRepository =
