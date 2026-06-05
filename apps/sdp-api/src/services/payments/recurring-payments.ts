@@ -2335,6 +2335,8 @@ export async function executeRecurringPaymentLifecycle(input: {
   }
   const lifecycleAttemptId = claim.lifecycleAttemptId;
 
+  // claimLifecycleRecords inserts this attempt in the same transaction as the
+  // canceling/resuming status claim, so signer failures below have an audit row.
   let sourceSigner: Awaited<ReturnType<typeof getSourceSigner>>;
   try {
     sourceSigner = await getSourceSigner({

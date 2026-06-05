@@ -227,4 +227,15 @@ describe("payment subscription schemas", () => {
       expect(result.data).toEqual({ amount: "10.50", status: "pending" });
     }
   });
+
+  it("parses explicit non-pending collection attempt statuses for handler compatibility", () => {
+    const result = createSubscriptionCollectionAttemptSchema.safeParse({
+      status: "processing",
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.status).toBe("processing");
+    }
+  });
 });

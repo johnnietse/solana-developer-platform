@@ -270,7 +270,7 @@ export const createSubscriptionCollectionAttemptSchema = z.object({
   amount: paymentAmountSchema.optional(),
   token: paymentTokenSchema.optional(),
   dueAt: recurringTimestampSchema.optional(),
-  status: z.literal("pending").default("pending"),
+  status: paymentSubscriptionCollectionAttemptStatusSchema.default("pending"),
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
