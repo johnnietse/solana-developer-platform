@@ -23,6 +23,7 @@ import * as repositories from "@/db/repositories";
 import app from "@/index";
 import { hashString } from "@/lib/hash";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
+import { createKVStoreSet } from "@/runtime/factory";
 import * as feePaymentAdapters from "@/services/adapters/fee-payment";
 import * as solanaServices from "@/services/solana";
 import * as solanaRpc from "@/services/solana/rpc";
@@ -290,6 +291,14 @@ async function seedCachedKey(override: Partial<CachedApiKey>): Promise<void> {
     ...TEST_CACHED_API_KEY,
     ...override,
   });
+}
+
+async function clearRateLimits(): Promise<void> {
+  const rateLimits = createKVStoreSet(env).rateLimits;
+  const keys = await rateLimits.list();
+  for (const key of keys.keys) {
+    await rateLimits.delete(key.name);
+  }
 }
 
 async function seedWalletPolicy(params: {
@@ -1566,6 +1575,7 @@ describe("Payments routes", () => {
     );
     expect(scopedPatchSubscriptionRes.status).toBe(403);
 
+    await clearRateLimits();
     await seedCachedKey({
       walletBindings: [
         { walletId: TEST_WALLET_ID, permissions: ["payments:read", "payments:write"] },
