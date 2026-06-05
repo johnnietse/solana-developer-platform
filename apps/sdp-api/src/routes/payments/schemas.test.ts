@@ -213,6 +213,20 @@ describe("payment subscription schemas", () => {
     expect(result.success).toBe(true);
   });
 
+  it("parses explicit low-level subscription create statuses for compatibility", () => {
+    const result = createSubscriptionSchema.safeParse({
+      planId: "psp_test",
+      counterpartyId: "cp_test",
+      subscriberAddress: VALID_DESTINATION,
+      status: "paused",
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.status).toBe("paused");
+    }
+  });
+
   it("ignores legacy execution fields on collection attempt creation", () => {
     const result = createSubscriptionCollectionAttemptSchema.safeParse({
       amount: "10.50",
