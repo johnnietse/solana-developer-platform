@@ -606,28 +606,26 @@ export class LightsparkRampClient implements RampProvider {
     const cryptoCurrency = normalizeLightsparkCurrencyCode(
       getCryptoRailAssetLabel(input.assetRail)
     );
-    const sendingAmount = toLightsparkMinorUnitsInteger(
-      parseDecimalAmount(input.cryptoAmount, getLightsparkCurrencyDecimals(cryptoCurrency)),
-      "cryptoAmount"
-    );
+    const cryptoDecimals = getLightsparkCurrencyDecimals(cryptoCurrency);
+    const cryptoMinorUnits = parseDecimalAmount(input.cryptoAmount, cryptoDecimals);
     const rate = parseGridExchangeRate(
       await this.request<GridExchangeRatesResponse>(
         config,
-        `exchange-rates?sourceCurrency=${encodeURIComponent(cryptoCurrency)}&destinationCurrency=${encodeURIComponent(input.fiatCurrency)}&sendingAmount=${sendingAmount}`,
+        `exchange-rates?sourceCurrency=${encodeURIComponent(cryptoCurrency)}&destinationCurrency=${encodeURIComponent(input.fiatCurrency)}&sendingAmount=${toLightsparkMinorUnitsInteger(cryptoMinorUnits, "cryptoAmount")}`,
         { method: "GET" }
       )
     );
+    const fiatMinorUnits =
+      (cryptoMinorUnits * BigInt(rate.receivingAmount)) / BigInt(rate.sendingAmount);
+    const fiatAmount = formatDecimalAmount(fiatMinorUnits, rate.destinationCurrency.decimals);
     return {
       provider: this.id,
       direction: "offramp",
       fiatCurrency: input.fiatCurrency,
       assetRail: input.assetRail,
-      fiatAmount: formatDecimalAmount(
-        BigInt(rate.receivingAmount),
-        rate.destinationCurrency.decimals
-      ),
-      cryptoAmount: formatDecimalAmount(BigInt(rate.sendingAmount), rate.sourceCurrency.decimals),
-      exchangeRate: String(rate.exchangeRate),
+      fiatAmount,
+      cryptoAmount: input.cryptoAmount,
+      exchangeRate: String(Number(fiatAmount) / Number(input.cryptoAmount)),
       fees: {
         currency: getCryptoRailAssetLabel(input.assetRail),
         total: formatDecimalAmount(BigInt(rate.fees.fixed), rate.sourceCurrency.decimals),
