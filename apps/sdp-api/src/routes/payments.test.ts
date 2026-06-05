@@ -1371,6 +1371,21 @@ describe("Payments routes", () => {
       cancelLifecycleRepoSpy.mockRestore();
     }
     const confirmCallsAfterFailedCancel = confirmTransactionMock.mock.calls.length;
+    const staleCancelClaimAt = new Date(Date.now() - 11 * 60 * 1000).toISOString();
+    await repositories.createPaymentRecurringPaymentsRepository(env).updateRecurringPayment({
+      recurringPaymentId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      status: "canceling",
+      updatedAt: staleCancelClaimAt,
+    });
+    await repositories.createPaymentSubscriptionsRepository(env).updateSubscription({
+      subscriptionId: recurringSubscriptionId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      status: "canceling",
+      updatedAt: staleCancelClaimAt,
+    });
 
     mockRecurringLifecycleSubscriptionState({
       planPda: recurringPlanPda,
@@ -1464,6 +1479,14 @@ describe("Payments routes", () => {
       resumeLifecycleRepoSpy.mockRestore();
     }
     const confirmCallsAfterFailedResume = confirmTransactionMock.mock.calls.length;
+    const staleResumeClaimAt = new Date(Date.now() - 11 * 60 * 1000).toISOString();
+    await repositories.createPaymentRecurringPaymentsRepository(env).updateRecurringPayment({
+      recurringPaymentId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      status: "resuming",
+      updatedAt: staleResumeClaimAt,
+    });
 
     mockRecurringLifecycleSubscriptionState({
       planPda: recurringPlanPda,

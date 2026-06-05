@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS payment_recurring_payments (
     FOREIGN KEY (subscription_id) REFERENCES payment_subscriptions(id) ON DELETE RESTRICT,
     CONSTRAINT payment_recurring_payments_period_hours_positive CHECK (period_hours > 0),
     CONSTRAINT payment_recurring_payments_status_check
-        CHECK (status IN ('pending_activation', 'activating', 'active', 'paused', 'canceled', 'expired'))
+        CHECK (status IN ('pending_activation', 'activating', 'active', 'canceling', 'resuming', 'paused', 'canceled', 'expired'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_payment_recurring_payments_project_status_due

@@ -80,6 +80,7 @@ function advanceCollectionDueAtAfter(input: {
 }
 
 const ACTIVATION_CLAIM_TTL_MS = 10 * 60 * 1000;
+const LIFECYCLE_CLAIM_TTL_MS = 10 * 60 * 1000;
 const ACTIVE_COLLECTION_ATTEMPT_STATUSES = new Set(["pending", "processing", "confirmed"]);
 const DEFAULT_COLLECTION_RETRY_AFTER_MINUTES = 30;
 
@@ -94,6 +95,96 @@ function getCollectionRetryAfter(env: Env, now = new Date()): string {
 
 function isFreshActivationClaim(updatedAt: string): boolean {
   return Date.now() - new Date(updatedAt).getTime() < ACTIVATION_CLAIM_TTL_MS;
+}
+
+type RecurringLifecycleOperation = "cancel" | "resume";
+type RecurringLifecycleClaimStatus = Extract<
+  PaymentRecurringPaymentRow["status"],
+  "canceling" | "resuming"
+>;
+
+function isFreshLifecycleClaim(updatedAt: string): boolean {
+  return Date.now() - new Date(updatedAt).getTime() < LIFECYCLE_CLAIM_TTL_MS;
+}
+
+function getLifecycleClaimStatus(
+  operation: RecurringLifecycleOperation
+): RecurringLifecycleClaimStatus {
+  return operation === "cancel" ? "canceling" : "resuming";
+}
+
+function getLifecycleTargetStatus(
+  operation: RecurringLifecycleOperation
+): Extract<PaymentRecurringPaymentRow["status"], "active" | "canceled"> {
+  return operation === "cancel" ? "canceled" : "active";
+}
+
+function isLifecycleClaimStatus(
+  status: PaymentRecurringPaymentRow["status"]
+): status is RecurringLifecycleClaimStatus {
+  return status === "canceling" || status === "resuming";
+}
+
+function assertRecurringPaymentCanClaimLifecycle(input: {
+  recurringPayment: PaymentRecurringPaymentRow;
+  operation: RecurringLifecycleOperation;
+  claimStatus: RecurringLifecycleClaimStatus;
+}) {
+  const { recurringPayment, operation, claimStatus } = input;
+  if (
+    !recurringPayment.subscription_id ||
+    !recurringPayment.plan_pda ||
+    !recurringPayment.subscription_pda
+  ) {
+    throw new AppError("BAD_REQUEST", "Recurring payment has not been activated");
+  }
+
+  if (isLifecycleClaimStatus(recurringPayment.status)) {
+    if (
+      recurringPayment.status !== claimStatus ||
+      isFreshLifecycleClaim(recurringPayment.updated_at)
+    ) {
+      throw new AppError("CONFLICT", "Recurring payment lifecycle update is already in progress");
+    }
+    return;
+  }
+
+  if (
+    operation === "cancel" &&
+    recurringPayment.status !== "active" &&
+    recurringPayment.status !== "paused"
+  ) {
+    throw new AppError("BAD_REQUEST", "Only active or paused recurring payments can be canceled");
+  }
+  if (
+    operation === "resume" &&
+    recurringPayment.status !== "canceled" &&
+    recurringPayment.status !== "paused"
+  ) {
+    throw new AppError("BAD_REQUEST", "Only canceled or paused recurring payments can be resumed");
+  }
+}
+
+function assertSubscriptionCanClaimLifecycle(input: {
+  subscription: PaymentSubscriptionRow;
+  operation: RecurringLifecycleOperation;
+}) {
+  const { subscription, operation } = input;
+  if (
+    operation === "cancel" &&
+    subscription.status !== "active" &&
+    subscription.status !== "paused" &&
+    subscription.status !== "canceling"
+  ) {
+    throw new AppError("CONFLICT", "Recurring payment subscription cannot be canceled");
+  }
+  if (
+    operation === "resume" &&
+    subscription.status !== "canceled" &&
+    subscription.status !== "paused"
+  ) {
+    throw new AppError("CONFLICT", "Recurring payment subscription cannot be resumed");
+  }
 }
 
 function toErrorMessage(error: unknown): string {
@@ -350,6 +441,245 @@ async function claimActivationRecords(input: {
       plan,
       subscription,
     };
+  });
+}
+
+async function claimLifecycleRecords(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  recurringPaymentId: string;
+  operation: RecurringLifecycleOperation;
+}): Promise<{
+  recurringPayment: PaymentRecurringPaymentRow;
+  subscription: PaymentSubscriptionRow;
+}> {
+  return getDb(input.env).transaction(async (tx) => {
+    const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+    const txSubscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
+    const claimStatus = getLifecycleClaimStatus(input.operation);
+
+    await tx
+      .prepare(
+        `SELECT id
+           FROM payment_recurring_payments
+          WHERE id = ?
+            AND organization_id = ?
+            AND project_id = ?
+          FOR UPDATE`
+      )
+      .bind(input.recurringPaymentId, input.organizationId, input.projectId)
+      .first();
+
+    const recurringPayment = await txRecurringRepo.getRecurringPaymentById({
+      recurringPaymentId: input.recurringPaymentId,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+    });
+
+    if (!recurringPayment) {
+      throw new AppError("NOT_FOUND", "Recurring payment not found");
+    }
+    assertRecurringPaymentCanClaimLifecycle({
+      recurringPayment,
+      operation: input.operation,
+      claimStatus,
+    });
+    const subscriptionId = recurringPayment.subscription_id;
+    if (!subscriptionId) {
+      throw new AppError("BAD_REQUEST", "Recurring payment has not been activated");
+    }
+
+    await tx
+      .prepare(
+        `SELECT id
+           FROM payment_subscriptions
+          WHERE id = ?
+            AND organization_id = ?
+            AND project_id = ?
+          FOR UPDATE`
+      )
+      .bind(subscriptionId, input.organizationId, input.projectId)
+      .first();
+
+    const subscription = await txSubscriptionsRepo.getSubscriptionById({
+      subscriptionId,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+    });
+    if (!subscription) {
+      throw new AppError("NOT_FOUND", "Recurring payment subscription not found");
+    }
+    assertSubscriptionCanClaimLifecycle({ subscription, operation: input.operation });
+
+    const now = new Date().toISOString();
+    const claimedPayment = await txRecurringRepo.updateRecurringPayment({
+      recurringPaymentId: recurringPayment.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      expectedStatus: recurringPayment.status,
+      expectedNextCollectionDueAt: recurringPayment.next_collection_due_at,
+      status: claimStatus,
+      updatedAt: now,
+    });
+    if (!claimedPayment) {
+      throw new AppError(
+        "CONFLICT",
+        "Recurring payment lifecycle state changed before the update was claimed"
+      );
+    }
+
+    if (input.operation !== "cancel" || subscription.status === "canceling") {
+      return { recurringPayment: claimedPayment, subscription };
+    }
+
+    const claimedSubscription = await txSubscriptionsRepo.updateSubscription({
+      subscriptionId: subscription.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      expectedStatus: subscription.status,
+      expectedNextCollectionDueAt: subscription.next_collection_due_at,
+      status: "canceling",
+      updatedAt: now,
+    });
+    if (!claimedSubscription) {
+      throw new AppError(
+        "CONFLICT",
+        "Recurring payment subscription lifecycle state changed before the update was claimed"
+      );
+    }
+
+    return { recurringPayment: claimedPayment, subscription: claimedSubscription };
+  });
+}
+
+async function finalizeRecurringPaymentLifecycle(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  recurringPayment: PaymentRecurringPaymentRow;
+  subscription: PaymentSubscriptionRow;
+  operation: RecurringLifecycleOperation;
+}): Promise<PaymentRecurringPaymentRow> {
+  const now = new Date().toISOString();
+  const claimStatus = getLifecycleClaimStatus(input.operation);
+  const status = getLifecycleTargetStatus(input.operation);
+  const resumeNextCollectionDueAt =
+    input.operation === "resume"
+      ? advanceCollectionDueAtAfter({
+          nextCollectionDueAt: input.recurringPayment.next_collection_due_at,
+          periodHours: input.recurringPayment.period_hours,
+          after: now,
+        })
+      : undefined;
+  const resumeCurrentPeriodStartAt =
+    resumeNextCollectionDueAt === undefined
+      ? undefined
+      : addPeriodHours(resumeNextCollectionDueAt, -input.recurringPayment.period_hours);
+
+  return getDb(input.env).transaction(async (tx) => {
+    const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+    const txSubscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
+
+    await tx
+      .prepare(
+        `SELECT id
+           FROM payment_recurring_payments
+          WHERE id = ?
+            AND organization_id = ?
+            AND project_id = ?
+          FOR UPDATE`
+      )
+      .bind(input.recurringPayment.id, input.organizationId, input.projectId)
+      .first();
+    await tx
+      .prepare(
+        `SELECT id
+           FROM payment_subscriptions
+          WHERE id = ?
+            AND organization_id = ?
+            AND project_id = ?
+          FOR UPDATE`
+      )
+      .bind(input.subscription.id, input.organizationId, input.projectId)
+      .first();
+
+    const lockedRecurringPayment = await txRecurringRepo.getRecurringPaymentById({
+      recurringPaymentId: input.recurringPayment.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+    });
+    const lockedSubscription = await txSubscriptionsRepo.getSubscriptionById({
+      subscriptionId: input.subscription.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+    });
+    if (!lockedRecurringPayment || !lockedSubscription) {
+      throw new AppError("NOT_FOUND", "Recurring payment lifecycle state not found");
+    }
+    if (
+      lockedRecurringPayment.status !== claimStatus ||
+      lockedRecurringPayment.next_collection_due_at !==
+        input.recurringPayment.next_collection_due_at
+    ) {
+      throw new AppError(
+        "CONFLICT",
+        "Recurring payment lifecycle state changed before finalization started"
+      );
+    }
+    if (
+      input.operation === "cancel" &&
+      (lockedSubscription.status !== "canceling" ||
+        lockedSubscription.next_collection_due_at !== input.recurringPayment.next_collection_due_at)
+    ) {
+      throw new AppError(
+        "CONFLICT",
+        "Recurring payment subscription lifecycle state changed before finalization started"
+      );
+    }
+    if (
+      input.operation === "resume" &&
+      (lockedSubscription.status !== input.subscription.status ||
+        lockedSubscription.next_collection_due_at !== input.recurringPayment.next_collection_due_at)
+    ) {
+      throw new AppError(
+        "CONFLICT",
+        "Recurring payment subscription lifecycle state changed before finalization started"
+      );
+    }
+
+    const updated = await txRecurringRepo.updateRecurringPayment({
+      recurringPaymentId: input.recurringPayment.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      expectedStatus: claimStatus,
+      expectedNextCollectionDueAt: input.recurringPayment.next_collection_due_at,
+      status,
+      nextCollectionDueAt: resumeNextCollectionDueAt,
+      updatedAt: now,
+    });
+    const updatedSubscription = await txSubscriptionsRepo.updateSubscription({
+      subscriptionId: input.subscription.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      expectedStatus: lockedSubscription.status,
+      expectedNextCollectionDueAt: input.recurringPayment.next_collection_due_at,
+      status,
+      currentPeriodStartAt: resumeCurrentPeriodStartAt,
+      nextCollectionDueAt: resumeNextCollectionDueAt,
+      canceledAt:
+        input.operation === "cancel" ? now : input.operation === "resume" ? null : undefined,
+      updatedAt: now,
+    });
+
+    if (!updated || !updatedSubscription) {
+      throw new AppError(
+        "CONFLICT",
+        "Recurring payment lifecycle state changed before the update completed"
+      );
+    }
+
+    return updated;
   });
 }
 
@@ -1451,105 +1781,39 @@ export async function executeRecurringPaymentLifecycle(input: {
   recurringPaymentId: string;
   operation: "cancel" | "resume";
 }): Promise<PaymentRecurringPaymentRow> {
-  const recurringRepo = createPaymentRecurringPaymentsRepository(input.env);
-  const recurringPayment = await recurringRepo.getRecurringPaymentById({
-    recurringPaymentId: input.recurringPaymentId,
+  const claim = await claimLifecycleRecords({
+    env: input.env,
     organizationId: input.organizationId,
     projectId: input.projectId,
+    recurringPaymentId: input.recurringPaymentId,
+    operation: input.operation,
   });
 
-  if (!recurringPayment) {
-    throw new AppError("NOT_FOUND", "Recurring payment not found");
-  }
-  const subscriptionId = recurringPayment.subscription_id;
-  if (!subscriptionId || !recurringPayment.plan_pda || !recurringPayment.subscription_pda) {
-    throw new AppError("BAD_REQUEST", "Recurring payment has not been activated");
-  }
-  if (
-    input.operation === "cancel" &&
-    recurringPayment.status !== "active" &&
-    recurringPayment.status !== "paused"
-  ) {
-    throw new AppError("BAD_REQUEST", "Only active or paused recurring payments can be canceled");
-  }
-  if (
-    input.operation === "resume" &&
-    recurringPayment.status !== "canceled" &&
-    recurringPayment.status !== "paused"
-  ) {
-    throw new AppError("BAD_REQUEST", "Only canceled or paused recurring payments can be resumed");
-  }
-
-  const sourceAddress = assertValidAddress(recurringPayment.source_address, "sourceAddress");
+  const sourceAddress = assertValidAddress(claim.recurringPayment.source_address, "sourceAddress");
   const sourceSigner = await getSourceSigner({
     env: input.env,
     organizationId: input.organizationId,
     projectId: input.projectId,
-    sourceWalletId: recurringPayment.source_wallet_id,
+    sourceWalletId: claim.recurringPayment.source_wallet_id,
     expectedAddress: sourceAddress,
   });
+  if (!claim.recurringPayment.plan_pda || !claim.recurringPayment.subscription_pda) {
+    throw new AppError("BAD_REQUEST", "Recurring payment has not been activated");
+  }
   await executeSubscriptionLifecycleOnChain({
     env: input.env,
     operation: input.operation,
     sourceSigner,
-    planPda: assertValidAddress(recurringPayment.plan_pda, "planPda"),
-    subscriptionPda: assertValidAddress(recurringPayment.subscription_pda, "subscriptionPda"),
+    planPda: assertValidAddress(claim.recurringPayment.plan_pda, "planPda"),
+    subscriptionPda: assertValidAddress(claim.recurringPayment.subscription_pda, "subscriptionPda"),
   });
 
-  const now = new Date().toISOString();
-  const status = input.operation === "cancel" ? "canceled" : "active";
-  const resumeNextCollectionDueAt =
-    input.operation === "resume"
-      ? advanceCollectionDueAtAfter({
-          nextCollectionDueAt: recurringPayment.next_collection_due_at,
-          periodHours: recurringPayment.period_hours,
-          after: now,
-        })
-      : undefined;
-  const resumeCurrentPeriodStartAt =
-    resumeNextCollectionDueAt === undefined
-      ? undefined
-      : addPeriodHours(resumeNextCollectionDueAt, -recurringPayment.period_hours);
-
-  return getDb(input.env).transaction(async (tx) => {
-    const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
-    const txSubscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
-    const updated = await txRecurringRepo.updateRecurringPayment({
-      recurringPaymentId: recurringPayment.id,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      expectedStatus: recurringPayment.status,
-      expectedNextCollectionDueAt: recurringPayment.next_collection_due_at,
-      status,
-      nextCollectionDueAt: resumeNextCollectionDueAt,
-      updatedAt: now,
-    });
-    const updatedSubscription = await txSubscriptionsRepo.updateSubscription({
-      subscriptionId,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      expectedStatus:
-        recurringPayment.status === "paused"
-          ? "paused"
-          : recurringPayment.status === "canceled"
-            ? "canceled"
-            : "active",
-      expectedNextCollectionDueAt: recurringPayment.next_collection_due_at,
-      status,
-      currentPeriodStartAt: resumeCurrentPeriodStartAt,
-      nextCollectionDueAt: resumeNextCollectionDueAt,
-      canceledAt:
-        input.operation === "cancel" ? now : input.operation === "resume" ? null : undefined,
-      updatedAt: now,
-    });
-
-    if (!updated || !updatedSubscription) {
-      throw new AppError(
-        "CONFLICT",
-        "Recurring payment lifecycle state changed before the update completed"
-      );
-    }
-
-    return updated;
+  return finalizeRecurringPaymentLifecycle({
+    env: input.env,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    recurringPayment: claim.recurringPayment,
+    subscription: claim.subscription,
+    operation: input.operation,
   });
 }

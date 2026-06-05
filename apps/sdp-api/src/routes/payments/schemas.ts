@@ -82,7 +82,6 @@ const futureRecurringTimestampSchema = (fieldName: string) =>
     message: `${fieldName} must be in the future`,
   });
 const firstCollectionAtTimestampSchema = futureRecurringTimestampSchema("firstCollectionAt");
-const nextCollectionDueAtTimestampSchema = futureRecurringTimestampSchema("nextCollectionDueAt");
 const u64StringSchema = z
   .string()
   .regex(/^\d+$/, { message: "Value must be an unsigned integer string" })
@@ -140,6 +139,8 @@ export const paymentRecurringPaymentStatusSchema = z.enum([
   "pending_activation",
   "activating",
   "active",
+  "canceling",
+  "resuming",
   "paused",
   "canceled",
   "expired",
@@ -227,7 +228,7 @@ export const createSubscriptionSchema = z.object({
   authorizationSignature: z.string().min(1).max(128).optional(),
   status: createSubscriptionStatusSchema,
   currentPeriodStartAt: recurringTimestampSchema.optional(),
-  nextCollectionDueAt: nextCollectionDueAtTimestampSchema.optional(),
+  nextCollectionDueAt: recurringTimestampSchema.optional(),
 });
 
 export const updateSubscriptionSchema = z

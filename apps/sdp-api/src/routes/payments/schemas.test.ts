@@ -189,7 +189,7 @@ describe("wallet policy destinationAllowlist schema", () => {
 });
 
 describe("payment subscription schemas", () => {
-  it("uses the nextCollectionDueAt field name in future timestamp errors", () => {
+  it("keeps low-level subscription creation compatible with past due timestamps", () => {
     const result = createSubscriptionSchema.safeParse({
       planId: "psp_test",
       counterpartyId: "cp_test",
@@ -197,12 +197,7 @@ describe("payment subscription schemas", () => {
       nextCollectionDueAt: new Date(Date.now() - 60_000).toISOString(),
     });
 
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.issues.map((issue) => issue.message)).toContain(
-        "nextCollectionDueAt must be in the future"
-      );
-    }
+    expect(result.success).toBe(true);
   });
 
   it("ignores legacy execution fields on collection attempt creation", () => {

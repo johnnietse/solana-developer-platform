@@ -151,6 +151,8 @@ export type PaymentRecurringPaymentStatus =
   | "pending_activation"
   | "activating"
   | "active"
+  | "canceling"
+  | "resuming"
   | "paused"
   | "canceled"
   | "expired";
