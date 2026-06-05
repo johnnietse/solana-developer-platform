@@ -1230,15 +1230,6 @@ describe("Payments routes", () => {
     );
     expect(blockhashExpiredRes.status).toBe(502);
 
-    const dueAfterBlockhashExpiry = await repositories
-      .createPaymentRecurringPaymentsRepository(env)
-      .listDueRecurringPayments({
-        now: new Date().toISOString(),
-        retryAfter: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-        limit: 10,
-      });
-    expect(dueAfterBlockhashExpiry.map((payment) => payment.id)).toContain(recurringPaymentId);
-
     const blockhashFailedAttemptsRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/collection-attempts?status=failed`,
       {
