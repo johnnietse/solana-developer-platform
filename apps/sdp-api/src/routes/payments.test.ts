@@ -1123,6 +1123,15 @@ describe("Payments routes", () => {
     };
     expect(cancelRetryBody.data.recurringPayment.status).toBe("canceled");
     expect(confirmTransactionMock.mock.calls.length).toBe(confirmCallsAfterFailedCancel);
+    const canceledSubscription = await repositories
+      .createPaymentSubscriptionsRepository(env)
+      .getSubscriptionById({
+        subscriptionId: recurringSubscriptionId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+      });
+    const canceledAt = canceledSubscription?.canceled_at ?? "";
+    expect(canceledAt).toBeTruthy();
 
     const staleResumeDueAt = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
     const staleResumePeriodStartAt = new Date(
@@ -1218,6 +1227,7 @@ describe("Payments routes", () => {
         projectId: TEST_PROJECT.id,
       });
     expect(resumedSubscription?.next_collection_due_at).toBe(resumedDueAt);
+    expect(resumedSubscription?.canceled_at).toBe(canceledAt);
   });
 
   it("exercises the recurring subscription lifecycle through SDP API routes", async () => {

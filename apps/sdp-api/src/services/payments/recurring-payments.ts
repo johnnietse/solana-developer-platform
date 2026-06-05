@@ -1199,7 +1199,7 @@ export async function executeRecurringPaymentLifecycle(input: {
       status,
       currentPeriodStartAt: resumeCurrentPeriodStartAt,
       nextCollectionDueAt: resumeNextCollectionDueAt,
-      canceledAt: input.operation === "cancel" ? now : null,
+      canceledAt: input.operation === "cancel" ? now : undefined,
       updatedAt: now,
     });
 
