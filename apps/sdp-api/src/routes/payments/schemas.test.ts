@@ -2,6 +2,7 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import type { z } from "zod";
 import {
   createSubscriptionCollectionAttemptSchema,
+  createSubscriptionPlanSchema,
   createSubscriptionSchema,
   createTransferSchema,
   PAYMENT_TOKEN_VALIDATION_MESSAGE,
@@ -189,6 +190,18 @@ describe("wallet policy destinationAllowlist schema", () => {
 });
 
 describe("payment subscription schemas", () => {
+  it("keeps low-level subscription plan creation compatible with active status", () => {
+    const result = createSubscriptionPlanSchema.safeParse({
+      ownerWalletId: "wal_test",
+      token: USDC_MINT,
+      amount: "10.00",
+      periodHours: 24,
+      status: "active",
+    });
+
+    expect(result.success).toBe(true);
+  });
+
   it("keeps low-level subscription creation compatible with past due timestamps", () => {
     const result = createSubscriptionSchema.safeParse({
       planId: "psp_test",

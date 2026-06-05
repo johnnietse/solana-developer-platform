@@ -170,7 +170,7 @@ export const listRecurringPaymentsQuerySchema = z.object({
 
 export const recurringPaymentLifecycleSchema = z.object({}).strict();
 
-const createSubscriptionPlanStatusSchema = z.literal("draft").default("draft");
+const createSubscriptionPlanStatusSchema = paymentSubscriptionPlanStatusSchema.default("draft");
 
 export const createSubscriptionPlanSchema = z.object({
   ownerWalletId: z.string().min(1),

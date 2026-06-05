@@ -80,7 +80,6 @@ function advanceCollectionDueAtAfter(input: {
 }
 
 const ACTIVATION_CLAIM_TTL_MS = 10 * 60 * 1000;
-const LIFECYCLE_CLAIM_TTL_MS = 10 * 60 * 1000;
 const ACTIVE_COLLECTION_ATTEMPT_STATUSES = new Set(["pending", "processing", "confirmed"]);
 const DEFAULT_COLLECTION_RETRY_AFTER_MINUTES = 30;
 
@@ -102,10 +101,6 @@ type RecurringLifecycleClaimStatus = Extract<
   PaymentRecurringPaymentRow["status"],
   "canceling" | "resuming"
 >;
-
-function isFreshLifecycleClaim(updatedAt: string): boolean {
-  return Date.now() - new Date(updatedAt).getTime() < LIFECYCLE_CLAIM_TTL_MS;
-}
 
 function getLifecycleClaimStatus(
   operation: RecurringLifecycleOperation
@@ -140,10 +135,7 @@ function assertRecurringPaymentCanClaimLifecycle(input: {
   }
 
   if (isLifecycleClaimStatus(recurringPayment.status)) {
-    if (
-      recurringPayment.status !== claimStatus ||
-      isFreshLifecycleClaim(recurringPayment.updated_at)
-    ) {
+    if (recurringPayment.status !== claimStatus) {
       throw new AppError("CONFLICT", "Recurring payment lifecycle update is already in progress");
     }
     return;
@@ -681,6 +673,27 @@ async function finalizeRecurringPaymentLifecycle(input: {
 
     return updated;
   });
+}
+
+async function finalizeRecurringPaymentLifecycleAfterChain(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  recurringPayment: PaymentRecurringPaymentRow;
+  subscription: PaymentSubscriptionRow;
+  operation: RecurringLifecycleOperation;
+}): Promise<PaymentRecurringPaymentRow> {
+  try {
+    return await finalizeRecurringPaymentLifecycle(input);
+  } catch (error) {
+    console.error("Recurring payment lifecycle finalized on-chain but DB finalization failed", {
+      recurringPaymentId: input.recurringPayment.id,
+      subscriptionId: input.subscription.id,
+      operation: input.operation,
+      error: toErrorMessage(error),
+    });
+    return finalizeRecurringPaymentLifecycle(input);
+  }
 }
 
 async function updateTransferRecord(input: {
@@ -1808,7 +1821,7 @@ export async function executeRecurringPaymentLifecycle(input: {
     subscriptionPda: assertValidAddress(claim.recurringPayment.subscription_pda, "subscriptionPda"),
   });
 
-  return finalizeRecurringPaymentLifecycle({
+  return finalizeRecurringPaymentLifecycleAfterChain({
     env: input.env,
     organizationId: input.organizationId,
     projectId: input.projectId,

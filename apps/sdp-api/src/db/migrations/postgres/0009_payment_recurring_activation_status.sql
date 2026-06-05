@@ -8,4 +8,4 @@ ALTER TABLE payment_recurring_payments
 
 ALTER TABLE payment_recurring_payments
     ADD CONSTRAINT payment_recurring_payments_status_check
-    CHECK (status IN ('pending_activation', 'activating', 'active', 'canceling', 'resuming', 'paused', 'canceled', 'expired'));
+    CHECK (status IN ('pending_activation', 'activating', 'active', 'paused', 'canceled', 'expired'));
