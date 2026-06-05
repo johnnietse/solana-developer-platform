@@ -302,6 +302,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
                        WHERE retry.recurring_payment_id = rp.id
                          AND retry.due_at = rp.next_collection_due_at
                          AND retry.status = 'failed'
+                         AND COALESCE(retry.metadata->>'retryImmediately', 'false') <> 'true'
                          AND retry.updated_at > ?
                     )
                   )

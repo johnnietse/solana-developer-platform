@@ -35,6 +35,7 @@ import {
   ensureSubscriptionPlanOnChain,
   executeSubscriptionLifecycleOnChain,
   generateProgramPlanId,
+  isImmediateRecurringSubscriptionRetryError,
   resolveRecurringSubscriptionRuntime,
 } from "./solana-subscriptions-adapter";
 
@@ -950,6 +951,7 @@ async function markRecurringCollectionFailedBeforeSubmission(input: {
   attempt: PaymentSubscriptionCollectionAttemptRow;
   transfer: PaymentTransferRow;
   error: string;
+  retryImmediately?: boolean;
 }): Promise<{
   attempt: PaymentSubscriptionCollectionAttemptRow;
   transfer: PaymentTransferRow;
@@ -970,6 +972,13 @@ async function markRecurringCollectionFailedBeforeSubmission(input: {
         transferId: input.transfer.id,
         status: "failed",
         error: input.error,
+        metadata: input.retryImmediately
+          ? {
+              ...input.attempt.metadata,
+              retryImmediately: true,
+              retryReason: "blockhash_expired",
+            }
+          : undefined,
         attemptedAt: now,
         updatedAt: now,
       });
@@ -1912,6 +1921,7 @@ export async function collectRecurringPayment(input: {
       attempt,
       transfer,
       error: message,
+      retryImmediately: isImmediateRecurringSubscriptionRetryError(error),
     });
     attempt = failed.attempt;
     transfer = failed.transfer;

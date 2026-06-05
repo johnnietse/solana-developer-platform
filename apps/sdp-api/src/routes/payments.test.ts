@@ -399,6 +399,9 @@ function mockTokenSupplyDecimalsOnce(decimals = 6): void {
 
 function mockRecurringTokenRpc(decimals = 6): void {
   createRpcMock.mockReturnValue({
+    getBlockTime: () => ({
+      send: async () => 1_700_000_000n,
+    }),
     getTokenAccountsByOwner: () => ({
       send: async () => ({
         value: [
@@ -1207,6 +1210,71 @@ describe("Payments routes", () => {
     );
 
     mockRecurringCollectionAccounts();
+    const blockhashExpiredFeePaymentAdapter = {
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+      signAsFeePayer: vi.fn(),
+      signAndSend: vi.fn().mockRejectedValue(new Error("Blockhash not found")),
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>;
+    createFeePaymentAdapterMock
+      .mockReturnValueOnce(blockhashExpiredFeePaymentAdapter)
+      .mockReturnValueOnce(blockhashExpiredFeePaymentAdapter);
+    const blockhashExpiredRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: "{}",
+      },
+      env
+    );
+    expect(blockhashExpiredRes.status).toBe(502);
+
+    const dueAfterBlockhashExpiry = await repositories
+      .createPaymentRecurringPaymentsRepository(env)
+      .listDueRecurringPayments({
+        now: new Date().toISOString(),
+        retryAfter: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+        limit: 10,
+      });
+    expect(dueAfterBlockhashExpiry.map((payment) => payment.id)).toContain(recurringPaymentId);
+
+    const blockhashFailedAttemptsRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/collection-attempts?status=failed`,
+      {
+        method: "GET",
+        headers: authHeaders,
+      },
+      env
+    );
+    expect(blockhashFailedAttemptsRes.status).toBe(200);
+    const blockhashFailedAttemptsBody = (await blockhashFailedAttemptsRes.json()) as {
+      data: {
+        collectionAttempts: Array<{
+          recurringPaymentId: string | null;
+          status: string;
+          transferId: string | null;
+          error: string | null;
+          metadata: Record<string, unknown>;
+        }>;
+      };
+    };
+    expect(blockhashFailedAttemptsBody.data.collectionAttempts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          recurringPaymentId,
+          status: "failed",
+          transferId: expect.any(String),
+          error: "Recurring payment transaction blockhash expired before submission",
+          metadata: expect.objectContaining({
+            retryImmediately: true,
+            retryReason: "blockhash_expired",
+          }),
+        }),
+      ])
+    );
+
+    mockRecurringCollectionAccounts();
     const failingCollectionFeePaymentAdapter = {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
@@ -1406,7 +1474,7 @@ describe("Payments routes", () => {
       data: {
         recurringPayment: { nextCollectionDueAt: string | null };
         collectionAttempt: { status: string; recurringPaymentId: string | null };
-        transfer: { status: string; signature: string | null };
+        transfer: { status: string; signature: string | null; blockTime: string | null };
       };
     };
     expect(collectBody.data.collectionAttempt).toMatchObject({
@@ -1416,6 +1484,7 @@ describe("Payments routes", () => {
     expect(collectBody.data.transfer).toMatchObject({
       status: "confirmed",
       signature: expect.any(String),
+      blockTime: "2023-11-14T22:13:20.000Z",
     });
     expect(confirmTransactionMock.mock.calls.length).toBe(confirmCallsAfterSubmittedCollection);
     expect(new Date(collectBody.data.recurringPayment.nextCollectionDueAt ?? "").getTime()).toBe(

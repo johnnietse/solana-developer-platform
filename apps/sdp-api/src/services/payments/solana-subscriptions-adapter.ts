@@ -1,4 +1,4 @@
-import type { Address, Instruction, TransactionSigner } from "@solana/kit";
+import type { Address, Instruction, Signature, TransactionSigner } from "@solana/kit";
 import {
   addSignersToTransactionMessage,
   appendTransactionMessageInstructions,
@@ -44,6 +44,8 @@ import * as solanaRpc from "@/services/solana/rpc";
 import type { Env } from "@/types/env";
 
 const U64_MAX = 18_446_744_073_709_551_615n;
+const BLOCKHASH_EXPIRY_ERROR_PATTERN =
+  /blockhash.*(expired|not found|no longer valid)|transactionexpiredblockheightexceeded|block height exceeded|last valid block height/i;
 
 export interface RecurringSubscriptionRuntime {
   amountBaseUnits: bigint;
@@ -56,6 +58,10 @@ export interface ExecutedSubscriptionTransaction {
   signature: string;
   slot: number | null;
   blockTime: string | null;
+}
+
+export function isImmediateRecurringSubscriptionRetryError(error: unknown): boolean {
+  return error instanceof AppError && error.details?.retryImmediately === true;
 }
 
 export function generateProgramPlanId(): string {
@@ -91,6 +97,27 @@ export function assertSubscriptionTokenMint(token: string): Address {
     throw new AppError("BAD_REQUEST", "Recurring payments require an SPL token mint");
   }
   return assertValidAddress(normalized, "token");
+}
+
+function isBlockhashExpiryError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return BLOCKHASH_EXPIRY_ERROR_PATTERN.test(message.toLowerCase());
+}
+
+async function resolveConfirmedBlockTime(
+  rpc: solanaRpc.SolanaRpc,
+  slot: bigint
+): Promise<string | null> {
+  try {
+    const blockTime = await rpc.getBlockTime(slot).send();
+    return blockTime === null ? null : new Date(Number(blockTime) * 1_000).toISOString();
+  } catch (error) {
+    console.warn("Failed to resolve recurring payment transaction block time", {
+      slot: slot.toString(),
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
 }
 
 export async function resolveRecurringSubscriptionRuntime(
@@ -142,7 +169,23 @@ async function executeSignedInstructions(input: {
 
   const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
   const txBytes = new Uint8Array(getTransactionEncoder().encode(partiallySigned));
-  const signature = await feePayment.signAndSend(txBytes);
+  let signature: Signature;
+  try {
+    signature = await feePayment.signAndSend(txBytes);
+  } catch (error) {
+    if (isBlockhashExpiryError(error)) {
+      throw new AppError(
+        "SOLANA_RPC_ERROR",
+        "Recurring payment transaction blockhash expired before submission",
+        {
+          retryImmediately: true,
+          retryReason: "blockhash_expired",
+        }
+      );
+    }
+
+    throw error;
+  }
   const confirmation = await solanaRpc.confirmTransaction(rpc, signature, {
     commitment: "confirmed",
   });
@@ -154,7 +197,7 @@ async function executeSignedInstructions(input: {
   return {
     signature,
     slot: Number(confirmation.slot),
-    blockTime: null,
+    blockTime: await resolveConfirmedBlockTime(rpc, confirmation.slot),
   };
 }
 
