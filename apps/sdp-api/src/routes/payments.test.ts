@@ -1140,12 +1140,15 @@ describe("Payments routes", () => {
     );
 
     mockRecurringCollectionAccounts();
-    createFeePaymentAdapterMock.mockReturnValueOnce({
+    const failingCollectionFeePaymentAdapter = {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
       signAsFeePayer: vi.fn(),
       signAndSend: vi.fn().mockRejectedValue(new Error("simulated collection submission failure")),
-    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>;
+    createFeePaymentAdapterMock
+      .mockReturnValueOnce(failingCollectionFeePaymentAdapter)
+      .mockReturnValueOnce(failingCollectionFeePaymentAdapter);
     let failFailedTransferCleanup = true;
     const failedTransferCleanupRepoSpy = vi
       .spyOn(repositories, "createPostgresPaymentsRepository")
