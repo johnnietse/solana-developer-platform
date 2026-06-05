@@ -34,14 +34,18 @@ function ProviderCardEstimate({
     const amount = isFiatOut ? fiatAmount : cryptoAmount;
     const unit = isFiatOut ? fiatCurrency : getCryptoRailAssetLabel(assetRail);
     const feeLines: Array<{ label: string; value: string }> = [];
+    let breakdownSum = 0;
     if (fees.network && Number(fees.network) > 0) {
       feeLines.push({ label: "Network", value: fees.network });
+      breakdownSum += Number(fees.network);
     }
     if (fees.provider && Number(fees.provider) > 0) {
       feeLines.push({ label: "Provider", value: fees.provider });
+      breakdownSum += Number(fees.provider);
     }
-    if (feeLines.length === 0 && Number(fees.total) > 0) {
-      feeLines.push({ label: "Fee", value: fees.total });
+    const total = Number(fees.total);
+    if (total > 0 && (feeLines.length === 0 || total > breakdownSum + 1e-9)) {
+      feeLines.push({ label: feeLines.length === 0 ? "Fee" : "Total fee", value: fees.total });
     }
     return (
       <div className="shrink-0 text-right">

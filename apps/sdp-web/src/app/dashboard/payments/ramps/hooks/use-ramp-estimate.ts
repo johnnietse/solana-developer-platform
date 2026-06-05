@@ -51,13 +51,13 @@ export function useRampEstimate({
 
   const estimatesByProvider = useMemo(() => {
     const map = new Map<RampProviderId, RampProviderEstimateResult>();
-    if (data) {
+    if (hasAmount && data) {
       for (const result of data) {
         map.set(result.provider, result);
       }
     }
     return map;
-  }, [data]);
+  }, [data, hasAmount]);
 
   return { estimatesByProvider, loading: isValidating };
 }
