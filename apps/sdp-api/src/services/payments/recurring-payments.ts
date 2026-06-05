@@ -52,6 +52,31 @@ function addPeriodHours(timestamp: string, periodHours: number): string {
   return new Date(new Date(timestamp).getTime() + periodHours * 60 * 60 * 1000).toISOString();
 }
 
+function advanceCollectionDueAtAfter(input: {
+  nextCollectionDueAt: string | null;
+  periodHours: number;
+  after: string;
+}): string {
+  const periodMs = input.periodHours * 60 * 60 * 1000;
+  if (!Number.isFinite(periodMs) || periodMs <= 0) {
+    throw new AppError("BAD_REQUEST", "Recurring payment period must be greater than zero");
+  }
+
+  const afterMs = new Date(input.after).getTime();
+  const dueMs = input.nextCollectionDueAt ? new Date(input.nextCollectionDueAt).getTime() : NaN;
+
+  if (input.nextCollectionDueAt && Number.isFinite(dueMs) && dueMs > afterMs) {
+    return input.nextCollectionDueAt;
+  }
+
+  if (Number.isFinite(dueMs)) {
+    const elapsedPeriods = Math.floor((afterMs - dueMs) / periodMs) + 1;
+    return new Date(dueMs + elapsedPeriods * periodMs).toISOString();
+  }
+
+  return new Date(afterMs + periodMs).toISOString();
+}
+
 const ACTIVATION_CLAIM_TTL_MS = 10 * 60 * 1000;
 const ACTIVE_COLLECTION_ATTEMPT_STATUSES = new Set(["pending", "processing", "confirmed"]);
 
@@ -1143,6 +1168,18 @@ export async function executeRecurringPaymentLifecycle(input: {
 
   const now = new Date().toISOString();
   const status = input.operation === "cancel" ? "canceled" : "active";
+  const resumeNextCollectionDueAt =
+    input.operation === "resume"
+      ? advanceCollectionDueAtAfter({
+          nextCollectionDueAt: recurringPayment.next_collection_due_at,
+          periodHours: recurringPayment.period_hours,
+          after: now,
+        })
+      : undefined;
+  const resumeCurrentPeriodStartAt =
+    resumeNextCollectionDueAt === undefined
+      ? undefined
+      : addPeriodHours(resumeNextCollectionDueAt, -recurringPayment.period_hours);
 
   return getDb(input.env).transaction(async (tx) => {
     const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
@@ -1152,6 +1189,7 @@ export async function executeRecurringPaymentLifecycle(input: {
       organizationId: input.organizationId,
       projectId: input.projectId,
       status,
+      nextCollectionDueAt: resumeNextCollectionDueAt,
       updatedAt: now,
     });
     const updatedSubscription = await txSubscriptionsRepo.updateSubscription({
@@ -1159,6 +1197,8 @@ export async function executeRecurringPaymentLifecycle(input: {
       organizationId: input.organizationId,
       projectId: input.projectId,
       status,
+      currentPeriodStartAt: resumeCurrentPeriodStartAt,
+      nextCollectionDueAt: resumeNextCollectionDueAt,
       canceledAt: input.operation === "cancel" ? now : null,
       updatedAt: now,
     });

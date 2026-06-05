@@ -858,8 +858,10 @@ describe("Payments routes", () => {
     });
     expect(activateBody.data.recurringPayment.planId).toBeTruthy();
     expect(activateBody.data.recurringPayment.subscriptionId).toBeTruthy();
+    const recurringSubscriptionId = activateBody.data.recurringPayment.subscriptionId ?? "";
     const recurringPlanPda = activateBody.data.recurringPayment.planPda ?? "";
     const recurringSubscriptionPda = activateBody.data.recurringPayment.subscriptionPda ?? "";
+    expect(recurringSubscriptionId).toBeTruthy();
     expect(recurringPlanPda).toBeTruthy();
     expect(recurringSubscriptionPda).toBeTruthy();
 
@@ -1122,6 +1124,26 @@ describe("Payments routes", () => {
     expect(cancelRetryBody.data.recurringPayment.status).toBe("canceled");
     expect(confirmTransactionMock.mock.calls.length).toBe(confirmCallsAfterFailedCancel);
 
+    const staleResumeDueAt = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const staleResumePeriodStartAt = new Date(
+      new Date(staleResumeDueAt).getTime() - 24 * 60 * 60 * 1000
+    ).toISOString();
+    await repositories.createPaymentRecurringPaymentsRepository(env).updateRecurringPayment({
+      recurringPaymentId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      nextCollectionDueAt: staleResumeDueAt,
+      updatedAt: staleResumeDueAt,
+    });
+    await repositories.createPaymentSubscriptionsRepository(env).updateSubscription({
+      subscriptionId: recurringSubscriptionId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      currentPeriodStartAt: staleResumePeriodStartAt,
+      nextCollectionDueAt: staleResumeDueAt,
+      updatedAt: staleResumeDueAt,
+    });
+
     let failResumeLifecycleUpdate = true;
     const resumeLifecycleRepoSpy = vi
       .spyOn(repositories, "createPostgresPaymentRecurringPaymentsRepository")
@@ -1181,10 +1203,21 @@ describe("Payments routes", () => {
     );
     expect(resumeRetryRes.status).toBe(200);
     const resumeRetryBody = (await resumeRetryRes.json()) as {
-      data: { recurringPayment: { status: string } };
+      data: { recurringPayment: { status: string; nextCollectionDueAt: string | null } };
     };
     expect(resumeRetryBody.data.recurringPayment.status).toBe("active");
+    const resumedDueAt = resumeRetryBody.data.recurringPayment.nextCollectionDueAt ?? "";
+    expect(new Date(resumedDueAt).getTime()).toBeGreaterThan(Date.now());
+    expect(new Date(resumedDueAt).getTime()).toBeGreaterThan(new Date(staleResumeDueAt).getTime());
     expect(confirmTransactionMock.mock.calls.length).toBe(confirmCallsAfterFailedResume);
+    const resumedSubscription = await repositories
+      .createPaymentSubscriptionsRepository(env)
+      .getSubscriptionById({
+        subscriptionId: recurringSubscriptionId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+      });
+    expect(resumedSubscription?.next_collection_due_at).toBe(resumedDueAt);
   });
 
   it("exercises the recurring subscription lifecycle through SDP API routes", async () => {
