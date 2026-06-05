@@ -615,20 +615,29 @@ export class LightsparkRampClient implements RampProvider {
         { method: "GET" }
       )
     );
-    const fiatMinorUnits =
+
+    const feeMinorUnits = BigInt(rate.fees.fixed);
+    const netCryptoMinorUnits =
+      cryptoMinorUnits > feeMinorUnits ? cryptoMinorUnits - feeMinorUnits : 0n;
+    const grossFiatMinorUnits =
       (cryptoMinorUnits * BigInt(rate.receivingAmount)) / BigInt(rate.sendingAmount);
-    const fiatAmount = formatDecimalAmount(fiatMinorUnits, rate.destinationCurrency.decimals);
+    const netFiatMinorUnits =
+      (netCryptoMinorUnits * BigInt(rate.receivingAmount)) / BigInt(rate.sendingAmount);
+    const grossFiatAmount = formatDecimalAmount(
+      grossFiatMinorUnits,
+      rate.destinationCurrency.decimals
+    );
     return {
       provider: this.id,
       direction: "offramp",
       fiatCurrency: input.fiatCurrency,
       assetRail: input.assetRail,
-      fiatAmount,
+      fiatAmount: formatDecimalAmount(netFiatMinorUnits, rate.destinationCurrency.decimals),
       cryptoAmount: input.cryptoAmount,
-      exchangeRate: String(Number(fiatAmount) / Number(input.cryptoAmount)),
+      exchangeRate: String(Number(grossFiatAmount) / Number(input.cryptoAmount)),
       fees: {
         currency: getCryptoRailAssetLabel(input.assetRail),
-        total: formatDecimalAmount(BigInt(rate.fees.fixed), rate.sourceCurrency.decimals),
+        total: formatDecimalAmount(feeMinorUnits, rate.sourceCurrency.decimals),
       },
     };
   }
