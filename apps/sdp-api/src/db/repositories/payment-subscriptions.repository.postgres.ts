@@ -591,6 +591,26 @@ export function createPostgresPaymentSubscriptionsRepository(
         .run();
     },
 
+    async listSubmittedRecurringCollectionAttempts(params) {
+      const rows = await db
+        .prepare(
+          `SELECT a.*
+             FROM payment_subscription_collection_attempts a
+             JOIN payment_transfers t ON t.id = a.transfer_id
+            WHERE a.recurring_payment_id IS NOT NULL
+              AND a.status IN ('processing', 'confirmed')
+              AND a.transfer_id IS NOT NULL
+              AND a.signature IS NOT NULL
+              AND (a.status <> 'confirmed' OR t.status NOT IN ('confirmed', 'finalized'))
+            ORDER BY a.updated_at ASC
+            LIMIT ?`
+        )
+        .bind(params.limit)
+        .all<Record<string, unknown>>();
+
+      return rows.results.map(mapAttemptRow);
+    },
+
     async getCollectionAttemptByRecurringDue(params) {
       const row = await db
         .prepare(

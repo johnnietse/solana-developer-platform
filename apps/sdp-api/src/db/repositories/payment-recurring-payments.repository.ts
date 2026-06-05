@@ -85,6 +85,11 @@ export interface ListDuePaymentRecurringPaymentsInput {
   limit: number;
 }
 
+export interface ListStalePaymentRecurringLifecycleClaimsInput {
+  olderThan: string;
+  limit: number;
+}
+
 export interface ListPaymentRecurringPaymentsResult {
   rows: PaymentRecurringPaymentRow[];
   total: number;
@@ -112,5 +117,8 @@ export interface PaymentRecurringPaymentsRepository {
   ): Promise<ListPaymentRecurringPaymentsResult>;
   listDueRecurringPayments(
     params: ListDuePaymentRecurringPaymentsInput
+  ): Promise<PaymentRecurringPaymentRow[]>;
+  listStaleLifecycleClaims(
+    params: ListStalePaymentRecurringLifecycleClaimsInput
   ): Promise<PaymentRecurringPaymentRow[]>;
 }

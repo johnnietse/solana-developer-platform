@@ -4,7 +4,10 @@ import {
   createPaymentSubscriptionsRepository,
 } from "@/db/repositories";
 import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recurring-payments.repository";
-import { collectRecurringPayment } from "@/services/payments/recurring-payments";
+import {
+  collectRecurringPayment,
+  executeRecurringPaymentLifecycle,
+} from "@/services/payments/recurring-payments";
 import type { Env } from "@/types/env";
 import { collectDueRecurringPayments } from "./collect-recurring-payments";
 
@@ -15,6 +18,7 @@ vi.mock("@/db/repositories", () => ({
 
 vi.mock("@/services/payments/recurring-payments", () => ({
   collectRecurringPayment: vi.fn(),
+  executeRecurringPaymentLifecycle: vi.fn(),
 }));
 
 const enabledEnv = {
@@ -69,11 +73,15 @@ describe("collectDueRecurringPayments", () => {
     const expireStaleUnsignedProcessingAttempts = vi
       .fn()
       .mockRejectedValue(new Error("temporary database outage"));
+    const listSubmittedRecurringCollectionAttempts = vi.fn().mockResolvedValue([]);
+    const listStaleLifecycleClaims = vi.fn().mockResolvedValue([]);
     const listDueRecurringPayments = vi.fn().mockResolvedValue([duePayment]);
     vi.mocked(createPaymentSubscriptionsRepository).mockReturnValue({
       expireStaleUnsignedProcessingAttempts,
+      listSubmittedRecurringCollectionAttempts,
     } as unknown as ReturnType<typeof createPaymentSubscriptionsRepository>);
     vi.mocked(createPaymentRecurringPaymentsRepository).mockReturnValue({
+      listStaleLifecycleClaims,
       listDueRecurringPayments,
     } as unknown as ReturnType<typeof createPaymentRecurringPaymentsRepository>);
     vi.mocked(collectRecurringPayment).mockResolvedValue(
@@ -87,8 +95,17 @@ describe("collectDueRecurringPayments", () => {
       collected: 1,
       failed: 1,
       expirationFailures: 1,
+      lifecycleRecovered: 0,
+      lifecycleFailures: 0,
+      submittedCollectionRecovered: 0,
+      submittedCollectionFailures: 0,
       collectionFailures: 0,
     });
+    expect(listStaleLifecycleClaims).toHaveBeenCalledWith(
+      expect.objectContaining({
+        limit: 20,
+      })
+    );
     expect(listDueRecurringPayments).toHaveBeenCalledWith(
       expect.objectContaining({
         limit: 20,
@@ -102,6 +119,124 @@ describe("collectDueRecurringPayments", () => {
         recurringPaymentId: duePayment.id,
         initiatedByKeyId: null,
         enforceDue: true,
+      })
+    );
+  });
+
+  it("recovers stale recurring lifecycle claims before due collection", async () => {
+    const cancelingPayment = makeRecurringPayment({
+      id: "prp_canceling",
+      status: "canceling",
+    });
+    const resumingPayment = makeRecurringPayment({
+      id: "prp_resuming",
+      status: "resuming",
+    });
+    const expireStaleUnsignedProcessingAttempts = vi.fn().mockResolvedValue(0);
+    const listSubmittedRecurringCollectionAttempts = vi.fn().mockResolvedValue([]);
+    const listStaleLifecycleClaims = vi.fn().mockResolvedValue([cancelingPayment, resumingPayment]);
+    const listDueRecurringPayments = vi.fn().mockResolvedValue([]);
+    vi.mocked(createPaymentSubscriptionsRepository).mockReturnValue({
+      expireStaleUnsignedProcessingAttempts,
+      listSubmittedRecurringCollectionAttempts,
+    } as unknown as ReturnType<typeof createPaymentSubscriptionsRepository>);
+    vi.mocked(createPaymentRecurringPaymentsRepository).mockReturnValue({
+      listStaleLifecycleClaims,
+      listDueRecurringPayments,
+    } as unknown as ReturnType<typeof createPaymentRecurringPaymentsRepository>);
+    vi.mocked(executeRecurringPaymentLifecycle).mockResolvedValue(
+      {} as Awaited<ReturnType<typeof executeRecurringPaymentLifecycle>>
+    );
+
+    const result = await collectDueRecurringPayments(enabledEnv);
+
+    expect(result).toEqual({
+      scanned: 0,
+      collected: 0,
+      failed: 0,
+      expirationFailures: 0,
+      lifecycleRecovered: 2,
+      lifecycleFailures: 0,
+      submittedCollectionRecovered: 0,
+      submittedCollectionFailures: 0,
+      collectionFailures: 0,
+    });
+    expect(executeRecurringPaymentLifecycle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        env: enabledEnv,
+        organizationId: cancelingPayment.organization_id,
+        projectId: cancelingPayment.project_id,
+        recurringPaymentId: cancelingPayment.id,
+        operation: "cancel",
+      })
+    );
+    expect(executeRecurringPaymentLifecycle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        env: enabledEnv,
+        organizationId: resumingPayment.organization_id,
+        projectId: resumingPayment.project_id,
+        recurringPaymentId: resumingPayment.id,
+        operation: "resume",
+      })
+    );
+  });
+
+  it("recovers submitted recurring collections even when they are not due-active", async () => {
+    const submittedAttempt = {
+      id: "psca_submitted_recovery",
+      organization_id: "org_test",
+      project_id: "prj_test",
+      subscription_id: "psub_test",
+      recurring_payment_id: "prp_submitted_recovery",
+      transfer_id: "xfr_submitted_recovery",
+      token: "token_test",
+      amount: "1.00",
+      due_at: new Date().toISOString(),
+      attempted_at: new Date().toISOString(),
+      status: "processing",
+      signature: "sig_test",
+      error: null,
+      metadata: {},
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    const expireStaleUnsignedProcessingAttempts = vi.fn().mockResolvedValue(0);
+    const listSubmittedRecurringCollectionAttempts = vi.fn().mockResolvedValue([submittedAttempt]);
+    const listStaleLifecycleClaims = vi.fn().mockResolvedValue([]);
+    const listDueRecurringPayments = vi.fn().mockResolvedValue([]);
+    vi.mocked(createPaymentSubscriptionsRepository).mockReturnValue({
+      expireStaleUnsignedProcessingAttempts,
+      listSubmittedRecurringCollectionAttempts,
+    } as unknown as ReturnType<typeof createPaymentSubscriptionsRepository>);
+    vi.mocked(createPaymentRecurringPaymentsRepository).mockReturnValue({
+      listStaleLifecycleClaims,
+      listDueRecurringPayments,
+    } as unknown as ReturnType<typeof createPaymentRecurringPaymentsRepository>);
+    vi.mocked(collectRecurringPayment).mockResolvedValue(
+      {} as Awaited<ReturnType<typeof collectRecurringPayment>>
+    );
+
+    const result = await collectDueRecurringPayments(enabledEnv);
+
+    expect(result).toEqual({
+      scanned: 0,
+      collected: 0,
+      failed: 0,
+      expirationFailures: 0,
+      lifecycleRecovered: 0,
+      lifecycleFailures: 0,
+      submittedCollectionRecovered: 1,
+      submittedCollectionFailures: 0,
+      collectionFailures: 0,
+    });
+    expect(collectRecurringPayment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        env: enabledEnv,
+        organizationId: submittedAttempt.organization_id,
+        projectId: submittedAttempt.project_id,
+        recurringPaymentId: submittedAttempt.recurring_payment_id,
+        initiatedByKeyId: null,
+        enforceDue: false,
       })
     );
   });

@@ -48,6 +48,9 @@ CREATE INDEX IF NOT EXISTS idx_payment_recurring_payments_project_status_due
 CREATE INDEX IF NOT EXISTS idx_payment_recurring_payments_status_due
     ON payment_recurring_payments(status, next_collection_due_at);
 
+CREATE INDEX IF NOT EXISTS idx_payment_recurring_payments_status_updated
+    ON payment_recurring_payments(status, updated_at);
+
 CREATE INDEX IF NOT EXISTS idx_payment_recurring_payments_counterparty_created
     ON payment_recurring_payments(counterparty_id, created_at DESC);
 
@@ -81,3 +84,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_subscription_attempts_recurring_du
     ON payment_subscription_collection_attempts(recurring_payment_id, due_at)
     WHERE recurring_payment_id IS NOT NULL
       AND status IN ('pending', 'processing', 'confirmed');
+
+CREATE INDEX IF NOT EXISTS idx_payment_subscription_attempts_recurring_submitted
+    ON payment_subscription_collection_attempts(recurring_payment_id, updated_at)
+    WHERE recurring_payment_id IS NOT NULL
+      AND transfer_id IS NOT NULL
+      AND signature IS NOT NULL
+      AND status IN ('processing', 'confirmed');
