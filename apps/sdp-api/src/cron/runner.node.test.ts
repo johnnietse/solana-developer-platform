@@ -36,13 +36,10 @@ vi.mock("./pending-transfers", async (importOriginal) => {
   };
 });
 
-vi.mock("./recurring-payments", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./recurring-payments")>();
-  return {
-    ...actual,
-    runRecurringPaymentsCollection: vi.fn(),
-  };
-});
+vi.mock("./recurring-payments", () => ({
+  RECURRING_PAYMENTS_COLLECTION_CRON: "*/5 * * * *",
+  runRecurringPaymentsCollection: vi.fn(),
+}));
 
 function makeBg(): BackgroundRunner {
   return { run: vi.fn(), awaitAll: vi.fn(async () => {}), draining: false };
