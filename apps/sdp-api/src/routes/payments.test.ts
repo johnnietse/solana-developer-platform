@@ -1792,6 +1792,25 @@ describe("Payments routes", () => {
     );
     expect(activeWithoutProofRes.status).toBe(400);
 
+    const compatibilityCounterpartyRes = await app.request(
+      "/v1/counterparties",
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          externalId: "subscription_counterparty_compat_001",
+          entityType: "individual",
+          displayName: "Subscription Compatibility Counterparty",
+          email: "subscription-compat@example.com",
+        }),
+      },
+      env
+    );
+    expect(compatibilityCounterpartyRes.status).toBe(201);
+    const compatibilityCounterpartyBody = (await compatibilityCounterpartyRes.json()) as {
+      data: { counterparty: { id: string } };
+    };
+
     const pastNextCollectionAt = new Date(Date.now() - 60_000).toISOString();
     const activeWithPastDueRes = await app.request(
       "/v1/payments/subscriptions",
@@ -1800,7 +1819,7 @@ describe("Payments routes", () => {
         headers: jsonHeaders,
         body: JSON.stringify({
           planId,
-          counterpartyId,
+          counterpartyId: compatibilityCounterpartyBody.data.counterparty.id,
           subscriberAddress: TEST_SOLANA_ADDRESSES.wallet2,
           subscriberTokenAccount,
           subscriptionPda: TEST_SOLANA_ADDRESSES.wallet1,
@@ -1813,7 +1832,11 @@ describe("Payments routes", () => {
       },
       env
     );
-    expect(activeWithPastDueRes.status).toBe(400);
+    expect(activeWithPastDueRes.status).toBe(201);
+    const activeWithPastDueBody = (await activeWithPastDueRes.json()) as {
+      data: { subscription: { nextCollectionDueAt: string | null } };
+    };
+    expect(activeWithPastDueBody.data.subscription.nextCollectionDueAt).toBe(pastNextCollectionAt);
 
     const terminalCreateRes = await app.request(
       "/v1/payments/subscriptions",
