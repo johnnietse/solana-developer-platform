@@ -780,7 +780,7 @@ describe("Payments routes", () => {
       },
       env
     );
-    expect(archivedRecurringPaymentRes.status).toBe(400);
+    expect(archivedRecurringPaymentRes.status).toBe(404);
     await clearRateLimits();
 
     const pastFirstCollectionRes = await app.request(
