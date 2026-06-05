@@ -1834,8 +1834,9 @@ describe("Payments routes", () => {
     );
     expect(activeWithPastDueRes.status).toBe(201);
     const activeWithPastDueBody = (await activeWithPastDueRes.json()) as {
-      data: { subscription: { nextCollectionDueAt: string | null } };
+      data: { subscription: { id: string; nextCollectionDueAt: string | null } };
     };
+    const compatibilitySubscriptionId = activeWithPastDueBody.data.subscription.id;
     expect(activeWithPastDueBody.data.subscription.nextCollectionDueAt).toBe(pastNextCollectionAt);
 
     const terminalCreateRes = await app.request(
@@ -2090,10 +2091,14 @@ describe("Payments routes", () => {
     const dueSubscriptionsBody = (await dueSubscriptionsRes.json()) as {
       data: { subscriptions: Array<{ id: string }>; total: number };
     };
-    expect(dueSubscriptionsBody.data.subscriptions.map((subscription) => subscription.id)).toEqual([
-      subscriptionId,
-    ]);
-    expect(dueSubscriptionsBody.data.total).toBe(1);
+    const dueSubscriptionIds = dueSubscriptionsBody.data.subscriptions.map(
+      (subscription) => subscription.id
+    );
+    expect(dueSubscriptionIds).toHaveLength(2);
+    expect(dueSubscriptionIds).toEqual(
+      expect.arrayContaining([subscriptionId, compatibilitySubscriptionId])
+    );
+    expect(dueSubscriptionsBody.data.total).toBe(2);
 
     const prepareCancelRes = await app.request(
       `/v1/payments/subscriptions/${subscriptionId}/prepare-cancel`,
