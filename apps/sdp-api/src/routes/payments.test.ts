@@ -1466,6 +1466,21 @@ describe("Payments routes", () => {
     const canceledAt = canceledSubscription?.canceled_at ?? "";
     expect(canceledAt).toBeTruthy();
 
+    const repeatedCancelRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/cancel`,
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: "{}",
+      },
+      env
+    );
+    expect(repeatedCancelRes.status).toBe(200);
+    const repeatedCancelBody = (await repeatedCancelRes.json()) as {
+      data: { recurringPayment: { status: string } };
+    };
+    expect(repeatedCancelBody.data.recurringPayment.status).toBe("canceled");
+
     const staleResumeDueAt = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
     const staleResumePeriodStartAt = new Date(
       new Date(staleResumeDueAt).getTime() - 24 * 60 * 60 * 1000
@@ -1546,6 +1561,22 @@ describe("Payments routes", () => {
       });
     expect(resumedSubscription?.next_collection_due_at).toBe(resumedDueAt);
     expect(resumedSubscription?.canceled_at).toBeNull();
+
+    const repeatedResumeRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/resume`,
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: "{}",
+      },
+      env
+    );
+    expect(repeatedResumeRes.status).toBe(200);
+    const repeatedResumeBody = (await repeatedResumeRes.json()) as {
+      data: { recurringPayment: { status: string; nextCollectionDueAt: string | null } };
+    };
+    expect(repeatedResumeBody.data.recurringPayment.status).toBe("active");
+    expect(repeatedResumeBody.data.recurringPayment.nextCollectionDueAt).toBe(resumedDueAt);
 
     const pausedUpdatedAt = new Date().toISOString();
     await repositories.createPaymentRecurringPaymentsRepository(env).updateRecurringPayment({

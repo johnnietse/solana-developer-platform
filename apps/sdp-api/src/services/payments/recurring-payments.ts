@@ -467,6 +467,7 @@ async function claimLifecycleRecords(input: {
   recurringPaymentId: string;
   operation: RecurringLifecycleOperation;
 }): Promise<{
+  alreadyFinalized: boolean;
   recurringPayment: PaymentRecurringPaymentRow;
   subscription: PaymentSubscriptionRow;
 }> {
@@ -496,11 +497,6 @@ async function claimLifecycleRecords(input: {
     if (!recurringPayment) {
       throw new AppError("NOT_FOUND", "Recurring payment not found");
     }
-    assertRecurringPaymentCanClaimLifecycle({
-      recurringPayment,
-      operation: input.operation,
-      claimStatus,
-    });
     const subscriptionId = recurringPayment.subscription_id;
     if (!subscriptionId) {
       throw new AppError("BAD_REQUEST", "Recurring payment has not been activated");
@@ -526,6 +522,20 @@ async function claimLifecycleRecords(input: {
     if (!subscription) {
       throw new AppError("NOT_FOUND", "Recurring payment subscription not found");
     }
+    if (
+      isRecurringPaymentLifecycleFinalized({
+        recurringPayment,
+        subscription,
+        operation: input.operation,
+      })
+    ) {
+      return { alreadyFinalized: true, recurringPayment, subscription };
+    }
+    assertRecurringPaymentCanClaimLifecycle({
+      recurringPayment,
+      operation: input.operation,
+      claimStatus,
+    });
     assertSubscriptionCanClaimLifecycle({ subscription, operation: input.operation });
 
     const now = new Date().toISOString();
@@ -546,7 +556,7 @@ async function claimLifecycleRecords(input: {
     }
 
     if (input.operation !== "cancel" || subscription.status === "canceling") {
-      return { recurringPayment: claimedPayment, subscription };
+      return { alreadyFinalized: false, recurringPayment: claimedPayment, subscription };
     }
 
     const claimedSubscription = await txSubscriptionsRepo.updateSubscription({
@@ -565,7 +575,11 @@ async function claimLifecycleRecords(input: {
       );
     }
 
-    return { recurringPayment: claimedPayment, subscription: claimedSubscription };
+    return {
+      alreadyFinalized: false,
+      recurringPayment: claimedPayment,
+      subscription: claimedSubscription,
+    };
   });
 }
 
@@ -1956,6 +1970,10 @@ export async function executeRecurringPaymentLifecycle(input: {
     recurringPaymentId: input.recurringPaymentId,
     operation: input.operation,
   });
+
+  if (claim.alreadyFinalized) {
+    return claim.recurringPayment;
+  }
 
   if (!claim.recurringPayment.plan_pda || !claim.recurringPayment.subscription_pda) {
     throw new AppError("BAD_REQUEST", "Recurring payment has not been activated");
