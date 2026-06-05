@@ -1288,6 +1288,16 @@ describe("Payments routes", () => {
       updatedAt: overdueCollectionAt,
     });
     await clearRateLimits();
+    createFeePaymentAdapterMock.mockReturnValueOnce({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+      signAsFeePayer: vi.fn(),
+      signAndSend: vi
+        .fn()
+        .mockResolvedValue(
+          "5hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
+        ),
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     mockRecurringCollectionAccounts();
 
     const overdueCollectRes = await app.request(
