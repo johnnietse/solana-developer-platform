@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS payment_subscriptions (
     updated_at TEXT NOT NULL DEFAULT sdp_iso_now(),
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-    FOREIGN KEY (plan_id) REFERENCES payment_subscription_plans(id) ON DELETE CASCADE,
+    FOREIGN KEY (plan_id) REFERENCES payment_subscription_plans(id) ON DELETE RESTRICT,
     FOREIGN KEY (counterparty_id, organization_id, project_id)
         REFERENCES counterparties(id, organization_id, project_id)
         ON DELETE CASCADE,
@@ -105,7 +105,7 @@ CREATE TABLE IF NOT EXISTS payment_subscription_collection_attempts (
     updated_at TEXT NOT NULL DEFAULT sdp_iso_now(),
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-    FOREIGN KEY (subscription_id) REFERENCES payment_subscriptions(id) ON DELETE CASCADE,
+    FOREIGN KEY (subscription_id) REFERENCES payment_subscriptions(id) ON DELETE RESTRICT,
     FOREIGN KEY (transfer_id) REFERENCES payment_transfers(id) ON DELETE SET NULL,
     CONSTRAINT payment_subscription_collection_attempts_status_check
         CHECK (status IN ('pending', 'processing', 'confirmed', 'failed', 'skipped')),

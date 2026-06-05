@@ -510,6 +510,46 @@ async function finalizeRecurringCollection(input: {
     const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
     const txSubscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
     const updatedAt = new Date().toISOString();
+    const lockedRecurringPayment = await tx.queryOne<{
+      status: string;
+      next_collection_due_at: string | null;
+    }>(
+      `SELECT status, next_collection_due_at
+         FROM payment_recurring_payments
+        WHERE id = ?
+          AND organization_id = ?
+          AND project_id = ?
+        FOR UPDATE`,
+      [input.recurringPayment.id, input.organizationId, input.projectId]
+    );
+    const lockedSubscription = await tx.queryOne<{
+      status: string;
+      next_collection_due_at: string | null;
+    }>(
+      `SELECT status, next_collection_due_at
+         FROM payment_subscriptions
+        WHERE id = ?
+          AND organization_id = ?
+          AND project_id = ?
+        FOR UPDATE`,
+      [input.subscriptionId, input.organizationId, input.projectId]
+    );
+
+    if (!lockedRecurringPayment || !lockedSubscription) {
+      throw new AppError("NOT_FOUND", "Recurring payment collection state not found");
+    }
+    if (
+      lockedRecurringPayment.status !== "active" ||
+      lockedRecurringPayment.next_collection_due_at !== input.dueAt ||
+      lockedSubscription.status !== "active" ||
+      lockedSubscription.next_collection_due_at !== input.dueAt
+    ) {
+      throw new AppError(
+        "CONFLICT",
+        "Recurring payment collection state changed before finalization started"
+      );
+    }
+
     const transferStatus = input.transfer.status === "finalized" ? "finalized" : "confirmed";
     const updatedTransfer = await txPaymentsRepo.updateTransfer({
       transferId: input.transfer.id,
