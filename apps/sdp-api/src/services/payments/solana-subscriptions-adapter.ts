@@ -56,6 +56,10 @@ export interface ExecutedSubscriptionTransaction {
   blockTime: string | null;
 }
 
+export interface SubmittedSubscriptionTransaction {
+  signature: string;
+}
+
 export function isImmediateRecurringSubscriptionRetryError(error: unknown): boolean {
   return error instanceof AppError && error.details?.retryImmediately === true;
 }
@@ -161,6 +165,7 @@ async function executeSignedInstructions(input: {
   env: Env;
   instructions: Instruction[];
   signers: TransactionSigner[];
+  onSubmitted?: (submitted: SubmittedSubscriptionTransaction) => Promise<void>;
 }): Promise<ExecutedSubscriptionTransaction> {
   const rpc = solanaRpc.createRpc(input.env);
   const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
@@ -193,6 +198,7 @@ async function executeSignedInstructions(input: {
 
     throw error;
   }
+  await input.onSubmitted?.({ signature });
   const confirmation = await solanaRpc.confirmTransaction(rpc, signature, {
     commitment: "confirmed",
   });
@@ -388,6 +394,9 @@ export async function collectSubscriptionOnChain(input: {
   planPda: Address;
   subscriptionPda: Address;
   runtime: RecurringSubscriptionRuntime;
+  onSubmitted?: (
+    submitted: SubmittedSubscriptionTransaction & { destinationTokenAccount: Address }
+  ) => Promise<void>;
 }): Promise<ExecutedSubscriptionTransaction & { destinationTokenAccount: Address }> {
   await assertOnChainPlanAndSubscription({
     env: input.env,
@@ -423,6 +432,9 @@ export async function collectSubscriptionOnChain(input: {
     env: input.env,
     instructions: [createDestinationAtaInstruction, transferInstruction],
     signers: [input.sourceSigner],
+    onSubmitted: async (submitted) => {
+      await input.onSubmitted?.({ ...submitted, destinationTokenAccount });
+    },
   });
 
   return { ...executed, destinationTokenAccount };
@@ -434,6 +446,7 @@ export async function executeSubscriptionLifecycleOnChain(input: {
   sourceSigner: TransactionSigner;
   planPda: Address;
   subscriptionPda: Address;
+  onSubmitted?: (submitted: SubmittedSubscriptionTransaction) => Promise<void>;
 }): Promise<ExecutedSubscriptionTransaction | null> {
   const rpc = solanaRpc.createRpc(input.env);
   const subscriptionAccount = await fetchMaybeSubscriptionDelegation(rpc, input.subscriptionPda, {
@@ -475,5 +488,6 @@ export async function executeSubscriptionLifecycleOnChain(input: {
     env: input.env,
     instructions: [instruction],
     signers: [input.sourceSigner],
+    onSubmitted: input.onSubmitted,
   });
 }
