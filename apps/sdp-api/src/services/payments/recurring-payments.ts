@@ -938,22 +938,20 @@ async function markRecurringCollectionFailedBeforeSubmission(input: {
       const txPaymentsRepo = createPostgresPaymentsRepository(tx);
       const txSubscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
       const now = new Date().toISOString();
-      const [updatedTransfer, failedAttempt] = await Promise.all([
-        txPaymentsRepo.updateTransfer({
-          transferId: input.transfer.id,
-          status: "failed",
-          error: input.error,
-          updatedAt: now,
-        }),
-        txSubscriptionsRepo.updateCollectionAttempt({
-          attemptId: input.attempt.id,
-          transferId: input.transfer.id,
-          status: "failed",
-          error: input.error,
-          attemptedAt: now,
-          updatedAt: now,
-        }),
-      ]);
+      const updatedTransfer = await txPaymentsRepo.updateTransfer({
+        transferId: input.transfer.id,
+        status: "failed",
+        error: input.error,
+        updatedAt: now,
+      });
+      const failedAttempt = await txSubscriptionsRepo.updateCollectionAttempt({
+        attemptId: input.attempt.id,
+        transferId: input.transfer.id,
+        status: "failed",
+        error: input.error,
+        attemptedAt: now,
+        updatedAt: now,
+      });
 
       if (!updatedTransfer || !failedAttempt) {
         throw new AppError("INTERNAL_ERROR", "Failed to mark recurring collection failed");
