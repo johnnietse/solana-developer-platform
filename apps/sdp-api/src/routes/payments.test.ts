@@ -472,6 +472,32 @@ function mockRecurringCollectionAccounts(): void {
   } as Awaited<ReturnType<typeof subscriptionsSdk.fetchMaybeSubscriptionDelegation>>);
 }
 
+function mockRecurringLifecycleSubscriptionState(input: {
+  planPda: string;
+  subscriptionPda: string;
+  expiresAtTs: bigint;
+}): void {
+  fetchMaybeSubscriptionDelegationMock.mockResolvedValueOnce({
+    exists: true,
+    address: address(input.subscriptionPda),
+    data: {
+      header: {
+        discriminator: subscriptionsSdk.AccountDiscriminator.SubscriptionDelegation,
+        version: 1,
+        bump: 255,
+        delegator: TEST_SOLANA_ADDRESSES.wallet1,
+        delegatee: address(input.planPda),
+        payer: TEST_SOLANA_ADDRESSES.wallet1,
+        initId: 0n,
+      },
+      terms: { amount: 500000n, periodHours: 24n, createdAt: 1_700_000_000n },
+      amountPulledInPeriod: 0n,
+      currentPeriodStartTs: 1_700_000_000n,
+      expiresAtTs: input.expiresAtTs,
+    },
+  } as Awaited<ReturnType<typeof subscriptionsSdk.fetchMaybeSubscriptionDelegation>>);
+}
+
 function expectPreparedSubscriptionTransaction(
   preparedTransaction: {
     serialized: string;
@@ -832,8 +858,10 @@ describe("Payments routes", () => {
     });
     expect(activateBody.data.recurringPayment.planId).toBeTruthy();
     expect(activateBody.data.recurringPayment.subscriptionId).toBeTruthy();
-    expect(activateBody.data.recurringPayment.planPda).toBeTruthy();
-    expect(activateBody.data.recurringPayment.subscriptionPda).toBeTruthy();
+    const recurringPlanPda = activateBody.data.recurringPayment.planPda ?? "";
+    const recurringSubscriptionPda = activateBody.data.recurringPayment.subscriptionPda ?? "";
+    expect(recurringPlanPda).toBeTruthy();
+    expect(recurringSubscriptionPda).toBeTruthy();
 
     const originalCreatePaymentsRepository = repositories.createPaymentsRepository;
     const createPaymentsRepositorySpy = vi
@@ -1003,6 +1031,134 @@ describe("Payments routes", () => {
     expect(earlyCollectRes.status).toBe(400);
     const earlyCollectBody = (await earlyCollectRes.json()) as { error: { message: string } };
     expect(earlyCollectBody.error.message).toContain("not due");
+
+    let failCancelLifecycleUpdate = true;
+    const cancelLifecycleRepoSpy = vi
+      .spyOn(repositories, "createPostgresPaymentRecurringPaymentsRepository")
+      .mockImplementation((db) => {
+        const repo = originalCreatePostgresRecurringPaymentsRepository(db);
+
+        return {
+          ...repo,
+          updateRecurringPayment: vi.fn(async (input) => {
+            if (
+              failCancelLifecycleUpdate &&
+              input.recurringPaymentId === recurringPaymentId &&
+              input.status === "canceled"
+            ) {
+              failCancelLifecycleUpdate = false;
+              throw new Error("simulated cancel lifecycle DB failure");
+            }
+
+            return repo.updateRecurringPayment(input);
+          }),
+        };
+      });
+    mockRecurringLifecycleSubscriptionState({
+      planPda: recurringPlanPda,
+      subscriptionPda: recurringSubscriptionPda,
+      expiresAtTs: 0n,
+    });
+    try {
+      const failedCancelRes = await app.request(
+        `/v1/payments/recurring-payments/${recurringPaymentId}/cancel`,
+        {
+          method: "POST",
+          headers: jsonHeaders,
+          body: "{}",
+        },
+        env
+      );
+      expect(failedCancelRes.status).toBe(500);
+    } finally {
+      cancelLifecycleRepoSpy.mockRestore();
+    }
+    const confirmCallsAfterFailedCancel = confirmTransactionMock.mock.calls.length;
+
+    mockRecurringLifecycleSubscriptionState({
+      planPda: recurringPlanPda,
+      subscriptionPda: recurringSubscriptionPda,
+      expiresAtTs: 1_800_000_000n,
+    });
+    const cancelRetryRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/cancel`,
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: "{}",
+      },
+      env
+    );
+    expect(cancelRetryRes.status).toBe(200);
+    const cancelRetryBody = (await cancelRetryRes.json()) as {
+      data: { recurringPayment: { status: string } };
+    };
+    expect(cancelRetryBody.data.recurringPayment.status).toBe("canceled");
+    expect(confirmTransactionMock.mock.calls.length).toBe(confirmCallsAfterFailedCancel);
+
+    let failResumeLifecycleUpdate = true;
+    const resumeLifecycleRepoSpy = vi
+      .spyOn(repositories, "createPostgresPaymentRecurringPaymentsRepository")
+      .mockImplementation((db) => {
+        const repo = originalCreatePostgresRecurringPaymentsRepository(db);
+
+        return {
+          ...repo,
+          updateRecurringPayment: vi.fn(async (input) => {
+            if (
+              failResumeLifecycleUpdate &&
+              input.recurringPaymentId === recurringPaymentId &&
+              input.status === "active"
+            ) {
+              failResumeLifecycleUpdate = false;
+              throw new Error("simulated resume lifecycle DB failure");
+            }
+
+            return repo.updateRecurringPayment(input);
+          }),
+        };
+      });
+    mockRecurringLifecycleSubscriptionState({
+      planPda: recurringPlanPda,
+      subscriptionPda: recurringSubscriptionPda,
+      expiresAtTs: 1_800_000_000n,
+    });
+    try {
+      const failedResumeRes = await app.request(
+        `/v1/payments/recurring-payments/${recurringPaymentId}/resume`,
+        {
+          method: "POST",
+          headers: jsonHeaders,
+          body: "{}",
+        },
+        env
+      );
+      expect(failedResumeRes.status).toBe(500);
+    } finally {
+      resumeLifecycleRepoSpy.mockRestore();
+    }
+    const confirmCallsAfterFailedResume = confirmTransactionMock.mock.calls.length;
+
+    mockRecurringLifecycleSubscriptionState({
+      planPda: recurringPlanPda,
+      subscriptionPda: recurringSubscriptionPda,
+      expiresAtTs: 0n,
+    });
+    const resumeRetryRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/resume`,
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: "{}",
+      },
+      env
+    );
+    expect(resumeRetryRes.status).toBe(200);
+    const resumeRetryBody = (await resumeRetryRes.json()) as {
+      data: { recurringPayment: { status: string } };
+    };
+    expect(resumeRetryBody.data.recurringPayment.status).toBe("active");
+    expect(confirmTransactionMock.mock.calls.length).toBe(confirmCallsAfterFailedResume);
   });
 
   it("exercises the recurring subscription lifecycle through SDP API routes", async () => {

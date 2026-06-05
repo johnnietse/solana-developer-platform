@@ -384,7 +384,30 @@ export async function executeSubscriptionLifecycleOnChain(input: {
   sourceSigner: TransactionSigner;
   planPda: Address;
   subscriptionPda: Address;
-}): Promise<ExecutedSubscriptionTransaction> {
+}): Promise<ExecutedSubscriptionTransaction | null> {
+  const rpc = solanaRpc.createRpc(input.env);
+  const subscriptionAccount = await fetchMaybeSubscriptionDelegation(rpc, input.subscriptionPda, {
+    commitment: "confirmed",
+  });
+
+  if (!subscriptionAccount.exists) {
+    throw new AppError("BAD_REQUEST", "Recurring payment subscription is missing on-chain");
+  }
+  if (subscriptionAccount.data.header.delegator !== input.sourceSigner.address) {
+    throw new AppError("BAD_REQUEST", "Recurring payment subscription owner mismatch");
+  }
+  if (subscriptionAccount.data.header.delegatee !== input.planPda) {
+    throw new AppError("BAD_REQUEST", "Recurring payment subscription plan mismatch");
+  }
+
+  const isCanceledOnChain = subscriptionAccount.data.expiresAtTs !== 0n;
+  if (
+    (input.operation === "cancel" && isCanceledOnChain) ||
+    (input.operation === "resume" && !isCanceledOnChain)
+  ) {
+    return null;
+  }
+
   const instruction =
     input.operation === "cancel"
       ? await getCancelSubscriptionOverlayInstructionAsync({
