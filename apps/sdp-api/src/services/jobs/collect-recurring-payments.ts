@@ -7,6 +7,7 @@ import { collectRecurringPayment as collectRecurringPaymentRecord } from "@/serv
 import type { Env } from "@/types/env";
 
 const DEFAULT_BATCH_SIZE = 20;
+const MAX_BATCH_SIZE = 20;
 const DEFAULT_RETRY_AFTER_MINUTES = 30;
 
 function parsePositiveInteger(value: string | undefined, fallback: number): number {
@@ -31,10 +32,21 @@ export async function collectDueRecurringPayments(env: Env): Promise<{
     return { scanned: 0, collected: 0, failed: 0 };
   }
 
-  const batchSize = parsePositiveInteger(
+  const requestedBatchSize = parsePositiveInteger(
     env.PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE,
     DEFAULT_BATCH_SIZE
   );
+  const batchSize = Math.min(requestedBatchSize, MAX_BATCH_SIZE);
+  if (requestedBatchSize > MAX_BATCH_SIZE) {
+    console.warn("Recurring payment collection batch size capped", {
+      requestedBatchSize,
+      maxBatchSize: MAX_BATCH_SIZE,
+      // Collection runs sequential on-chain work on a five-minute cron tick.
+      // Keep the batch bounded so slow confirmations do not routinely overlap
+      // the next scheduled run.
+      cronIntervalMinutes: 5,
+    });
+  }
   const retryAfterMinutes = parsePositiveInteger(
     env.PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES,
     DEFAULT_RETRY_AFTER_MINUTES
