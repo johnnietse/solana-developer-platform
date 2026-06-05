@@ -1,11 +1,23 @@
-import type { PaymentRampExecution, PaymentRampQuote, SdpEnvironment } from "@sdp/types";
-import { type CryptoRailId, parseFiatCurrency } from "@sdp/types/payment-rails";
+import type {
+  PaymentRampEstimate,
+  PaymentRampExecution,
+  PaymentRampQuote,
+  SdpEnvironment,
+} from "@sdp/types";
+import {
+  type CryptoRailId,
+  getCryptoRailAssetLabel,
+  parseFiatCurrency,
+} from "@sdp/types/payment-rails";
 import { AppError, providerNotConfigured } from "@/lib/errors";
+import { providerFetchJson } from "../fetch";
 import { createProviderRampSupport, RAMP_RAIL_DUMPS, rampId, requireEnv } from "../shared";
 import type {
   MutableProviderRampSupport,
   ProviderRampSupport,
   RampDumpReader,
+  RampEstimateOfframpInput,
+  RampEstimateOnrampInput,
   RampExecuteOfframpInput,
   RampExecuteOnrampInput,
   RampOfframpQuoteInput,
@@ -16,6 +28,7 @@ import type {
   RampWebhookValidationResult,
 } from "../types";
 
+const MOONPAY_API_BASE_URL = "https://api.moonpay.com";
 const MOONPAY_ONRAMP_URL = "https://buy.moonpay.com";
 const MOONPAY_OFFRAMP_URL = "https://sell.moonpay.com";
 const MOONPAY_SANDBOX_ONRAMP_URL = "https://buy-sandbox.moonpay.com";
@@ -27,6 +40,23 @@ interface MoonpayConfig {
   secretKey: string;
   onrampUrl: string;
   offrampUrl: string;
+}
+
+interface MoonpayBuyQuoteResponse {
+  baseCurrencyAmount: number;
+  quoteCurrencyAmount: number;
+  quoteCurrencyPrice: number;
+  feeAmount: number;
+  networkFeeAmount: number;
+  extraFeeAmount: number;
+}
+
+interface MoonpaySellQuoteResponse {
+  baseCurrencyAmount: number;
+  quoteCurrencyAmount: number;
+  baseCurrencyPrice: number;
+  feeAmount: number;
+  extraFeeAmount: number;
 }
 
 function readMoonpayConfig(
@@ -128,6 +158,7 @@ interface MoonpayCurrencyEntry {
   code?: string;
   isSuspended?: boolean;
   isSellSupported?: boolean;
+  supportsTestMode?: boolean;
   minBuyAmount?: number | null;
   minSellAmount?: number | null;
   metadata?: { networkCode?: string };
@@ -153,6 +184,7 @@ function addCryptoSupport(
 ) {
   if (!entry.code) return;
   if (entry.isSuspended === true) return;
+  if (entry.supportsTestMode !== true) return;
   if (entry.metadata?.networkCode !== "solana") return;
   if (!isMoonpayCryptoCode(entry.code)) return;
 
@@ -211,6 +243,65 @@ export class MoonpayRampClient implements RampProvider {
     throw new AppError("PROVIDER_NOT_CONFIGURED", "MoonPay webhook validation is not implemented", {
       provider: this.id,
     });
+  }
+
+  async estimateOnramp(
+    { env, mode }: RampRuntimeContext,
+    input: RampEstimateOnrampInput
+  ): Promise<PaymentRampEstimate> {
+    const config = readMoonpayConfig(env, mode);
+    const currencyCode = normalizeMoonpayCurrencyCode(getCryptoRailAssetLabel(input.assetRail));
+    const url = new URL(`${MOONPAY_API_BASE_URL}/v3/currencies/${currencyCode}/buy_quote`);
+    url.searchParams.set("apiKey", config.apiKey);
+    url.searchParams.set("baseCurrencyCode", input.fiatCurrency.toLowerCase());
+    url.searchParams.set("baseCurrencyAmount", input.fiatAmount);
+    const quote = await providerFetchJson<MoonpayBuyQuoteResponse>(this.id, url.toString(), {
+      method: "GET",
+    });
+    return {
+      provider: this.id,
+      direction: "onramp",
+      fiatCurrency: input.fiatCurrency,
+      assetRail: input.assetRail,
+      fiatAmount: String(quote.baseCurrencyAmount),
+      cryptoAmount: String(quote.quoteCurrencyAmount),
+      exchangeRate: String(quote.quoteCurrencyPrice),
+      fees: {
+        currency: input.fiatCurrency,
+        total: String(quote.feeAmount + quote.networkFeeAmount + quote.extraFeeAmount),
+        network: String(quote.networkFeeAmount),
+        provider: String(quote.feeAmount),
+      },
+    };
+  }
+
+  async estimateOfframp(
+    { env, mode }: RampRuntimeContext,
+    input: RampEstimateOfframpInput
+  ): Promise<PaymentRampEstimate> {
+    const config = readMoonpayConfig(env, mode);
+    const currencyCode = normalizeMoonpayCurrencyCode(getCryptoRailAssetLabel(input.assetRail));
+    const url = new URL(`${MOONPAY_API_BASE_URL}/v3/currencies/${currencyCode}/sell_quote`);
+    url.searchParams.set("apiKey", config.apiKey);
+    url.searchParams.set("quoteCurrencyCode", input.fiatCurrency.toLowerCase());
+    url.searchParams.set("baseCurrencyAmount", input.cryptoAmount);
+    const quote = await providerFetchJson<MoonpaySellQuoteResponse>(this.id, url.toString(), {
+      method: "GET",
+    });
+    return {
+      provider: this.id,
+      direction: "offramp",
+      fiatCurrency: input.fiatCurrency,
+      assetRail: input.assetRail,
+      fiatAmount: String(quote.quoteCurrencyAmount),
+      cryptoAmount: String(quote.baseCurrencyAmount),
+      exchangeRate: String(quote.baseCurrencyPrice),
+      fees: {
+        currency: input.fiatCurrency,
+        total: String(quote.feeAmount + quote.extraFeeAmount),
+        provider: String(quote.feeAmount),
+      },
+    };
   }
 
   async createOnrampQuote(
