@@ -405,6 +405,7 @@ async function markRecurringCollectionSubmitted(input: {
   attempt: PaymentSubscriptionCollectionAttemptRow;
   transfer: PaymentTransferRow;
   hasRecoveryMarker: boolean;
+  hasAttemptRecoveryMarker: boolean;
 }> {
   const updatedAt = new Date().toISOString();
   const metadata = {
@@ -463,12 +464,24 @@ async function markRecurringCollectionSubmitted(input: {
     attemptResult.status === "fulfilled" && attemptResult.value
       ? attemptResult.value
       : input.attempt;
+  const transferHasSubmissionMarker =
+    transferResult.status === "fulfilled" && Boolean(transferResult.value?.signature);
+  const attemptHasSubmissionMarker =
+    attemptResult.status === "fulfilled" && Boolean(attemptResult.value?.signature);
+
+  if (!transferHasSubmissionMarker && !attemptHasSubmissionMarker) {
+    console.error("Recurring collection submitted on-chain without a persisted recovery marker", {
+      attemptId: input.attempt.id,
+      transferId: input.transfer.id,
+      signature: input.signature,
+    });
+  }
 
   return {
     attempt: updatedAttempt,
     transfer: updatedTransfer,
-    hasRecoveryMarker:
-      attemptResult.status === "fulfilled" && Boolean(attemptResult.value?.signature),
+    hasRecoveryMarker: transferHasSubmissionMarker || attemptHasSubmissionMarker,
+    hasAttemptRecoveryMarker: attemptHasSubmissionMarker,
   };
 }
 
@@ -515,6 +528,8 @@ async function finalizeRecurringCollection(input: {
       recurringPaymentId: input.recurringPayment.id,
       organizationId: input.organizationId,
       projectId: input.projectId,
+      expectedStatus: "active",
+      expectedNextCollectionDueAt: input.dueAt,
       destinationTokenAccount: input.destinationTokenAccount,
       nextCollectionDueAt: nextDueAt,
       updatedAt,
@@ -523,13 +538,21 @@ async function finalizeRecurringCollection(input: {
       subscriptionId: input.subscriptionId,
       organizationId: input.organizationId,
       projectId: input.projectId,
+      expectedStatus: "active",
+      expectedNextCollectionDueAt: input.dueAt,
       currentPeriodStartAt: input.dueAt,
       nextCollectionDueAt: nextDueAt,
       updatedAt,
     });
 
-    if (!updatedTransfer || !updatedAttempt || !updatedRecurringPayment || !updatedSubscription) {
+    if (!updatedTransfer || !updatedAttempt) {
       throw new AppError("INTERNAL_ERROR", "Failed to update recurring payment collection state");
+    }
+    if (!updatedRecurringPayment || !updatedSubscription) {
+      throw new AppError(
+        "CONFLICT",
+        "Recurring payment collection state changed before finalization completed"
+      );
     }
 
     return {
@@ -690,6 +713,7 @@ async function resolveStaleUnsignedProcessingAttempt(input: {
       recurringPaymentId: input.recurringPayment.id,
       organizationId: input.organizationId,
       projectId: input.projectId,
+      expectedStatus: input.recurringPayment.status,
       status: "paused",
       updatedAt: now,
     });
@@ -697,6 +721,7 @@ async function resolveStaleUnsignedProcessingAttempt(input: {
       subscriptionId: input.subscriptionId,
       organizationId: input.organizationId,
       projectId: input.projectId,
+      expectedStatus: "active",
       status: "paused",
       updatedAt: now,
     });
@@ -1288,7 +1313,7 @@ export async function collectRecurringPayment(input: {
       destinationTokenAccount: String(executed.destinationTokenAccount),
     });
   } catch (error) {
-    if (!submitted.hasRecoveryMarker) {
+    if (!submitted.hasAttemptRecoveryMarker) {
       submitted = await markRecurringCollectionSubmitted({
         env: input.env,
         attempt,
@@ -1307,6 +1332,7 @@ export async function collectRecurringPayment(input: {
       transferId: transfer.id,
       signature: executed.signature,
       hasRecoveryMarker: submitted.hasRecoveryMarker,
+      hasAttemptRecoveryMarker: submitted.hasAttemptRecoveryMarker,
       error: error instanceof Error ? error.message : String(error),
     });
 
@@ -1384,6 +1410,8 @@ export async function executeRecurringPaymentLifecycle(input: {
       recurringPaymentId: recurringPayment.id,
       organizationId: input.organizationId,
       projectId: input.projectId,
+      expectedStatus: recurringPayment.status,
+      expectedNextCollectionDueAt: recurringPayment.next_collection_due_at,
       status,
       nextCollectionDueAt: resumeNextCollectionDueAt,
       updatedAt: now,
@@ -1392,6 +1420,13 @@ export async function executeRecurringPaymentLifecycle(input: {
       subscriptionId,
       organizationId: input.organizationId,
       projectId: input.projectId,
+      expectedStatus:
+        recurringPayment.status === "paused"
+          ? "paused"
+          : recurringPayment.status === "canceled"
+            ? "canceled"
+            : "active",
+      expectedNextCollectionDueAt: recurringPayment.next_collection_due_at,
       status,
       currentPeriodStartAt: resumeCurrentPeriodStartAt,
       nextCollectionDueAt: resumeNextCollectionDueAt,
@@ -1400,7 +1435,10 @@ export async function executeRecurringPaymentLifecycle(input: {
     });
 
     if (!updated || !updatedSubscription) {
-      throw new AppError("INTERNAL_ERROR", "Failed to update recurring payment lifecycle state");
+      throw new AppError(
+        "CONFLICT",
+        "Recurring payment lifecycle state changed before the update completed"
+      );
     }
 
     return updated;

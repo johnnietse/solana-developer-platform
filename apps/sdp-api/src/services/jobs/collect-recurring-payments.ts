@@ -1,4 +1,7 @@
-import { createPaymentRecurringPaymentsRepository } from "@/db/repositories";
+import {
+  createPaymentRecurringPaymentsRepository,
+  createPaymentSubscriptionsRepository,
+} from "@/db/repositories";
 import {
   isRecurringPaymentCollectionEnabled,
   isRecurringPaymentsEnabled,
@@ -53,6 +56,19 @@ export async function collectDueRecurringPayments(env: Env): Promise<{
   );
   const now = new Date();
   const retryAfter = new Date(now.getTime() - retryAfterMinutes * 60 * 1000).toISOString();
+  const expiredAttempts = await createPaymentSubscriptionsRepository(
+    env
+  ).expireStaleUnsignedProcessingAttempts({
+    olderThan: retryAfter,
+    updatedAt: now.toISOString(),
+    limit: batchSize,
+  });
+  if (expiredAttempts > 0) {
+    console.warn("Expired stale unsigned recurring collection attempts", {
+      expiredAttempts,
+      retryAfter,
+    });
+  }
   const due = await createPaymentRecurringPaymentsRepository(env).listDueRecurringPayments({
     now: now.toISOString(),
     retryAfter,

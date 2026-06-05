@@ -131,6 +131,8 @@ export interface UpdatePaymentSubscriptionInput {
   subscriptionId: string;
   organizationId: string;
   projectId: string;
+  expectedStatus?: PaymentSubscriptionStatus;
+  expectedNextCollectionDueAt?: string | null;
   subscriberTokenAccount?: string | null;
   subscriptionPda?: string | null;
   subscriptionAuthorityAddress?: string | null;
@@ -236,6 +238,11 @@ export interface PaymentSubscriptionsRepository {
   updateCollectionAttempt(
     input: UpdatePaymentSubscriptionCollectionAttemptInput
   ): Promise<PaymentSubscriptionCollectionAttemptRow | null>;
+  expireStaleUnsignedProcessingAttempts(params: {
+    olderThan: string;
+    updatedAt: string;
+    limit: number;
+  }): Promise<number>;
   getCollectionAttemptByRecurringDue(params: {
     recurringPaymentId: string;
     dueAt: string;

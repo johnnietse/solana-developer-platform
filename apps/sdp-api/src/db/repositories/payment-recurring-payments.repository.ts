@@ -53,6 +53,8 @@ export interface UpdatePaymentRecurringPaymentInput {
   recurringPaymentId: string;
   organizationId: string;
   projectId: string;
+  expectedStatus?: PaymentRecurringPaymentStatus;
+  expectedNextCollectionDueAt?: string | null;
   destinationTokenAccount?: string | null;
   nextCollectionDueAt?: string | null;
   planId?: string | null;

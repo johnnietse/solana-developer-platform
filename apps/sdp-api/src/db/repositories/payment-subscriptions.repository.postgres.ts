@@ -330,14 +330,23 @@ export function createPostgresPaymentSubscriptionsRepository(
     },
 
     async updateSubscription(input: UpdatePaymentSubscriptionInput) {
-      const existing = await getSubscriptionByIdInternal(db, {
-        subscriptionId: input.subscriptionId,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-      });
-      if (!existing) return null;
+      const whereClauses = ["id = ?", "organization_id = ?", "project_id = ?"];
+      const whereValues: unknown[] = [input.subscriptionId, input.organizationId, input.projectId];
 
-      await db
+      if (input.expectedStatus !== undefined) {
+        whereClauses.push("status = ?");
+        whereValues.push(input.expectedStatus);
+      }
+      if (input.expectedNextCollectionDueAt !== undefined) {
+        if (input.expectedNextCollectionDueAt === null) {
+          whereClauses.push("next_collection_due_at IS NULL");
+        } else {
+          whereClauses.push("next_collection_due_at = ?");
+          whereValues.push(input.expectedNextCollectionDueAt);
+        }
+      }
+
+      const changes = await db
         .prepare(
           `UPDATE payment_subscriptions
               SET subscriber_token_account =
@@ -355,9 +364,7 @@ export function createPostgresPaymentSubscriptionsRepository(
                   cancel_at = CASE WHEN ?::boolean THEN ? ELSE cancel_at END,
                   canceled_at = CASE WHEN ?::boolean THEN ? ELSE canceled_at END,
                   updated_at = ?
-            WHERE id = ?
-              AND organization_id = ?
-              AND project_id = ?`
+            WHERE ${whereClauses.join(" AND ")}`
         )
         .bind(
           input.subscriberTokenAccount !== undefined,
@@ -378,11 +385,13 @@ export function createPostgresPaymentSubscriptionsRepository(
           input.canceledAt !== undefined,
           input.canceledAt ?? null,
           input.updatedAt,
-          input.subscriptionId,
-          input.organizationId,
-          input.projectId
+          ...whereValues
         )
         .run();
+
+      if (changes === 0) {
+        return null;
+      }
 
       return getSubscriptionByIdInternal(db, {
         subscriptionId: input.subscriptionId,
@@ -522,6 +531,29 @@ export function createPostgresPaymentSubscriptionsRepository(
         .run();
 
       return getAttemptByIdInternal(db, input.attemptId);
+    },
+
+    expireStaleUnsignedProcessingAttempts(params) {
+      return db
+        .prepare(
+          `UPDATE payment_subscription_collection_attempts
+              SET status = 'failed',
+                  error = COALESCE(error, 'Stale recurring collection attempt expired before transfer submission'),
+                  attempted_at = COALESCE(attempted_at, ?),
+                  updated_at = ?
+            WHERE id IN (
+                  SELECT id
+                    FROM payment_subscription_collection_attempts
+                   WHERE status = 'processing'
+                     AND transfer_id IS NULL
+                     AND signature IS NULL
+                     AND updated_at <= ?
+                   ORDER BY updated_at ASC
+                   LIMIT ?
+            )`
+        )
+        .bind(params.updatedAt, params.updatedAt, params.olderThan, params.limit)
+        .run();
     },
 
     async getCollectionAttemptByRecurringDue(params) {

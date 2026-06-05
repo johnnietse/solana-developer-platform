@@ -108,16 +108,27 @@ export function createPostgresPaymentRecurringPaymentsRepository(
     },
 
     async updateRecurringPayment(input: UpdatePaymentRecurringPaymentInput) {
-      const existing = await getRecurringPaymentByIdInternal(db, input.recurringPaymentId);
-      if (
-        !existing ||
-        existing.organization_id !== input.organizationId ||
-        existing.project_id !== input.projectId
-      ) {
-        return null;
+      const whereClauses = ["id = ?", "organization_id = ?", "project_id = ?"];
+      const whereValues: unknown[] = [
+        input.recurringPaymentId,
+        input.organizationId,
+        input.projectId,
+      ];
+
+      if (input.expectedStatus !== undefined) {
+        whereClauses.push("status = ?");
+        whereValues.push(input.expectedStatus);
+      }
+      if (input.expectedNextCollectionDueAt !== undefined) {
+        if (input.expectedNextCollectionDueAt === null) {
+          whereClauses.push("next_collection_due_at IS NULL");
+        } else {
+          whereClauses.push("next_collection_due_at = ?");
+          whereValues.push(input.expectedNextCollectionDueAt);
+        }
       }
 
-      await db
+      const changes = await db
         .prepare(
           `UPDATE payment_recurring_payments
               SET destination_token_account =
@@ -137,9 +148,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
                     CASE WHEN ?::boolean THEN ? ELSE authorization_signature END,
                   status = COALESCE(?, status),
                   updated_at = ?
-            WHERE id = ?
-              AND organization_id = ?
-              AND project_id = ?`
+            WHERE ${whereClauses.join(" AND ")}`
         )
         .bind(
           input.destinationTokenAccount !== undefined,
@@ -164,11 +173,13 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.authorizationSignature ?? null,
           input.status ?? null,
           input.updatedAt,
-          input.recurringPaymentId,
-          input.organizationId,
-          input.projectId
+          ...whereValues
         )
         .run();
+
+      if (changes === 0) {
+        return null;
+      }
 
       return getRecurringPaymentByIdInternal(db, input.recurringPaymentId);
     },
