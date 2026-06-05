@@ -919,11 +919,11 @@ describe("Payments routes", () => {
       });
     expect(dueWithStaleUnsignedAttempt.map((payment) => payment.id)).toContain(recurringPaymentId);
 
-    const originalCreatePaymentsRepository = repositories.createPaymentsRepository;
-    const createPaymentsRepositorySpy = vi
-      .spyOn(repositories, "createPaymentsRepository")
-      .mockImplementation((repoEnv) => ({
-        ...originalCreatePaymentsRepository(repoEnv),
+    const originalCreatePostgresPaymentsRepository = repositories.createPostgresPaymentsRepository;
+    const createPostgresPaymentsRepositorySpy = vi
+      .spyOn(repositories, "createPostgresPaymentsRepository")
+      .mockImplementation((db) => ({
+        ...originalCreatePostgresPaymentsRepository(db),
         createTransfer: vi.fn().mockResolvedValue(null),
       }));
     try {
@@ -938,7 +938,7 @@ describe("Payments routes", () => {
       );
       expect(failedCollectRes.status).toBe(500);
     } finally {
-      createPaymentsRepositorySpy.mockRestore();
+      createPostgresPaymentsRepositorySpy.mockRestore();
     }
 
     const failedAttemptsRes = await app.request(
