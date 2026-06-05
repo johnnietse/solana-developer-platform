@@ -680,6 +680,78 @@ describe("Payments routes", () => {
     expect(body.error.message).toContain("Recurring payments are not enabled");
   });
 
+  it("does not apply today's daily wallet-policy usage to recurring payment setup", async () => {
+    env.PAYMENTS_RECURRING_ENABLED = "true";
+    await seedWalletPolicy({
+      destinationAllowlist: [],
+      maxDailyAmount: "1.0",
+    });
+    const counterpartyId = await seedCounterparty({ id: "cp_recurring_daily_setup" });
+    const account = await repositories
+      .createCounterpartyAccountsRepository(env)
+      .createCounterpartyAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        counterpartyId,
+        accountKind: "crypto_wallet",
+        label: "Recipient wallet",
+        details: {
+          network: "solana",
+          address: TEST_SOLANA_ADDRESSES.wallet2,
+        },
+      });
+    expect(account).not.toBeNull();
+    const counterpartyAccountId = account?.id ?? "";
+    expect(counterpartyAccountId).toBeTruthy();
+
+    const now = new Date().toISOString();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_transfers
+           (id, organization_id, project_id, wallet_id, source_address, destination_address, token, amount, memo, type, direction, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        "xfr_existing_recurring_daily_limit",
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        TEST_WALLET_ID,
+        TEST_SOLANA_ADDRESSES.wallet1,
+        TEST_SOLANA_ADDRESSES.wallet2,
+        DEVNET_USDC_MINT,
+        "0.90",
+        null,
+        "transfer",
+        "outbound",
+        "confirmed",
+        now,
+        now
+      )
+      .run();
+
+    const res = await app.request(
+      "/v1/payments/recurring-payments",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          sourceWalletId: TEST_WALLET_ID,
+          counterpartyId,
+          counterpartyAccountId,
+          token: DEVNET_USDC_MINT,
+          amount: "0.50",
+          periodHours: 24,
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(201);
+  });
+
   it("executes the outbound recurring payment backend flow through SDP API routes", async () => {
     env.PAYMENTS_RECURRING_ENABLED = "true";
     mockRecurringTokenRpc();

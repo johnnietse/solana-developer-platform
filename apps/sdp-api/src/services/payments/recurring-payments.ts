@@ -964,6 +964,7 @@ export async function createRecurringPayment(input: {
     projectId: input.projectId,
     wallet: input.sourceWallet,
     destinationAddress: destination.destinationAddress,
+    enforceDailyLimit: false,
     token: input.token,
     amount: input.amount,
   });

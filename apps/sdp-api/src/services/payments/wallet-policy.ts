@@ -127,6 +127,7 @@ export async function assertWalletPolicyAllowsTransferWithRepository(
     wallet: CustodyWallet;
     destinationAddress?: string | null;
     enforceDestinationAllowlist?: boolean;
+    enforceDailyLimit?: boolean;
     token: string;
     amount: string;
   }
@@ -159,7 +160,7 @@ export async function assertWalletPolicyAllowsTransferWithRepository(
     }
   }
 
-  if (policy.maxDailyAmount) {
+  if (policy.maxDailyAmount && input.enforceDailyLimit !== false) {
     if (!isDecimalString(policy.maxDailyAmount)) {
       throw new AppError("INTERNAL_ERROR", "Wallet policy has invalid maxDailyAmount");
     }
