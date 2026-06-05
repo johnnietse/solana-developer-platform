@@ -1,12 +1,13 @@
 import { createVerify } from "node:crypto";
 import type {
   LightsparkPaymentRampInstruction,
+  PaymentRampEstimate,
   PaymentRampExecution,
   PaymentRampQuote,
   SdpEnvironment,
 } from "@sdp/types";
-import { parseFiatCurrency } from "@sdp/types/payment-rails";
-import { parseDecimalAmount } from "@/lib/amount";
+import { getCryptoRailAssetLabel, parseFiatCurrency } from "@sdp/types/payment-rails";
+import { formatDecimalAmount, parseDecimalAmount } from "@/lib/amount";
 import { AppError, providerNotConfigured } from "@/lib/errors";
 import { isAddress } from "@/lib/solana";
 import { type ProviderRequestInit, providerFetchJson } from "../fetch";
@@ -22,6 +23,8 @@ import {
 import type {
   ProviderRampSupport,
   RampDumpReader,
+  RampEstimateOfframpInput,
+  RampEstimateOnrampInput,
   RampExecuteOfframpInput,
   RampExecuteOnrampInput,
   RampOfframpQuoteInput,
@@ -210,6 +213,37 @@ interface GridOfframpQuoteBody {
   lockedCurrencySide: "SENDING" | "RECEIVING";
   lockedCurrencyAmount: number;
   description: string;
+}
+
+interface GridExchangeRateCurrency {
+  code: string;
+  decimals: number;
+}
+
+interface GridExchangeRate {
+  sourceCurrency: GridExchangeRateCurrency;
+  destinationCurrency: GridExchangeRateCurrency;
+  sendingAmount: number;
+  receivingAmount: number;
+  exchangeRate: number;
+  fees: { fixed: number };
+  minSendingAmount: number;
+  maxSendingAmount: number;
+}
+
+interface GridExchangeRatesResponse {
+  data: GridExchangeRate[];
+}
+
+function parseGridExchangeRate(response: GridExchangeRatesResponse): GridExchangeRate {
+  const entry = response.data[0];
+  if (!entry) {
+    throw new AppError(
+      "PROVIDER_UNAVAILABLE",
+      "Lightspark returned no exchange rate for this pair"
+    );
+  }
+  return entry;
 }
 
 export interface CreateLightsparkOnrampQuoteInput {
@@ -551,6 +585,54 @@ export class LightsparkRampClient implements RampProvider {
       throw new AppError("BAD_REQUEST", "Lightspark external account response is missing id");
     }
     return created.id;
+  }
+
+  async estimateOnramp(
+    _ctx: RampRuntimeContext,
+    _input: RampEstimateOnrampInput
+  ): Promise<PaymentRampEstimate> {
+    throw new AppError(
+      "ESTIMATE_NOT_AVAILABLE",
+      "Lightspark on-ramp rate is only known at quote time.",
+      { provider: this.id }
+    );
+  }
+
+  async estimateOfframp(
+    { env, mode }: RampRuntimeContext,
+    input: RampEstimateOfframpInput
+  ): Promise<PaymentRampEstimate> {
+    const config = readLightsparkConfig(env, mode);
+    const cryptoCurrency = normalizeLightsparkCurrencyCode(
+      getCryptoRailAssetLabel(input.assetRail)
+    );
+    const sendingAmount = toLightsparkMinorUnitsInteger(
+      parseDecimalAmount(input.cryptoAmount, getLightsparkCurrencyDecimals(cryptoCurrency)),
+      "cryptoAmount"
+    );
+    const rate = parseGridExchangeRate(
+      await this.request<GridExchangeRatesResponse>(
+        config,
+        `exchange-rates?sourceCurrency=${encodeURIComponent(cryptoCurrency)}&destinationCurrency=${encodeURIComponent(input.fiatCurrency)}&sendingAmount=${sendingAmount}`,
+        { method: "GET" }
+      )
+    );
+    return {
+      provider: this.id,
+      direction: "offramp",
+      fiatCurrency: input.fiatCurrency,
+      assetRail: input.assetRail,
+      fiatAmount: formatDecimalAmount(
+        BigInt(rate.receivingAmount),
+        rate.destinationCurrency.decimals
+      ),
+      cryptoAmount: formatDecimalAmount(BigInt(rate.sendingAmount), rate.sourceCurrency.decimals),
+      exchangeRate: String(rate.exchangeRate),
+      fees: {
+        currency: getCryptoRailAssetLabel(input.assetRail),
+        total: formatDecimalAmount(BigInt(rate.fees.fixed), rate.sourceCurrency.decimals),
+      },
+    };
   }
 
   async createOnrampQuote(

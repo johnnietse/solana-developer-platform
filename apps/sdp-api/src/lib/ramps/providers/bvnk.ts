@@ -2,11 +2,12 @@ import type {
   BvnkBankFundingDetails,
   BvnkOnboardingStatus,
   BvnkPaymentRampInstruction,
+  PaymentRampEstimate,
   PaymentRampExecution,
   PaymentRampQuote,
   SdpEnvironment,
 } from "@sdp/types";
-import { parseFiatCurrency } from "@sdp/types/payment-rails";
+import { getCryptoRailAssetLabel, parseFiatCurrency } from "@sdp/types/payment-rails";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import { AppError, providerNotConfigured } from "@/lib/errors";
 import { hashString, hmacSha256Base64, verifyHmacSha256Base64 } from "@/lib/hash";
@@ -20,6 +21,8 @@ import {
 import type {
   ProviderRampSupport,
   RampDumpReader,
+  RampEstimateOfframpInput,
+  RampEstimateOnrampInput,
   RampExecuteOfframpInput,
   RampOfframpQuoteInput,
   RampProvider,
@@ -353,6 +356,34 @@ function parseBvnkEstimateResponse(payload: unknown): BvnkEstimateResponse {
   return payload as BvnkEstimateResponse;
 }
 
+interface BvnkPayoutEstimateResponse {
+  walletCurrency: string;
+  walletRequiredAmount: number;
+  paidCurrency: string;
+  paidRequiredAmount: number;
+  feePredictedAmount: number;
+  networkFeePredictedAmount: number;
+  exchangeRate: number;
+}
+
+function parseBvnkPayoutEstimateResponse(payload: unknown): BvnkPayoutEstimateResponse {
+  if (typeof payload !== "object" || payload === null) {
+    throw new AppError("BAD_REQUEST", "BVNK estimate response payload is invalid");
+  }
+  return payload as BvnkPayoutEstimateResponse;
+}
+
+interface BvnkConvertResponse {
+  value: number;
+}
+
+function parseBvnkConvertResponse(payload: unknown): BvnkConvertResponse {
+  if (typeof payload !== "object" || payload === null) {
+    throw new AppError("BAD_REQUEST", "BVNK convert response payload is invalid");
+  }
+  return payload as BvnkConvertResponse;
+}
+
 function parseBvnkPaymentSummary(payload: unknown): BvnkPaymentSummary {
   if (typeof payload !== "object" || payload === null) {
     throw new AppError("BAD_REQUEST", "BVNK payment response payload is invalid");
@@ -658,7 +689,7 @@ export class BvnkRampClient implements RampProvider {
     fetchJson,
     writeDump,
   }: Parameters<RampProvider["_discoverRails"]>[0]) {
-    const base = env.BVNK_RAMP_RAILS_API_BASE_URL?.trim() || "https://api.bvnk.com/";
+    const base = env.BVNK_RAMP_RAILS_API_BASE_URL?.trim() || "https://api.sandbox.bvnk.com/";
     // biome-ignore lint/security/noSecrets: BVNK pagination query string, not a secret.
     const pageQuery = "?offset=0&max=1000";
 
@@ -944,6 +975,71 @@ export class BvnkRampClient implements RampProvider {
    * which owns the DB-cached state. The stateless provider contract can't model
    * it, so these interface methods are unreachable for BVNK.
    */
+  async estimateOnramp(
+    { env, mode }: RampRuntimeContext,
+    input: RampEstimateOnrampInput
+  ): Promise<PaymentRampEstimate> {
+    const config = readBvnkConfig(env, mode);
+    const { currency } = normalizeBvnkCurrencyAndNetwork(getCryptoRailAssetLabel(input.assetRail));
+    const fiatAmount = toPositiveAmount(input.fiatAmount, "fiatAmount");
+    const converted = parseBvnkConvertResponse(
+      await bvnkRequest(
+        config,
+        `/api/currency/convert/${encodeURIComponent(input.fiatCurrency)}/${encodeURIComponent(currency)}?amount=${fiatAmount}`,
+        { method: "GET" }
+      )
+    );
+    return {
+      provider: this.id,
+      direction: "onramp",
+      fiatCurrency: input.fiatCurrency,
+      assetRail: input.assetRail,
+      fiatAmount: input.fiatAmount,
+      cryptoAmount: String(converted.value),
+      exchangeRate: String(converted.value / fiatAmount),
+      fees: { currency: input.fiatCurrency, total: "0" },
+    };
+  }
+
+  async estimateOfframp(
+    { env, mode }: RampRuntimeContext,
+    input: RampEstimateOfframpInput
+  ): Promise<PaymentRampEstimate> {
+    const config = readBvnkConfig(env, mode);
+    const { currency, network } = normalizeBvnkCurrencyAndNetwork(
+      getCryptoRailAssetLabel(input.assetRail)
+    );
+    const paidRequiredAmount = toPositiveAmount(input.cryptoAmount, "cryptoAmount");
+    const estimate = parseBvnkPayoutEstimateResponse(
+      await bvnkRequest(config, "/api/v1/pay/estimate", {
+        method: "POST",
+        body: {
+          walletId: config.walletId,
+          walletCurrency: input.fiatCurrency,
+          paidCurrency: currency,
+          paidRequiredAmount,
+          reference: rampId("sdp_offramp_est"),
+          network,
+        },
+      })
+    );
+    return {
+      provider: this.id,
+      direction: "offramp",
+      fiatCurrency: input.fiatCurrency,
+      assetRail: input.assetRail,
+      fiatAmount: String(estimate.walletRequiredAmount),
+      cryptoAmount: String(estimate.paidRequiredAmount),
+      exchangeRate: String(estimate.exchangeRate),
+      fees: {
+        currency: input.fiatCurrency,
+        total: String(estimate.feePredictedAmount + estimate.networkFeePredictedAmount),
+        provider: String(estimate.feePredictedAmount),
+        network: String(estimate.networkFeePredictedAmount),
+      },
+    };
+  }
+
   async createOnrampQuote(): Promise<PaymentRampQuote> {
     throw new AppError(
       "INTERNAL_ERROR",

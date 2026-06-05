@@ -1,5 +1,8 @@
 "use client";
 
+import type { RampProviderEstimateResult } from "@sdp/types";
+import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
+import { Loader2Icon } from "lucide-react";
 import { motion } from "motion/react";
 import Image from "next/image";
 import { RAMP_PROVIDER_LOGOS, type RampProviderOption } from "@/lib/ramps";
@@ -8,10 +11,69 @@ import { cn } from "@/lib/utils";
 interface ProviderCardProps {
   option: RampProviderOption;
   active: boolean;
+  estimate?: RampProviderEstimateResult;
+  estimateLoading?: boolean;
   onSelect: () => void;
 }
 
-export function ProviderCard({ option, active, onSelect }: ProviderCardProps) {
+function ProviderCardEstimate({
+  estimate,
+  estimateLoading,
+}: {
+  estimate?: RampProviderEstimateResult;
+  estimateLoading?: boolean;
+}) {
+  if (estimateLoading) {
+    return <Loader2Icon className="size-4 shrink-0 animate-spin text-text-low" />;
+  }
+
+  if (estimate?.status === "ok") {
+    const { direction, fiatCurrency, assetRail, fiatAmount, cryptoAmount, fees } =
+      estimate.estimate;
+    const isFiatOut = direction === "offramp";
+    const amount = isFiatOut ? fiatAmount : cryptoAmount;
+    const unit = isFiatOut ? fiatCurrency : getCryptoRailAssetLabel(assetRail);
+    const feeLines: Array<{ label: string; value: string }> = [];
+    if (fees.network && Number(fees.network) > 0) {
+      feeLines.push({ label: "Network", value: fees.network });
+    }
+    if (fees.provider && Number(fees.provider) > 0) {
+      feeLines.push({ label: "Provider", value: fees.provider });
+    }
+    if (feeLines.length === 0 && Number(fees.total) > 0) {
+      feeLines.push({ label: "Fee", value: fees.total });
+    }
+    return (
+      <div className="shrink-0 text-right">
+        <p className="text-xs text-text-low">You get</p>
+        <p className="text-base font-medium text-text-extra-high">{`≈ ${amount} ${unit}`}</p>
+        {feeLines.map((line) => (
+          <p key={line.label} className="text-xs text-text-low">
+            {`${line.label} ${line.value} ${fees.currency}`}
+          </p>
+        ))}
+      </div>
+    );
+  }
+
+  if (estimate?.status === "unsupported") {
+    return <p className="shrink-0 text-sm text-text-low">Rate known at quote</p>;
+  }
+
+  if (estimate?.status === "error") {
+    return <p className="shrink-0 text-sm text-text-low">Unavailable</p>;
+  }
+
+  return null;
+}
+
+export function ProviderCard({
+  option,
+  active,
+  estimate,
+  estimateLoading,
+  onSelect,
+}: ProviderCardProps) {
   return (
     <motion.button
       type="button"
@@ -48,6 +110,8 @@ export function ProviderCard({ option, active, onSelect }: ProviderCardProps) {
       >
         {option.title}
       </p>
+
+      <ProviderCardEstimate estimate={estimate} estimateLoading={estimateLoading} />
     </motion.button>
   );
 }

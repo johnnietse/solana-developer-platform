@@ -1,4 +1,9 @@
-import type { PaymentRampExecution, PaymentRampQuote, SdpEnvironment } from "@sdp/types";
+import type {
+  PaymentRampEstimate,
+  PaymentRampExecution,
+  PaymentRampQuote,
+  SdpEnvironment,
+} from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
 import type { CryptoRailId, FiatCurrencyCode } from "@sdp/types/payment-rails";
 import type { RampProviderId } from "@sdp/types/provider-access";
@@ -64,6 +69,18 @@ export interface RampRuntimeContext {
   mode: SdpEnvironment;
 }
 
+export interface RampEstimateOnrampInput {
+  assetRail: CryptoRailId;
+  fiatCurrency: RampFiatCurrency;
+  fiatAmount: string;
+}
+
+export interface RampEstimateOfframpInput {
+  assetRail: CryptoRailId;
+  fiatCurrency: RampFiatCurrency;
+  cryptoAmount: string;
+}
+
 export interface RampOnrampQuoteInput {
   cryptoToken: string;
   fiatCurrency?: RampFiatCurrency;
@@ -121,6 +138,14 @@ export interface RampProviderClient {
  * handler owns DB interaction and passes pre-resolved inputs.
  */
 export interface RampProvider extends RampProviderClient {
+  estimateOnramp(
+    ctx: RampRuntimeContext,
+    input: RampEstimateOnrampInput
+  ): Promise<PaymentRampEstimate>;
+  estimateOfframp(
+    ctx: RampRuntimeContext,
+    input: RampEstimateOfframpInput
+  ): Promise<PaymentRampEstimate>;
   createOnrampQuote(
     ctx: RampRuntimeContext,
     input: RampOnrampQuoteInput

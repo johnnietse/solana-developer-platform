@@ -1,4 +1,6 @@
 import type { CustodyWalletAggregate, CustodyWalletTokenBalance } from "./custody";
+import type { RampFiatCurrency } from "./generated/ramp-support.generated";
+import type { CryptoAssetSymbol, CryptoRailId } from "./payment-rails";
 import type { PrivateTransferRequest } from "./private-transfers";
 import type { RampProviderId } from "./provider-access";
 
@@ -357,6 +359,61 @@ export interface BvnkPaymentRampInstruction {
 }
 
 export type PaymentRampInstruction = LightsparkPaymentRampInstruction | BvnkPaymentRampInstruction;
+
+export type RampDirection = "onramp" | "offramp";
+
+export interface PaymentRampEstimateFees {
+  currency: RampFiatCurrency | CryptoAssetSymbol;
+  total: string;
+  network?: string;
+  provider?: string;
+}
+
+export interface PaymentRampEstimate {
+  provider: RampProviderId;
+  direction: RampDirection;
+  fiatCurrency: RampFiatCurrency;
+  assetRail: CryptoRailId;
+  fiatAmount: string;
+  cryptoAmount: string;
+  exchangeRate: string;
+  fees: PaymentRampEstimateFees;
+  minFiatAmount?: string;
+  maxFiatAmount?: string;
+  expiresAt?: string;
+}
+
+export interface RampProviderEstimateSuccess {
+  provider: RampProviderId;
+  status: "ok";
+  estimate: PaymentRampEstimate;
+}
+
+/** The provider supports this pair, but the rate is only known at quote time. */
+export interface RampProviderEstimateUnsupported {
+  provider: RampProviderId;
+  status: "unsupported";
+}
+
+export interface RampProviderEstimateError {
+  provider: RampProviderId;
+  status: "error";
+  error: string;
+}
+
+export type RampProviderEstimateResult =
+  | RampProviderEstimateSuccess
+  | RampProviderEstimateUnsupported
+  | RampProviderEstimateError;
+
+export interface PaymentRampEstimateEnvelope {
+  data?: {
+    estimates?: RampProviderEstimateResult[];
+  };
+  error?: {
+    message?: string;
+  };
+}
 
 export type PaymentRampQuoteDeliveryMode = "manual_instructions" | "hosted";
 

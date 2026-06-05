@@ -378,6 +378,18 @@ export const executeOnrampSchema = z.object({
   bvnkCompliance: bvnkComplianceSchema.optional(),
 });
 
+export const estimateOnrampSchema = z.object({
+  assetRail: onrampCryptoRailSchema,
+  fiatCurrency: rampFiatCurrencySchema,
+  fiatAmount: paymentAmountSchema,
+});
+
+export const estimateOfframpSchema = z.object({
+  assetRail: offrampCryptoRailSchema,
+  fiatCurrency: rampFiatCurrencySchema,
+  cryptoAmount: paymentAmountSchema,
+});
+
 export const createOnrampQuoteSchema = z.object({
   provider: rampProviderSchema,
   counterpartyId: z.string().min(1),
