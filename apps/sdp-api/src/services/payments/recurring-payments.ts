@@ -1957,6 +1957,14 @@ export async function executeRecurringPaymentLifecycle(input: {
     operation: input.operation,
   });
 
+  if (!claim.recurringPayment.plan_pda || !claim.recurringPayment.subscription_pda) {
+    throw new AppError("BAD_REQUEST", "Recurring payment has not been activated");
+  }
+  const planPda = assertValidAddress(claim.recurringPayment.plan_pda, "planPda");
+  const subscriptionPda = assertValidAddress(
+    claim.recurringPayment.subscription_pda,
+    "subscriptionPda"
+  );
   const sourceAddress = assertValidAddress(claim.recurringPayment.source_address, "sourceAddress");
   const sourceSigner = await getSourceSigner({
     env: input.env,
@@ -1965,15 +1973,12 @@ export async function executeRecurringPaymentLifecycle(input: {
     sourceWalletId: claim.recurringPayment.source_wallet_id,
     expectedAddress: sourceAddress,
   });
-  if (!claim.recurringPayment.plan_pda || !claim.recurringPayment.subscription_pda) {
-    throw new AppError("BAD_REQUEST", "Recurring payment has not been activated");
-  }
   await executeSubscriptionLifecycleOnChain({
     env: input.env,
     operation: input.operation,
     sourceSigner,
-    planPda: assertValidAddress(claim.recurringPayment.plan_pda, "planPda"),
-    subscriptionPda: assertValidAddress(claim.recurringPayment.subscription_pda, "subscriptionPda"),
+    planPda,
+    subscriptionPda,
   });
 
   return finalizeRecurringPaymentLifecycleAfterChain({
