@@ -36,6 +36,7 @@ import type {
 } from "../types";
 
 const LIGHTSPARK_DEFAULT_GRID_API_URL = "https://api.lightspark.com/grid/2025-10-13";
+const GRID_EXCHANGE_RATE_AMOUNT_DECIMALS = 2;
 
 function readLightsparkConfig(
   env: Record<string, string | undefined>,
@@ -608,36 +609,31 @@ export class LightsparkRampClient implements RampProvider {
     );
     const cryptoDecimals = getLightsparkCurrencyDecimals(cryptoCurrency);
     const cryptoMinorUnits = parseDecimalAmount(input.cryptoAmount, cryptoDecimals);
+    const sendingAmount = toLightsparkMinorUnitsInteger(
+      cryptoMinorUnits / 10n ** BigInt(cryptoDecimals - GRID_EXCHANGE_RATE_AMOUNT_DECIMALS),
+      "cryptoAmount"
+    );
     const rate = parseGridExchangeRate(
       await this.request<GridExchangeRatesResponse>(
         config,
-        `exchange-rates?sourceCurrency=${encodeURIComponent(cryptoCurrency)}&destinationCurrency=${encodeURIComponent(input.fiatCurrency)}&sendingAmount=${toLightsparkMinorUnitsInteger(cryptoMinorUnits, "cryptoAmount")}`,
+        `exchange-rates?sourceCurrency=${encodeURIComponent(cryptoCurrency)}&destinationCurrency=${encodeURIComponent(input.fiatCurrency)}&sendingAmount=${sendingAmount}`,
         { method: "GET" }
       )
     );
 
-    const feeMinorUnits = BigInt(rate.fees.fixed);
-    const netCryptoMinorUnits =
-      cryptoMinorUnits > feeMinorUnits ? cryptoMinorUnits - feeMinorUnits : 0n;
-    const grossFiatMinorUnits =
-      (cryptoMinorUnits * BigInt(rate.receivingAmount)) / BigInt(rate.sendingAmount);
-    const netFiatMinorUnits =
-      (netCryptoMinorUnits * BigInt(rate.receivingAmount)) / BigInt(rate.sendingAmount);
-    const grossFiatAmount = formatDecimalAmount(
-      grossFiatMinorUnits,
-      rate.destinationCurrency.decimals
-    );
+    const netFiatMinorUnits = rate.receivingAmount > 0 ? BigInt(rate.receivingAmount) : 0n;
+    const fiatAmount = formatDecimalAmount(netFiatMinorUnits, rate.destinationCurrency.decimals);
     return {
       provider: this.id,
       direction: "offramp",
       fiatCurrency: input.fiatCurrency,
       assetRail: input.assetRail,
-      fiatAmount: formatDecimalAmount(netFiatMinorUnits, rate.destinationCurrency.decimals),
+      fiatAmount,
       cryptoAmount: input.cryptoAmount,
-      exchangeRate: String(Number(grossFiatAmount) / Number(input.cryptoAmount)),
+      exchangeRate: String(Number(fiatAmount) / Number(input.cryptoAmount)),
       fees: {
         currency: getCryptoRailAssetLabel(input.assetRail),
-        total: formatDecimalAmount(feeMinorUnits, rate.sourceCurrency.decimals),
+        total: formatDecimalAmount(BigInt(rate.fees.fixed), rate.sourceCurrency.decimals),
       },
     };
   }
