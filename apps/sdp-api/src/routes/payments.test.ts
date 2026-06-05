@@ -1466,6 +1466,22 @@ describe("Payments routes", () => {
       expect.objectContaining({ id: planId, planPda: preparePlanBody.data.planPda })
     );
 
+    const activeWithoutProofRes = await app.request(
+      "/v1/payments/subscriptions",
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          planId,
+          counterpartyId,
+          subscriberAddress: TEST_SOLANA_ADDRESSES.wallet2,
+          status: "active",
+        }),
+      },
+      env
+    );
+    expect(activeWithoutProofRes.status).toBe(400);
+
     const subscriptionRes = await app.request(
       "/v1/payments/subscriptions",
       {
@@ -1507,6 +1523,54 @@ describe("Payments routes", () => {
       status: "pending_authorization",
     });
     expect(subscriptionBody.data.subscription.nextCollectionDueAt).toBeNull();
+
+    await seedCachedKey({
+      walletBindings: [
+        { walletId: "wal_other_wallet", permissions: ["payments:read", "payments:write"] },
+      ],
+    });
+
+    const scopedSubscriptionsRes = await app.request(
+      `/v1/payments/subscriptions?planId=${planId}`,
+      {
+        headers: authHeaders,
+      },
+      env
+    );
+    expect(scopedSubscriptionsRes.status).toBe(200);
+    const scopedSubscriptionsBody = (await scopedSubscriptionsRes.json()) as {
+      data: { subscriptions: Array<{ id: string }>; total: number };
+    };
+    expect(scopedSubscriptionsBody.data.subscriptions).toEqual([]);
+    expect(scopedSubscriptionsBody.data.total).toBe(0);
+
+    const scopedGetSubscriptionRes = await app.request(
+      `/v1/payments/subscriptions/${subscriptionId}`,
+      {
+        headers: authHeaders,
+      },
+      env
+    );
+    expect(scopedGetSubscriptionRes.status).toBe(403);
+
+    const scopedPatchSubscriptionRes = await app.request(
+      `/v1/payments/subscriptions/${subscriptionId}`,
+      {
+        method: "PATCH",
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          nextCollectionDueAt,
+        }),
+      },
+      env
+    );
+    expect(scopedPatchSubscriptionRes.status).toBe(403);
+
+    await seedCachedKey({
+      walletBindings: [
+        { walletId: TEST_WALLET_ID, permissions: ["payments:read", "payments:write"] },
+      ],
+    });
 
     const listSubscriptionsRes = await app.request(
       `/v1/payments/subscriptions?planId=${planId}&counterpartyId=${counterpartyId}&status=pending_authorization`,

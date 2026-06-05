@@ -8,6 +8,7 @@ import type {
   PaymentSubscriptionPlan,
   PaymentSubscriptionPlanResponse,
   PaymentSubscriptionResponse,
+  Permission,
   PreparedPaymentSubscriptionTransaction,
   PreparePaymentSubscriptionAuthorizationResponse,
   PreparePaymentSubscriptionCollectionResponse,
@@ -210,6 +211,89 @@ function assertSubscriptionTokenMint(token: string): Address {
   }
 
   return assertValidAddress(token, "token");
+}
+
+function planWalletIds(plan: PaymentSubscriptionPlanRow): string[] {
+  return [...new Set([plan.owner_wallet_id, plan.puller_wallet_id].filter(Boolean) as string[])];
+}
+
+function hasPlanWalletAccess(
+  auth: ReturnType<typeof getAuth>,
+  plan: PaymentSubscriptionPlanRow,
+  permissions: Permission[]
+): boolean {
+  for (const walletId of planWalletIds(plan)) {
+    try {
+      assertApiKeyWalletAccess(auth, walletId, permissions);
+      return true;
+    } catch (error) {
+      if (error instanceof AppError && error.code === "FORBIDDEN") {
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  return false;
+}
+
+function assertPlanWalletAccess(
+  auth: ReturnType<typeof getAuth>,
+  plan: PaymentSubscriptionPlanRow,
+  permissions: Permission[]
+): void {
+  if (!hasPlanWalletAccess(auth, plan, permissions)) {
+    throw new AppError("FORBIDDEN", "API key is not authorized for this subscription plan wallet");
+  }
+}
+
+async function assertSubscriptionWalletAccess(
+  c: AppContext,
+  subscription: PaymentSubscriptionRow,
+  permissions: Permission[]
+): Promise<PaymentSubscriptionPlanRow> {
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+  const plan = await getPaymentSubscriptionsRepository(c).getPlanById({
+    planId: subscription.plan_id,
+    organizationId: auth.organizationId,
+    projectId,
+  });
+
+  if (!plan) {
+    throw new AppError("NOT_FOUND", "Subscription plan not found");
+  }
+
+  assertPlanWalletAccess(auth, plan, permissions);
+  return plan;
+}
+
+function assertSubscriptionCanBeActive(input: {
+  status: PaymentSubscriptionRow["status"];
+  subscriberTokenAccount: string | null;
+  subscriptionPda: string | null;
+  subscriptionAuthorityAddress: string | null;
+  authorizationSignature: string | null;
+  currentPeriodStartAt: string | null;
+  nextCollectionDueAt: string | null;
+}): void {
+  if (input.status !== "active") {
+    return;
+  }
+
+  if (
+    !input.subscriberTokenAccount ||
+    !input.subscriptionPda ||
+    !input.subscriptionAuthorityAddress ||
+    !input.authorizationSignature ||
+    !input.currentPeriodStartAt ||
+    !input.nextCollectionDueAt
+  ) {
+    throw new AppError(
+      "BAD_REQUEST",
+      "Active subscriptions require subscriber token account, subscription PDA, authority address, authorization signature, and collection timing"
+    );
+  }
 }
 
 async function buildPreparedSubscriptionTransaction(
@@ -450,10 +534,11 @@ export const listSubscriptionPlans = async (c: AppContext) => {
     limit: pageSize,
     offset: (page - 1) * pageSize,
   });
+  const visibleRows = rows.filter((plan) => hasPlanWalletAccess(auth, plan, ["payments:read"]));
 
   const response: ListPaymentSubscriptionPlansResponse = {
-    subscriptionPlans: rows.map(mapPlan),
-    total,
+    subscriptionPlans: visibleRows.map(mapPlan),
+    total: visibleRows.length === rows.length ? total : visibleRows.length,
     page,
     pageSize,
   };
@@ -480,6 +565,7 @@ export const getSubscriptionPlan = async (c: AppContext) => {
   if (!plan) {
     throw new AppError("NOT_FOUND", "Subscription plan not found");
   }
+  assertPlanWalletAccess(auth, plan, ["payments:read"]);
 
   const response: PaymentSubscriptionPlanResponse = { subscriptionPlan: mapPlan(plan) };
   return success(c, response);
@@ -585,6 +671,16 @@ export const updateSubscriptionPlan = async (c: AppContext) => {
 
   const puller = await resolvePullerWalletAddress(c, parsed.data.pullerWalletId);
   const repo = getPaymentSubscriptionsRepository(c);
+  const plan = await repo.getPlanById({
+    planId: params.data.planId,
+    organizationId: auth.organizationId,
+    projectId,
+  });
+  if (!plan) {
+    throw new AppError("NOT_FOUND", "Subscription plan not found");
+  }
+  assertPlanWalletAccess(auth, plan, ["payments:write"]);
+
   const updated = await repo.updatePlan({
     planId: params.data.planId,
     organizationId: auth.organizationId,
@@ -629,6 +725,7 @@ export const createSubscription = async (c: AppContext) => {
   if (plan.status === "archived") {
     throw new AppError("BAD_REQUEST", "Cannot create a subscription for an archived plan");
   }
+  assertPlanWalletAccess(auth, plan, ["payments:write"]);
 
   await requireActiveCounterparty(c, parsed.data.counterpartyId);
 
@@ -652,6 +749,15 @@ export const createSubscription = async (c: AppContext) => {
   const nextCollectionDueAt =
     parsed.data.nextCollectionDueAt ??
     (status === "active" ? defaultNextCollectionDueAt(plan.period_hours) : null);
+  assertSubscriptionCanBeActive({
+    status,
+    subscriberTokenAccount: parsed.data.subscriberTokenAccount ?? null,
+    subscriptionPda: parsed.data.subscriptionPda ?? null,
+    subscriptionAuthorityAddress: parsed.data.subscriptionAuthorityAddress ?? null,
+    authorizationSignature: parsed.data.authorizationSignature ?? null,
+    currentPeriodStartAt,
+    nextCollectionDueAt,
+  });
 
   const subscription = await repo.createSubscription({
     id: `psub_${crypto.randomUUID()}`,
@@ -695,6 +801,7 @@ export const prepareSubscriptionAuthorization = async (c: AppContext) => {
   }
 
   const { plan, subscription } = await getSubscriptionWithPlan(c, params.data.subscriptionId);
+  assertPlanWalletAccess(getAuth(c), plan, ["payments:write"]);
   if (plan.status !== "active") {
     throw new AppError("BAD_REQUEST", "Subscription plan must be active before authorization");
   }
@@ -789,10 +896,21 @@ export const listSubscriptions = async (c: AppContext) => {
     limit: pageSize,
     offset: (page - 1) * pageSize,
   });
+  const visibleRows: PaymentSubscriptionRow[] = [];
+  for (const subscription of rows) {
+    const plan = await repo.getPlanById({
+      planId: subscription.plan_id,
+      organizationId: auth.organizationId,
+      projectId,
+    });
+    if (plan && hasPlanWalletAccess(auth, plan, ["payments:read"])) {
+      visibleRows.push(subscription);
+    }
+  }
 
   const response: ListPaymentSubscriptionsResponse = {
-    subscriptions: rows.map(mapSubscription),
-    total,
+    subscriptions: visibleRows.map(mapSubscription),
+    total: visibleRows.length === rows.length ? total : visibleRows.length,
     page,
     pageSize,
   };
@@ -819,6 +937,7 @@ export const getSubscription = async (c: AppContext) => {
   if (!subscription) {
     throw new AppError("NOT_FOUND", "Subscription not found");
   }
+  await assertSubscriptionWalletAccess(c, subscription, ["payments:read"]);
 
   const response: PaymentSubscriptionResponse = { subscription: mapSubscription(subscription) };
   return success(c, response);
@@ -841,6 +960,43 @@ export const updateSubscription = async (c: AppContext) => {
   }
 
   const repo = getPaymentSubscriptionsRepository(c);
+  const subscription = await repo.getSubscriptionById({
+    subscriptionId: params.data.subscriptionId,
+    organizationId: auth.organizationId,
+    projectId,
+  });
+  if (!subscription) {
+    throw new AppError("NOT_FOUND", "Subscription not found");
+  }
+  await assertSubscriptionWalletAccess(c, subscription, ["payments:write"]);
+  assertSubscriptionCanBeActive({
+    status: parsed.data.status ?? subscription.status,
+    subscriberTokenAccount:
+      parsed.data.subscriberTokenAccount === undefined
+        ? subscription.subscriber_token_account
+        : parsed.data.subscriberTokenAccount,
+    subscriptionPda:
+      parsed.data.subscriptionPda === undefined
+        ? subscription.subscription_pda
+        : parsed.data.subscriptionPda,
+    subscriptionAuthorityAddress:
+      parsed.data.subscriptionAuthorityAddress === undefined
+        ? subscription.subscription_authority_address
+        : parsed.data.subscriptionAuthorityAddress,
+    authorizationSignature:
+      parsed.data.authorizationSignature === undefined
+        ? subscription.authorization_signature
+        : parsed.data.authorizationSignature,
+    currentPeriodStartAt:
+      parsed.data.currentPeriodStartAt === undefined
+        ? subscription.current_period_start_at
+        : parsed.data.currentPeriodStartAt,
+    nextCollectionDueAt:
+      parsed.data.nextCollectionDueAt === undefined
+        ? subscription.next_collection_due_at
+        : parsed.data.nextCollectionDueAt,
+  });
+
   const updated = await repo.updateSubscription({
     subscriptionId: params.data.subscriptionId,
     organizationId: auth.organizationId,
@@ -883,6 +1039,7 @@ async function prepareSubscriptionLifecycle(
   }
 
   const { plan, subscription } = await getSubscriptionWithPlan(c, params.data.subscriptionId);
+  assertPlanWalletAccess(getAuth(c), plan, ["payments:write"]);
   const { planPda } = await derivePlanAddresses(plan);
   const subscriber = assertValidAddress(subscription.subscriber_address, "subscriberAddress");
   const [derivedSubscriptionPda] = await findSubscriptionDelegationPda({ planPda, subscriber });
@@ -936,6 +1093,7 @@ export const prepareSubscriptionCollection = async (c: AppContext) => {
   }
 
   const { plan, subscription } = await getSubscriptionWithPlan(c, params.data.subscriptionId);
+  assertPlanWalletAccess(getAuth(c), plan, ["payments:write"]);
   if (subscription.status !== "active") {
     throw new AppError("BAD_REQUEST", "Subscription must be active before collection");
   }
@@ -1009,18 +1167,11 @@ export const createSubscriptionCollectionAttempt = async (c: AppContext) => {
   if (!subscription) {
     throw new AppError("NOT_FOUND", "Subscription not found");
   }
+  const plan = await assertSubscriptionWalletAccess(c, subscription, ["payments:write"]);
   if (subscription.status !== "active") {
     throw new AppError("BAD_REQUEST", "Subscription must be active before collection");
   }
 
-  const plan = await repo.getPlanById({
-    planId: subscription.plan_id,
-    organizationId: auth.organizationId,
-    projectId,
-  });
-  if (!plan) {
-    throw new AppError("NOT_FOUND", "Subscription plan not found");
-  }
   if (plan.status !== "active") {
     throw new AppError("BAD_REQUEST", "Subscription plan must be active before collection");
   }
@@ -1077,6 +1228,7 @@ export const listSubscriptionCollectionAttempts = async (c: AppContext) => {
   if (!subscription) {
     throw new AppError("NOT_FOUND", "Subscription not found");
   }
+  await assertSubscriptionWalletAccess(c, subscription, ["payments:read"]);
 
   const { page, pageSize, status } = parsed.data;
   const { rows, total } = await repo.listCollectionAttempts({
