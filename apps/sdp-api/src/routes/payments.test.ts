@@ -1140,6 +1140,73 @@ describe("Payments routes", () => {
     );
 
     mockRecurringCollectionAccounts();
+    const originalCreatePaymentSubscriptionsRepositoryForClaimFailure =
+      repositories.createPaymentSubscriptionsRepository;
+    let failProcessingAttemptClaim = true;
+    const processingAttemptClaimRepoSpy = vi
+      .spyOn(repositories, "createPaymentSubscriptionsRepository")
+      .mockImplementation((repoEnv) => {
+        const repo = originalCreatePaymentSubscriptionsRepositoryForClaimFailure(repoEnv);
+
+        return {
+          ...repo,
+          createCollectionAttempt: vi.fn(async (input) => {
+            if (failProcessingAttemptClaim && input.status === "processing") {
+              failProcessingAttemptClaim = false;
+              throw new Error("simulated processing-attempt claim failure");
+            }
+
+            return repo.createCollectionAttempt(input);
+          }),
+        };
+      });
+    try {
+      const failedClaimRes = await app.request(
+        `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
+        {
+          method: "POST",
+          headers: jsonHeaders,
+          body: "{}",
+        },
+        env
+      );
+      expect(failedClaimRes.status).toBe(500);
+    } finally {
+      processingAttemptClaimRepoSpy.mockRestore();
+    }
+    expect(failProcessingAttemptClaim).toBe(false);
+
+    const failedClaimAttemptsRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/collection-attempts?status=failed`,
+      {
+        method: "GET",
+        headers: authHeaders,
+      },
+      env
+    );
+    expect(failedClaimAttemptsRes.status).toBe(200);
+    const failedClaimAttemptsBody = (await failedClaimAttemptsRes.json()) as {
+      data: {
+        collectionAttempts: Array<{
+          recurringPaymentId: string | null;
+          status: string;
+          transferId: string | null;
+          error: string | null;
+        }>;
+      };
+    };
+    expect(failedClaimAttemptsBody.data.collectionAttempts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          recurringPaymentId,
+          status: "failed",
+          transferId: null,
+          error: "simulated processing-attempt claim failure",
+        }),
+      ])
+    );
+
+    mockRecurringCollectionAccounts();
     const failingCollectionFeePaymentAdapter = {
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),

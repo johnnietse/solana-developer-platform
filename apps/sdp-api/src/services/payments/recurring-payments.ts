@@ -1869,6 +1869,17 @@ export async function collectRecurringPayment(input: {
       return recoveredConflict;
     }
 
+    await createFailedCollectionAttemptForRetry({
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPayment,
+      subscriptionId,
+      dueAt,
+      error: toErrorMessage(error),
+      initiatedByKeyId: input.initiatedByKeyId ?? null,
+    });
+
     throw error;
   }
 
