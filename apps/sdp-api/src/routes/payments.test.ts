@@ -2653,6 +2653,7 @@ describe("Payments routes", () => {
       planPda: recurringPlanPda,
       subscriptionPda: recurringSubscriptionPda,
       expiresAtTs: 0n,
+      times: 2,
     });
     const pausedCancelRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/cancel`,
