@@ -568,107 +568,119 @@ export function createPostgresPaymentSubscriptionsRepository(
     },
 
     async expireStaleUnsignedProcessingAttempts(params) {
-      const staleLinkedProcessingAttempts = await db
-        .prepare(
-          `SELECT a.id AS attempt_id,
-                  a.transfer_id AS transfer_id
-             FROM payment_subscription_collection_attempts a
-             JOIN payment_transfers t
-               ON t.id = a.transfer_id
-              AND t.organization_id = a.organization_id
-              AND t.project_id = a.project_id
-            WHERE a.status = 'processing'
-              AND a.recurring_payment_id IS NOT NULL
-              AND a.transfer_id IS NOT NULL
-              AND a.signature IS NULL
-              AND a.updated_at <= ?
-              AND t.status = 'processing'
-              AND t.signature IS NULL
-            ORDER BY a.updated_at ASC
-            LIMIT ?`
-        )
-        .bind(params.olderThan, params.limit)
-        .all<{ attempt_id: string; transfer_id: string }>();
-      const staleLinkedAttemptIds = staleLinkedProcessingAttempts.results.map(
-        (row) => row.attempt_id
+      const result = await db.queryOne<{
+        expired_linked_attempts: number;
+        expired_failed_attempt_transfers: number;
+        expired_unlinked_attempts: number;
+      }>(
+        `WITH stale_linked AS (
+              SELECT a.id AS attempt_id,
+                     a.transfer_id AS transfer_id
+                FROM payment_subscription_collection_attempts a
+                JOIN payment_transfers t
+                  ON t.id = a.transfer_id
+                 AND t.organization_id = a.organization_id
+                 AND t.project_id = a.project_id
+               WHERE a.status = 'processing'
+                 AND a.recurring_payment_id IS NOT NULL
+                 AND a.transfer_id IS NOT NULL
+                 AND a.signature IS NULL
+                 AND a.updated_at <= ?
+                 AND t.status = 'processing'
+                 AND t.signature IS NULL
+               ORDER BY a.updated_at ASC
+               LIMIT ?
+            ),
+            stale_failed_attempt_transfers AS (
+              SELECT t.id AS transfer_id
+                FROM payment_subscription_collection_attempts a
+                JOIN payment_transfers t
+                  ON t.id = a.transfer_id
+                 AND t.organization_id = a.organization_id
+                 AND t.project_id = a.project_id
+               WHERE a.status = 'failed'
+                 AND a.recurring_payment_id IS NOT NULL
+                 AND a.transfer_id IS NOT NULL
+                 AND a.signature IS NULL
+                 AND a.updated_at <= ?
+                 AND t.status = 'processing'
+                 AND t.signature IS NULL
+               ORDER BY a.updated_at ASC
+               LIMIT ?
+            ),
+            stale_unlinked AS (
+              SELECT id AS attempt_id
+                FROM payment_subscription_collection_attempts
+               WHERE status = 'processing'
+                 AND recurring_payment_id IS NOT NULL
+                 AND transfer_id IS NULL
+                 AND signature IS NULL
+                 AND updated_at <= ?
+               ORDER BY updated_at ASC
+               LIMIT ?
+            ),
+            updated_linked_transfers AS (
+              UPDATE payment_transfers t
+                 SET status = 'failed',
+                     error = COALESCE(error, 'Stale recurring collection transfer expired before submission'),
+                     updated_at = ?
+                FROM stale_linked stale
+               WHERE t.id = stale.transfer_id
+               RETURNING t.id
+            ),
+            updated_linked_attempts AS (
+              UPDATE payment_subscription_collection_attempts a
+                 SET status = 'failed',
+                     error = COALESCE(error, 'Stale recurring collection attempt expired before submission'),
+                     attempted_at = COALESCE(attempted_at, ?),
+                     updated_at = ?
+                FROM stale_linked stale
+               WHERE a.id = stale.attempt_id
+               RETURNING a.id
+            ),
+            updated_failed_attempt_transfers AS (
+              UPDATE payment_transfers t
+                 SET status = 'failed',
+                     error = COALESCE(error, 'Stale recurring collection transfer expired after failed attempt'),
+                     updated_at = ?
+                FROM stale_failed_attempt_transfers stale
+               WHERE t.id = stale.transfer_id
+               RETURNING t.id
+            ),
+            updated_unlinked_attempts AS (
+              UPDATE payment_subscription_collection_attempts a
+                 SET status = 'failed',
+                     error = COALESCE(error, 'Stale recurring collection attempt expired before transfer submission'),
+                     attempted_at = COALESCE(attempted_at, ?),
+                     updated_at = ?
+                FROM stale_unlinked stale
+               WHERE a.id = stale.attempt_id
+               RETURNING a.id
+            )
+          SELECT (SELECT COUNT(*)::int FROM updated_linked_attempts) AS expired_linked_attempts,
+                 (SELECT COUNT(*)::int FROM updated_failed_attempt_transfers) AS expired_failed_attempt_transfers,
+                 (SELECT COUNT(*)::int FROM updated_unlinked_attempts) AS expired_unlinked_attempts`,
+        [
+          params.olderThan,
+          params.limit,
+          params.olderThan,
+          params.limit,
+          params.olderThan,
+          params.limit,
+          params.updatedAt,
+          params.updatedAt,
+          params.updatedAt,
+          params.updatedAt,
+          params.updatedAt,
+          params.updatedAt,
+        ]
       );
-      const staleLinkedTransferIds = staleLinkedProcessingAttempts.results.map(
-        (row) => row.transfer_id
-      );
-      if (staleLinkedAttemptIds.length > 0) {
-        const attemptPlaceholders = staleLinkedAttemptIds.map(() => "?").join(", ");
-        const transferPlaceholders = staleLinkedTransferIds.map(() => "?").join(", ");
-        await db
-          .prepare(
-            `UPDATE payment_transfers
-                SET status = 'failed',
-                    error = COALESCE(error, 'Stale recurring collection transfer expired before submission'),
-                    updated_at = ?
-              WHERE id IN (${transferPlaceholders})`
-          )
-          .bind(params.updatedAt, ...staleLinkedTransferIds)
-          .run();
-        await db
-          .prepare(
-            `UPDATE payment_subscription_collection_attempts
-                SET status = 'failed',
-                    error = COALESCE(error, 'Stale recurring collection attempt expired before submission'),
-                    attempted_at = COALESCE(attempted_at, ?),
-                    updated_at = ?
-              WHERE id IN (${attemptPlaceholders})`
-          )
-          .bind(params.updatedAt, params.updatedAt, ...staleLinkedAttemptIds)
-          .run();
-      }
-      const expiredLinkedTransfers = await db
-        .prepare(
-          `UPDATE payment_transfers
-              SET status = 'failed',
-                  error = COALESCE(error, 'Stale recurring collection transfer expired after failed attempt'),
-                  updated_at = ?
-            WHERE id IN (
-                  SELECT t.id
-                    FROM payment_subscription_collection_attempts a
-                    JOIN payment_transfers t
-                      ON t.id = a.transfer_id
-                     AND t.organization_id = a.organization_id
-                     AND t.project_id = a.project_id
-                   WHERE a.status = 'failed'
-                     AND a.recurring_payment_id IS NOT NULL
-                     AND a.transfer_id IS NOT NULL
-                     AND a.signature IS NULL
-                     AND a.updated_at <= ?
-                     AND t.status = 'processing'
-                     AND t.signature IS NULL
-                   ORDER BY a.updated_at ASC
-                   LIMIT ?
-            )`
-        )
-        .bind(params.updatedAt, params.olderThan, params.limit)
-        .run();
-      const expiredAttempts = await db
-        .prepare(
-          `UPDATE payment_subscription_collection_attempts
-              SET status = 'failed',
-                  error = COALESCE(error, 'Stale recurring collection attempt expired before transfer submission'),
-                  attempted_at = COALESCE(attempted_at, ?),
-                  updated_at = ?
-            WHERE id IN (
-                  SELECT id
-                    FROM payment_subscription_collection_attempts
-                   WHERE status = 'processing'
-                     AND recurring_payment_id IS NOT NULL
-                     AND transfer_id IS NULL
-                     AND signature IS NULL
-                     AND updated_at <= ?
-                   ORDER BY updated_at ASC
-                   LIMIT ?
-            )`
-        )
-        .bind(params.updatedAt, params.updatedAt, params.olderThan, params.limit)
-        .run();
 
-      return staleLinkedAttemptIds.length + expiredLinkedTransfers + expiredAttempts;
+      return (
+        (result?.expired_linked_attempts ?? 0) +
+        (result?.expired_failed_attempt_transfers ?? 0) +
+        (result?.expired_unlinked_attempts ?? 0)
+      );
     },
 
     async listSubmittedRecurringCollectionAttempts(params) {
