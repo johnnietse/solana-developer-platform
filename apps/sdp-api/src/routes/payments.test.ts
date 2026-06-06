@@ -2507,6 +2507,91 @@ describe("Payments routes", () => {
     const earlyCollectBody = (await earlyCollectRes.json()) as { error: { message: string } };
     expect(earlyCollectBody.error.message).toContain("not due");
 
+    const lifecycleGuardUpdatedAt = new Date().toISOString();
+    await repositories.createPaymentRecurringPaymentsRepository(env).updateRecurringPayment({
+      recurringPaymentId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      status: "active",
+      nextCollectionDueAt: overdueCollectBody.data.recurringPayment.nextCollectionDueAt ?? null,
+      updatedAt: lifecycleGuardUpdatedAt,
+    });
+    await repositories.createPaymentSubscriptionsRepository(env).updateSubscription({
+      subscriptionId: recurringSubscriptionId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      status: "active",
+      nextCollectionDueAt: overdueCollectBody.data.recurringPayment.nextCollectionDueAt ?? null,
+      canceledAt: null,
+      updatedAt: lifecycleGuardUpdatedAt,
+    });
+    const feePaymentCallsBeforeLifecycleGuard = createFeePaymentAdapterMock.mock.calls.length;
+    mockRecurringLifecycleSubscriptionState({
+      planPda: recurringPlanPda,
+      subscriptionPda: recurringSubscriptionPda,
+      expiresAtTs: 0n,
+    });
+    createOrgSignerMock.mockImplementationOnce(async () => {
+      await getDb(env)
+        .prepare(
+          `UPDATE payment_recurring_operation_attempts
+              SET status = 'failed',
+                  error = 'simulated stale lifecycle claim',
+                  updated_at = ?
+            WHERE recurring_payment_id = ?
+              AND operation = 'cancel'
+              AND status = 'processing'`
+        )
+        .bind(new Date().toISOString(), recurringPaymentId)
+        .run();
+
+      return createNoopSigner(address(TEST_SOLANA_ADDRESSES.wallet1));
+    });
+    await clearRateLimits();
+    const lifecycleGuardRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/cancel`,
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: "{}",
+      },
+      env
+    );
+    expect(lifecycleGuardRes.status).toBe(409);
+    expect(createFeePaymentAdapterMock.mock.calls.length).toBe(feePaymentCallsBeforeLifecycleGuard);
+    const lifecycleGuardAttempt = await getDb(env)
+      .prepare(
+        `SELECT status, error
+           FROM payment_recurring_operation_attempts
+          WHERE recurring_payment_id = ?
+            AND operation = 'cancel'
+          ORDER BY updated_at DESC
+          LIMIT 1`
+      )
+      .bind(recurringPaymentId)
+      .first<{ status: string; error: string | null }>();
+    expect(lifecycleGuardAttempt).toMatchObject({
+      status: "failed",
+      error: "Recurring payment lifecycle state changed before on-chain submission",
+    });
+
+    const restoredAfterLifecycleGuardAt = new Date().toISOString();
+    await repositories.createPaymentRecurringPaymentsRepository(env).updateRecurringPayment({
+      recurringPaymentId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      status: "active",
+      updatedAt: restoredAfterLifecycleGuardAt,
+    });
+    await repositories.createPaymentSubscriptionsRepository(env).updateSubscription({
+      subscriptionId: recurringSubscriptionId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      status: "active",
+      canceledAt: null,
+      updatedAt: restoredAfterLifecycleGuardAt,
+    });
+
     let failCancelLifecycleUpdate = true;
     const cancelLifecycleRepoSpy = vi
       .spyOn(repositories, "createPostgresPaymentRecurringPaymentsRepository")

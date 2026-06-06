@@ -1633,6 +1633,14 @@ async function finalizeRecurringPaymentLifecycleAfterChain(input: {
     if (isRecurringPaymentLifecycleFinalized({ ...current, operation: input.operation })) {
       return current.recurringPayment;
     }
+    if (error instanceof AppError && error.code === "CONFLICT") {
+      const reconciled = await reconcileFromConfirmedChain();
+      if (reconciled) {
+        return reconciled;
+      }
+
+      throw error;
+    }
     if (
       !isRecurringPaymentLifecycleClaimStillFinalizable({
         ...current,
@@ -2928,6 +2936,89 @@ async function assertRecurringCollectionClaimStillActive(input: {
   });
 }
 
+async function assertRecurringLifecycleClaimStillActive(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  recurringPayment: PaymentRecurringPaymentRow;
+  subscription: PaymentSubscriptionRow;
+  operation: RecurringLifecycleOperation;
+  lifecycleAttemptId: string;
+}) {
+  const claimStatus = getLifecycleClaimStatus(input.operation);
+
+  await getDb(input.env).transaction(async (tx) => {
+    const recurringPayment = await tx.queryOne<{
+      status: string;
+      next_collection_due_at: string | null;
+    }>(
+      `SELECT status, next_collection_due_at
+         FROM payment_recurring_payments
+        WHERE id = ?
+          AND organization_id = ?
+          AND project_id = ?
+        FOR UPDATE`,
+      [input.recurringPayment.id, input.organizationId, input.projectId]
+    );
+    const subscription = await tx.queryOne<{
+      status: string;
+      next_collection_due_at: string | null;
+    }>(
+      `SELECT status, next_collection_due_at
+         FROM payment_subscriptions
+        WHERE id = ?
+          AND organization_id = ?
+          AND project_id = ?
+        FOR UPDATE`,
+      [input.subscription.id, input.organizationId, input.projectId]
+    );
+    const operationAttempt = await tx.queryOne<{
+      status: string;
+      signature: string | null;
+    }>(
+      `SELECT status, signature
+         FROM payment_recurring_operation_attempts
+        WHERE id = ?
+          AND organization_id = ?
+          AND project_id = ?
+          AND recurring_payment_id = ?
+          AND operation = ?
+        FOR UPDATE`,
+      [
+        input.lifecycleAttemptId,
+        input.organizationId,
+        input.projectId,
+        input.recurringPayment.id,
+        input.operation,
+      ]
+    );
+
+    if (!recurringPayment || !subscription || !operationAttempt) {
+      throw new AppError("NOT_FOUND", "Recurring payment lifecycle claim not found");
+    }
+
+    const subscriptionStillClaimed =
+      input.operation === "cancel"
+        ? subscription.status === "canceling" &&
+          subscription.next_collection_due_at === input.recurringPayment.next_collection_due_at
+        : subscription.status === input.subscription.status &&
+          subscription.next_collection_due_at === input.recurringPayment.next_collection_due_at;
+
+    if (
+      recurringPayment.status !== claimStatus ||
+      recurringPayment.next_collection_due_at !== input.recurringPayment.next_collection_due_at ||
+      !subscriptionStillClaimed ||
+      operationAttempt.status !== "processing" ||
+      operationAttempt.signature !== null
+    ) {
+      throw new AppError(
+        "CONFLICT",
+        "Recurring payment lifecycle state changed before on-chain submission"
+      );
+    }
+  });
+}
+
 export async function createRecurringPayment(input: {
   env: Env;
   organizationId: string;
@@ -3743,6 +3834,15 @@ export async function executeRecurringPaymentLifecycle(input: {
       if (!sourceSigner) {
         throw new AppError("INTERNAL_ERROR", "Recurring lifecycle signer was not resolved");
       }
+      await assertRecurringLifecycleClaimStillActive({
+        env: input.env,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        recurringPayment: claim.recurringPayment,
+        subscription: claim.subscription,
+        operation: input.operation,
+        lifecycleAttemptId,
+      });
       // claimLifecycleRecords commits the canceling/resuming status claim plus
       // the active operation-attempt mutex before this submission. That unique
       // active attempt blocks concurrent collect/cancel/resume work; onSubmitted
