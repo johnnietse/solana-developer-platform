@@ -87,6 +87,10 @@ CREATE INDEX IF NOT EXISTS idx_payment_recurring_operation_attempts_submitted
     ON payment_recurring_operation_attempts(status, updated_at)
     WHERE status IN ('processing', 'submitted');
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_recurring_operation_attempts_active_operation
+    ON payment_recurring_operation_attempts(recurring_payment_id, operation)
+    WHERE status IN ('processing', 'submitted');
+
 ALTER TABLE payment_subscription_collection_attempts
     ADD COLUMN IF NOT EXISTS recurring_payment_id TEXT;
 

@@ -761,6 +761,21 @@ async function claimLifecycleRecords(input: {
       if (isFreshLifecycleClaim(recurringPayment.updated_at)) {
         throw new AppError("CONFLICT", "Recurring payment lifecycle update is already in progress");
       }
+
+      await tx
+        .prepare(
+          `UPDATE payment_recurring_operation_attempts
+              SET status = 'failed',
+                  error = COALESCE(error, 'Stale recurring lifecycle attempt expired before submission'),
+                  updated_at = ?
+            WHERE organization_id = ?
+              AND project_id = ?
+              AND recurring_payment_id = ?
+              AND operation = ?
+              AND status = 'processing'`
+        )
+        .bind(now, input.organizationId, input.projectId, recurringPayment.id, input.operation)
+        .run();
     }
     if (
       input.operation === "cancel" &&
@@ -1233,9 +1248,6 @@ async function finalizeRecurringPaymentLifecycleAfterChain(input: {
     });
     if (isRecurringPaymentLifecycleFinalized({ ...current, operation: input.operation })) {
       return current.recurringPayment;
-    }
-    if (error instanceof AppError && error.code === "CONFLICT") {
-      throw error;
     }
     if (
       !isRecurringPaymentLifecycleClaimStillFinalizable({
@@ -1799,9 +1811,17 @@ async function createFailedCollectionAttemptForRetry(input: {
       await recordAttempt();
     } catch (retryError) {
       const pausedForReconciliation = await pauseRecurringPaymentAfterRetryBackoffFailure(input);
+      console.error("Recurring collection failed before retry marker could be persisted", {
+        recurringPaymentId: input.recurringPayment.id,
+        dueAt: input.dueAt,
+        originalError: input.error,
+        recordError: toErrorMessage(recordError),
+        retryError: toErrorMessage(retryError),
+        pausedForReconciliation,
+      });
       throw new AppError(
         "INTERNAL_ERROR",
-        "Recurring collection failed and retry backoff could not be recorded",
+        `Recurring collection failed and retry backoff could not be recorded: ${input.error}`,
         {
           recurringPaymentId: input.recurringPayment.id,
           dueAt: input.dueAt,
