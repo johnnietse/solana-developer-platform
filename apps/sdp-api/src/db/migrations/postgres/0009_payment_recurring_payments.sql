@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS payment_recurring_operation_attempts (
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
     FOREIGN KEY (recurring_payment_id) REFERENCES payment_recurring_payments(id) ON DELETE CASCADE,
     CONSTRAINT payment_recurring_operation_attempts_operation_check
-        CHECK (operation IN ('cancel', 'resume')),
+        CHECK (operation IN ('cancel', 'resume', 'collect')),
     CONSTRAINT payment_recurring_operation_attempts_status_check
         CHECK (status IN ('processing', 'submitted', 'confirmed', 'failed'))
 );
@@ -87,8 +87,17 @@ CREATE INDEX IF NOT EXISTS idx_payment_recurring_operation_attempts_submitted
     ON payment_recurring_operation_attempts(status, updated_at)
     WHERE status IN ('processing', 'submitted');
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_recurring_operation_attempts_active_operation
-    ON payment_recurring_operation_attempts(recurring_payment_id, operation)
+ALTER TABLE payment_recurring_operation_attempts
+    DROP CONSTRAINT IF EXISTS payment_recurring_operation_attempts_operation_check;
+
+ALTER TABLE payment_recurring_operation_attempts
+    ADD CONSTRAINT payment_recurring_operation_attempts_operation_check
+        CHECK (operation IN ('cancel', 'resume', 'collect'));
+
+DROP INDEX IF EXISTS idx_payment_recurring_operation_attempts_active_operation;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_recurring_operation_attempts_active_recurring_payment
+    ON payment_recurring_operation_attempts(recurring_payment_id)
     WHERE status IN ('processing', 'submitted');
 
 ALTER TABLE payment_subscription_collection_attempts

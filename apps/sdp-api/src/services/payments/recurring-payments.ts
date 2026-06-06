@@ -1,4 +1,4 @@
-import { getDb } from "@/db";
+import { type DatabaseExecutor, getDb } from "@/db";
 import {
   createPaymentRecurringPaymentsRepository,
   createPaymentSubscriptionsRepository,
@@ -107,10 +107,20 @@ function isFreshLifecycleClaim(updatedAt: string): boolean {
 }
 
 type RecurringLifecycleOperation = "cancel" | "resume";
+type RecurringOperation = RecurringLifecycleOperation | "collect";
 type RecurringLifecycleClaimStatus = Extract<
   PaymentRecurringPaymentRow["status"],
   "canceling" | "resuming"
 >;
+type RecurringOperationAttemptClaim = {
+  id: string;
+  operation: RecurringOperation;
+  status: "processing" | "submitted";
+  signature: string | null;
+  slot: number | null;
+  block_time: string | null;
+  updated_at: string;
+};
 
 function getLifecycleClaimStatus(
   operation: RecurringLifecycleOperation
@@ -326,6 +336,156 @@ async function markRecurringLifecycleAttemptFailed(input: {
     )
     .bind(input.error, new Date().toISOString(), input.attemptId)
     .run();
+}
+
+async function failActiveRecurringCollectOperationAttempt(input: {
+  executor: DatabaseExecutor;
+  organizationId: string;
+  projectId: string;
+  recurringPaymentId: string;
+  error: string;
+  updatedAt: string;
+}) {
+  await input.executor
+    .prepare(
+      `UPDATE payment_recurring_operation_attempts
+          SET status = 'failed',
+              error = COALESCE(error, ?),
+              updated_at = ?
+        WHERE organization_id = ?
+          AND project_id = ?
+          AND recurring_payment_id = ?
+          AND operation = 'collect'
+          AND status = 'processing'`
+    )
+    .bind(
+      input.error,
+      input.updatedAt,
+      input.organizationId,
+      input.projectId,
+      input.recurringPaymentId
+    )
+    .run();
+}
+
+async function markActiveRecurringCollectOperationAttemptSubmitted(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  recurringPaymentId: string;
+  signature: string;
+  slot: number | null;
+  blockTime: string | null;
+}): Promise<boolean> {
+  const updatedAt = new Date().toISOString();
+  const changes = await getDb(input.env)
+    .prepare(
+      `UPDATE payment_recurring_operation_attempts
+          SET status = 'submitted',
+              signature = ?,
+              slot = CASE WHEN ?::boolean THEN ? ELSE slot END,
+              block_time = CASE WHEN ?::boolean THEN ? ELSE block_time END,
+              error = NULL,
+              updated_at = ?
+        WHERE organization_id = ?
+          AND project_id = ?
+          AND recurring_payment_id = ?
+          AND operation = 'collect'
+          AND status IN ('processing', 'submitted')`
+    )
+    .bind(
+      input.signature,
+      input.slot !== null,
+      input.slot,
+      input.blockTime !== null,
+      input.blockTime,
+      updatedAt,
+      input.organizationId,
+      input.projectId,
+      input.recurringPaymentId
+    )
+    .run();
+
+  return changes > 0;
+}
+
+async function markActiveRecurringCollectOperationAttemptFinalized(input: {
+  executor: DatabaseExecutor;
+  organizationId: string;
+  projectId: string;
+  recurringPaymentId: string;
+  updatedAt: string;
+}) {
+  await input.executor
+    .prepare(
+      `UPDATE payment_recurring_operation_attempts
+          SET status = 'confirmed',
+              updated_at = ?
+        WHERE organization_id = ?
+          AND project_id = ?
+          AND recurring_payment_id = ?
+          AND operation = 'collect'
+          AND status IN ('processing', 'submitted')`
+    )
+    .bind(input.updatedAt, input.organizationId, input.projectId, input.recurringPaymentId)
+    .run();
+}
+
+async function getActiveRecurringCollectOperationAttempt(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  recurringPaymentId: string;
+}): Promise<RecurringOperationAttemptClaim | null> {
+  const row = await getDb(input.env)
+    .prepare(
+      `SELECT id, operation, status, signature, slot, block_time, updated_at
+         FROM payment_recurring_operation_attempts
+        WHERE organization_id = ?
+          AND project_id = ?
+          AND recurring_payment_id = ?
+          AND operation = 'collect'
+          AND status IN ('processing', 'submitted')
+        ORDER BY updated_at DESC
+        LIMIT 1`
+    )
+    .bind(input.organizationId, input.projectId, input.recurringPaymentId)
+    .first<RecurringOperationAttemptClaim>();
+
+  return row ?? null;
+}
+
+async function assertNoActiveRecurringOperationAttempt(input: {
+  executor: DatabaseExecutor;
+  organizationId: string;
+  projectId: string;
+  recurringPaymentId: string;
+}) {
+  const activeOperationAttempt = await input.executor
+    .prepare(
+      `SELECT id, operation, status, signature, slot, block_time, updated_at
+         FROM payment_recurring_operation_attempts
+        WHERE organization_id = ?
+          AND project_id = ?
+          AND recurring_payment_id = ?
+          AND status IN ('processing', 'submitted')
+        ORDER BY updated_at DESC
+        LIMIT 1
+        FOR UPDATE`
+    )
+    .bind(input.organizationId, input.projectId, input.recurringPaymentId)
+    .first<RecurringOperationAttemptClaim>();
+
+  if (!activeOperationAttempt) {
+    return;
+  }
+
+  throw new AppError(
+    "CONFLICT",
+    activeOperationAttempt.operation === "collect"
+      ? "Recurring payment collection is already in progress"
+      : "Recurring payment lifecycle update is already in progress"
+  );
 }
 
 function isActiveCollectionAttempt(attempt: PaymentSubscriptionCollectionAttemptRow): boolean {
@@ -809,6 +969,12 @@ async function claimLifecycleRecords(input: {
         .bind(now, input.organizationId, input.projectId, recurringPayment.id, input.operation)
         .run();
     }
+    await assertNoActiveRecurringOperationAttempt({
+      executor: tx,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPaymentId: recurringPayment.id,
+    });
     if (
       input.operation === "cancel" &&
       recurringPayment.status !== claimStatus &&
@@ -1544,7 +1710,19 @@ async function markRecurringCollectionSubmitted(input: {
     collectionBlockTime: input.blockTime,
   };
 
-  const [transferResult, attemptResult] = await Promise.allSettled([
+  const operationAttemptPromise = input.attempt.recurring_payment_id
+    ? markActiveRecurringCollectOperationAttemptSubmitted({
+        env: input.env,
+        organizationId: input.attempt.organization_id,
+        projectId: input.attempt.project_id,
+        recurringPaymentId: input.attempt.recurring_payment_id,
+        signature: input.signature,
+        slot: input.slot,
+        blockTime: input.blockTime,
+      })
+    : Promise.resolve(false);
+
+  const [transferResult, attemptResult, operationAttemptResult] = await Promise.allSettled([
     updateTransferRecord({
       env: input.env,
       transferId: input.transfer.id,
@@ -1564,6 +1742,7 @@ async function markRecurringCollectionSubmitted(input: {
       attemptedAt: updatedAt,
       updatedAt,
     }),
+    operationAttemptPromise,
   ]);
 
   if (transferResult.status === "rejected") {
@@ -1584,6 +1763,16 @@ async function markRecurringCollectionSubmitted(input: {
           : String(attemptResult.reason),
     });
   }
+  if (operationAttemptResult.status === "rejected") {
+    console.error("Failed to persist recurring collection operation recovery marker", {
+      recurringPaymentId: input.attempt.recurring_payment_id,
+      signature: input.signature,
+      error:
+        operationAttemptResult.reason instanceof Error
+          ? operationAttemptResult.reason.message
+          : String(operationAttemptResult.reason),
+    });
+  }
 
   const updatedTransfer =
     transferResult.status === "fulfilled" ? transferResult.value : input.transfer;
@@ -1595,8 +1784,14 @@ async function markRecurringCollectionSubmitted(input: {
     transferResult.status === "fulfilled" && Boolean(transferResult.value?.signature);
   const attemptHasSubmissionMarker =
     attemptResult.status === "fulfilled" && Boolean(attemptResult.value?.signature);
+  const operationHasSubmissionMarker =
+    operationAttemptResult.status === "fulfilled" && operationAttemptResult.value === true;
 
-  if (!transferHasSubmissionMarker && !attemptHasSubmissionMarker) {
+  if (
+    !transferHasSubmissionMarker &&
+    !attemptHasSubmissionMarker &&
+    !operationHasSubmissionMarker
+  ) {
     console.error("Recurring collection submitted on-chain without a persisted recovery marker", {
       attemptId: input.attempt.id,
       transferId: input.transfer.id,
@@ -1607,7 +1802,8 @@ async function markRecurringCollectionSubmitted(input: {
   return {
     attempt: updatedAttempt,
     transfer: updatedTransfer,
-    hasRecoveryMarker: transferHasSubmissionMarker || attemptHasSubmissionMarker,
+    hasRecoveryMarker:
+      transferHasSubmissionMarker || attemptHasSubmissionMarker || operationHasSubmissionMarker,
     hasAttemptRecoveryMarker: attemptHasSubmissionMarker,
   };
 }
@@ -1777,6 +1973,16 @@ async function markRecurringCollectionFailedBeforeSubmission(input: {
         attemptedAt: now,
         updatedAt: now,
       });
+      if (input.attempt.recurring_payment_id) {
+        await failActiveRecurringCollectOperationAttempt({
+          executor: tx,
+          organizationId: input.attempt.organization_id,
+          projectId: input.attempt.project_id,
+          recurringPaymentId: input.attempt.recurring_payment_id,
+          error: input.error,
+          updatedAt: now,
+        });
+      }
 
       if (!updatedTransfer || !failedAttempt) {
         throw new AppError("INTERNAL_ERROR", "Failed to mark recurring collection failed");
@@ -1900,6 +2106,13 @@ async function finalizeRecurringCollection(input: {
 
     if (collectionStateChanged) {
       const { updatedAttempt, updatedTransfer } = await confirmCollectionRecords();
+      await markActiveRecurringCollectOperationAttemptFinalized({
+        executor: tx,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        recurringPaymentId: input.recurringPayment.id,
+        updatedAt,
+      });
       const currentRecurringPayment = await txRecurringRepo.getRecurringPaymentById({
         recurringPaymentId: input.recurringPayment.id,
         organizationId: input.organizationId,
@@ -1927,6 +2140,13 @@ async function finalizeRecurringCollection(input: {
     }
 
     const { updatedAttempt, updatedTransfer } = await confirmCollectionRecords();
+    await markActiveRecurringCollectOperationAttemptFinalized({
+      executor: tx,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPaymentId: input.recurringPayment.id,
+      updatedAt,
+    });
     const updatedRecurringPayment = await txRecurringRepo.updateRecurringPayment({
       recurringPaymentId: input.recurringPayment.id,
       organizationId: input.organizationId,
@@ -1985,7 +2205,17 @@ async function recoverSubmittedRecurringCollection(input: {
     return null;
   }
 
-  const signature = input.attempt.signature ?? transfer.signature;
+  const activeCollectOperationAttempt =
+    input.attempt.signature || transfer.signature
+      ? null
+      : await getActiveRecurringCollectOperationAttempt({
+          env: input.env,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          recurringPaymentId: input.recurringPayment.id,
+        });
+  const signature =
+    input.attempt.signature ?? transfer.signature ?? activeCollectOperationAttempt?.signature;
   if (!signature) {
     return null;
   }
@@ -2007,9 +2237,16 @@ async function recoverSubmittedRecurringCollection(input: {
     transfer,
     dueAt: input.dueAt,
     signature,
-    slot: transfer.slot ?? getNumberMetadataValue(input.attempt.metadata, "collectionSlot"),
+    slot:
+      transfer.slot ??
+      getNumberMetadataValue(input.attempt.metadata, "collectionSlot") ??
+      activeCollectOperationAttempt?.slot ??
+      null,
     blockTime:
-      transfer.block_time ?? getStringMetadataValue(input.attempt.metadata, "collectionBlockTime"),
+      transfer.block_time ??
+      getStringMetadataValue(input.attempt.metadata, "collectionBlockTime") ??
+      activeCollectOperationAttempt?.block_time ??
+      null,
     destinationTokenAccount,
   });
 }
@@ -2181,6 +2418,15 @@ async function resolveStaleUnsignedProcessingAttempt(input: {
       throw new AppError("INTERNAL_ERROR", "Failed to expire stale collection attempt");
     }
 
+    await failActiveRecurringCollectOperationAttempt({
+      executor: getDb(input.env),
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPaymentId: input.recurringPayment.id,
+      error: "Stale recurring collection attempt expired before transfer submission",
+      updatedAt: now,
+    });
+
     return true;
   }
 
@@ -2217,6 +2463,14 @@ async function resolveStaleUnsignedProcessingAttempt(input: {
       status: "failed",
       error: message,
       attemptedAt: now,
+      updatedAt: now,
+    });
+    await failActiveRecurringCollectOperationAttempt({
+      executor: tx,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPaymentId: input.recurringPayment.id,
+      error: message,
       updatedAt: now,
     });
     const shouldPauseForReconciliation =
@@ -2400,6 +2654,36 @@ async function createProcessingCollectionAttempt(input: {
     if (existingActiveAttempt) {
       throw new AppError("CONFLICT", "Collection attempt already exists for this due time");
     }
+    await assertNoActiveRecurringOperationAttempt({
+      executor: tx,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPaymentId: input.recurringPayment.id,
+    });
+
+    const operationAttemptId = `prlo_${crypto.randomUUID()}`;
+    await tx
+      .prepare(
+        `INSERT INTO payment_recurring_operation_attempts (
+           id,
+           organization_id,
+           project_id,
+           recurring_payment_id,
+           operation,
+           status,
+           created_at,
+           updated_at
+         ) VALUES (?, ?, ?, ?, 'collect', 'processing', ?, ?)`
+      )
+      .bind(
+        operationAttemptId,
+        input.organizationId,
+        input.projectId,
+        input.recurringPayment.id,
+        now,
+        now
+      )
+      .run();
 
     const attempt = await txSubscriptionsRepo.createCollectionAttempt({
       id: `psca_${crypto.randomUUID()}`,
@@ -2494,6 +2778,14 @@ async function createTransferAndLinkCollectionAttempt(input: {
             updatedAt: now,
           });
         }
+        await failActiveRecurringCollectOperationAttempt({
+          executor: tx,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          recurringPaymentId: input.recurringPayment.id,
+          error: message,
+          updatedAt: now,
+        });
       });
     } catch (cleanupError) {
       console.warn("Failed to mark collection attempt failed after transfer-link error", {
@@ -2563,8 +2855,21 @@ async function assertRecurringCollectionClaimStillActive(input: {
         input.dueAt,
       ]
     );
+    const operationAttempt = await tx.queryOne<RecurringOperationAttemptClaim>(
+      `SELECT id, operation, status, signature, slot, block_time, updated_at
+         FROM payment_recurring_operation_attempts
+        WHERE organization_id = ?
+          AND project_id = ?
+          AND recurring_payment_id = ?
+          AND operation = 'collect'
+          AND status = 'processing'
+        ORDER BY updated_at DESC
+        LIMIT 1
+        FOR UPDATE`,
+      [input.organizationId, input.projectId, input.recurringPaymentId]
+    );
 
-    if (!recurringPayment || !subscription || !attempt) {
+    if (!recurringPayment || !subscription || !attempt || !operationAttempt) {
       throw new AppError("NOT_FOUND", "Recurring payment collection claim not found");
     }
     if (

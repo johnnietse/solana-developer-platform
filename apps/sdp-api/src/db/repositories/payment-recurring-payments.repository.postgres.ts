@@ -289,6 +289,12 @@ export function createPostgresPaymentRecurringPaymentsRepository(
                        AND COALESCE(retry.metadata->>'retryImmediately', 'false') <> 'true'
                        AND retry.updated_at > ?
                   )
+              AND NOT EXISTS (
+                    SELECT 1
+                      FROM payment_recurring_operation_attempts op
+                     WHERE op.recurring_payment_id = rp.id
+                       AND op.status IN ('processing', 'submitted')
+                  )
             ORDER BY rp.next_collection_due_at ASC
             LIMIT ?`
         )

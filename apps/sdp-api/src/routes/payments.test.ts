@@ -2134,6 +2134,21 @@ describe("Payments routes", () => {
         limit: 10,
       });
     expect(dueAfterFinalizeFailure.map((payment) => payment.id)).not.toContain(recurringPaymentId);
+    const submittedCollectOperationAttempt = await getDb(env)
+      .prepare(
+        `SELECT status, signature
+           FROM payment_recurring_operation_attempts
+          WHERE recurring_payment_id = ?
+            AND operation = 'collect'
+          ORDER BY updated_at DESC
+          LIMIT 1`
+      )
+      .bind(recurringPaymentId)
+      .first<{ status: string; signature: string | null }>();
+    expect(submittedCollectOperationAttempt).toMatchObject({
+      status: "submitted",
+      signature: expect.any(String),
+    });
     const confirmCallsAfterSubmittedCollection = confirmTransactionMock.mock.calls.length;
 
     const collectRes = await app.request(
@@ -2166,6 +2181,18 @@ describe("Payments routes", () => {
     expect(new Date(collectBody.data.recurringPayment.nextCollectionDueAt ?? "").getTime()).toBe(
       new Date(firstCollectionAt).getTime() + 24 * 60 * 60 * 1000
     );
+    const confirmedCollectOperationAttempt = await getDb(env)
+      .prepare(
+        `SELECT status
+           FROM payment_recurring_operation_attempts
+          WHERE recurring_payment_id = ?
+            AND operation = 'collect'
+          ORDER BY updated_at DESC
+          LIMIT 1`
+      )
+      .bind(recurringPaymentId)
+      .first<{ status: string }>();
+    expect(confirmedCollectOperationAttempt?.status).toBe("confirmed");
 
     const signedRaceDueAt = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
     const signedRacePeriodStartAt = new Date(

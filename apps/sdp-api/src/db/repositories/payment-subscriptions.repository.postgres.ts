@@ -160,10 +160,12 @@ async function expireStaleUnsignedProcessingAttemptsWithExecutor(
     expired_linked_attempts: number;
     expired_failed_attempt_transfers: number;
     expired_unlinked_attempts: number;
+    expired_collect_operation_attempts: number;
   }>(
     `WITH stale_linked AS (
           SELECT a.id AS attempt_id,
-                 a.transfer_id AS transfer_id
+                 a.transfer_id AS transfer_id,
+                 a.recurring_payment_id AS recurring_payment_id
             FROM payment_subscription_collection_attempts a
             JOIN payment_transfers t
               ON t.id = a.transfer_id
@@ -180,7 +182,8 @@ async function expireStaleUnsignedProcessingAttemptsWithExecutor(
            LIMIT ?
         ),
         stale_failed_attempt_transfers AS (
-          SELECT t.id AS transfer_id
+          SELECT t.id AS transfer_id,
+                 a.recurring_payment_id AS recurring_payment_id
             FROM payment_subscription_collection_attempts a
             JOIN payment_transfers t
               ON t.id = a.transfer_id
@@ -197,7 +200,8 @@ async function expireStaleUnsignedProcessingAttemptsWithExecutor(
            LIMIT ?
         ),
         stale_unlinked AS (
-          SELECT id AS attempt_id
+          SELECT id AS attempt_id,
+                 recurring_payment_id AS recurring_payment_id
             FROM payment_subscription_collection_attempts
            WHERE status = 'processing'
              AND recurring_payment_id IS NOT NULL
@@ -244,10 +248,29 @@ async function expireStaleUnsignedProcessingAttemptsWithExecutor(
             FROM stale_unlinked stale
            WHERE a.id = stale.attempt_id
            RETURNING a.id
+        ),
+        stale_collect_claims AS (
+          SELECT recurring_payment_id FROM stale_linked
+          UNION
+          SELECT recurring_payment_id FROM stale_failed_attempt_transfers
+          UNION
+          SELECT recurring_payment_id FROM stale_unlinked
+        ),
+        updated_collect_operation_attempts AS (
+          UPDATE payment_recurring_operation_attempts op
+             SET status = 'failed',
+                 error = COALESCE(error, 'Stale recurring collection operation expired before submission'),
+                 updated_at = ?
+            FROM stale_collect_claims stale
+           WHERE op.recurring_payment_id = stale.recurring_payment_id
+             AND op.operation = 'collect'
+             AND op.status = 'processing'
+           RETURNING op.id
         )
       SELECT (SELECT COUNT(*)::int FROM updated_linked_attempts) AS expired_linked_attempts,
              (SELECT COUNT(*)::int FROM updated_failed_attempt_transfers) AS expired_failed_attempt_transfers,
-             (SELECT COUNT(*)::int FROM updated_unlinked_attempts) AS expired_unlinked_attempts`,
+             (SELECT COUNT(*)::int FROM updated_unlinked_attempts) AS expired_unlinked_attempts,
+             (SELECT COUNT(*)::int FROM updated_collect_operation_attempts) AS expired_collect_operation_attempts`,
     [
       params.olderThan,
       params.limit,
@@ -255,6 +278,7 @@ async function expireStaleUnsignedProcessingAttemptsWithExecutor(
       params.limit,
       params.olderThan,
       params.limit,
+      params.updatedAt,
       params.updatedAt,
       params.updatedAt,
       params.updatedAt,
@@ -715,15 +739,21 @@ export function createPostgresPaymentSubscriptionsRepository(
       const rows = await db
         .prepare(
           `SELECT a.*
-             FROM payment_subscription_collection_attempts a
-             JOIN payment_transfers t
-               ON t.id = a.transfer_id
-              AND t.organization_id = a.organization_id
-              AND t.project_id = a.project_id
+           FROM payment_subscription_collection_attempts a
+           JOIN payment_transfers t
+             ON t.id = a.transfer_id
+            AND t.organization_id = a.organization_id
+            AND t.project_id = a.project_id
+            LEFT JOIN payment_recurring_operation_attempts op
+              ON op.recurring_payment_id = a.recurring_payment_id
+             AND op.organization_id = a.organization_id
+             AND op.project_id = a.project_id
+             AND op.operation = 'collect'
+             AND op.status IN ('processing', 'submitted')
             WHERE a.recurring_payment_id IS NOT NULL
               AND a.status IN ('processing', 'confirmed')
               AND a.transfer_id IS NOT NULL
-              AND (a.signature IS NOT NULL OR t.signature IS NOT NULL)
+              AND (a.signature IS NOT NULL OR t.signature IS NOT NULL OR op.signature IS NOT NULL)
               AND (a.status <> 'confirmed' OR t.status NOT IN ('confirmed', 'finalized'))
             ORDER BY a.updated_at ASC
             LIMIT ?`
