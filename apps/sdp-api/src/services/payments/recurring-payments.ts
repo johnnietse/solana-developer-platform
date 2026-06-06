@@ -40,6 +40,7 @@ import {
   isSubscriptionLifecycleTargetReachedOnChain,
   readSubscriptionLifecycleStateOnChain,
   resolveRecurringSubscriptionRuntime,
+  type SubmittedSubscriptionTransaction,
 } from "./solana-subscriptions-adapter";
 
 export type ActivationResult = {
@@ -265,6 +266,37 @@ async function markRecurringLifecycleAttemptSubmitted(input: {
       input.attemptId
     )
     .run();
+}
+
+async function retryPersistRecurringLifecycleSubmittedMarker(input: {
+  env: Env;
+  recurringPaymentId: string;
+  attemptId: string;
+  operation: RecurringLifecycleOperation;
+  submitted: SubmittedSubscriptionTransaction | null;
+}) {
+  if (!input.submitted) {
+    return;
+  }
+
+  try {
+    await markRecurringLifecycleAttemptSubmitted({
+      env: input.env,
+      attemptId: input.attemptId,
+      executed: {
+        signature: input.submitted.signature,
+        slot: null,
+        blockTime: null,
+      },
+    });
+  } catch (markerError) {
+    console.warn("Failed to persist recurring lifecycle submitted recovery marker", {
+      recurringPaymentId: input.recurringPaymentId,
+      attemptId: input.attemptId,
+      operation: input.operation,
+      error: toErrorMessage(markerError),
+    });
+  }
 }
 
 async function markRecurringLifecycleAttemptFinalized(input: { env: Env; attemptId: string }) {
@@ -1422,6 +1454,135 @@ async function markRecurringCollectionSubmitted(input: {
     hasRecoveryMarker: transferHasSubmissionMarker || attemptHasSubmissionMarker,
     hasAttemptRecoveryMarker: attemptHasSubmissionMarker,
   };
+}
+
+async function retryPersistRecurringCollectionSubmittedMarker(input: {
+  env: Env;
+  recurringPaymentId: string;
+  attempt: PaymentSubscriptionCollectionAttemptRow;
+  transfer: PaymentTransferRow;
+  signature: string | null;
+  destinationTokenAccount: string | null;
+}): Promise<Awaited<ReturnType<typeof markRecurringCollectionSubmitted>> | null> {
+  if (!input.signature || !input.destinationTokenAccount) {
+    return null;
+  }
+
+  try {
+    return await markRecurringCollectionSubmitted({
+      env: input.env,
+      attempt: input.attempt,
+      transfer: input.transfer,
+      signature: input.signature,
+      slot: null,
+      blockTime: null,
+      destinationTokenAccount: input.destinationTokenAccount,
+    });
+  } catch (markerError) {
+    console.warn("Failed to persist recurring collection submitted recovery marker", {
+      recurringPaymentId: input.recurringPaymentId,
+      attemptId: input.attempt.id,
+      transferId: input.transfer.id,
+      signature: input.signature,
+      error: toErrorMessage(markerError),
+    });
+    return null;
+  }
+}
+
+async function executeRecurringCollectionOnChainWithRecoveryMarker(input: {
+  env: Env;
+  recurringPaymentId: string;
+  attempt: PaymentSubscriptionCollectionAttemptRow;
+  transfer: PaymentTransferRow;
+  sourceSigner: Awaited<ReturnType<typeof getSourceSigner>>;
+  sourceAddress: ReturnType<typeof assertValidAddress>;
+  destinationAddress: ReturnType<typeof assertValidAddress>;
+  planPda: ReturnType<typeof assertValidAddress>;
+  subscriptionPda: ReturnType<typeof assertValidAddress>;
+  runtime: Awaited<ReturnType<typeof resolveRecurringSubscriptionRuntime>>;
+}): Promise<{
+  executed: Awaited<ReturnType<typeof collectSubscriptionOnChain>>;
+  attempt: PaymentSubscriptionCollectionAttemptRow;
+  transfer: PaymentTransferRow;
+}> {
+  let collectionAttempt = input.attempt;
+  let transfer = input.transfer;
+  const submittedCollection = {
+    current: null as Awaited<ReturnType<typeof markRecurringCollectionSubmitted>> | null,
+  };
+  let submittedSignature: string | null = null;
+  let submittedDestinationTokenAccount: string | null = null;
+
+  try {
+    const executed = await collectSubscriptionOnChain({
+      env: input.env,
+      sourceSigner: input.sourceSigner,
+      sourceAddress: input.sourceAddress,
+      destinationAddress: input.destinationAddress,
+      planPda: input.planPda,
+      subscriptionPda: input.subscriptionPda,
+      runtime: input.runtime,
+      onSubmitted: async (submittedTransaction) => {
+        submittedSignature = submittedTransaction.signature;
+        submittedDestinationTokenAccount = String(submittedTransaction.destinationTokenAccount);
+        submittedCollection.current = await markRecurringCollectionSubmitted({
+          env: input.env,
+          attempt: collectionAttempt,
+          transfer,
+          signature: submittedTransaction.signature,
+          slot: null,
+          blockTime: null,
+          destinationTokenAccount: submittedDestinationTokenAccount,
+        });
+        collectionAttempt = submittedCollection.current.attempt;
+        transfer = submittedCollection.current.transfer;
+      },
+    });
+
+    return { executed, attempt: collectionAttempt, transfer };
+  } catch (error) {
+    let submittedBeforeConfirmation = submittedCollection.current;
+    if (submittedBeforeConfirmation || submittedSignature) {
+      const retriedSubmittedMarker =
+        submittedBeforeConfirmation ??
+        (await retryPersistRecurringCollectionSubmittedMarker({
+          env: input.env,
+          recurringPaymentId: input.recurringPaymentId,
+          attempt: collectionAttempt,
+          transfer,
+          signature: submittedSignature,
+          destinationTokenAccount: submittedDestinationTokenAccount,
+        }));
+      if (retriedSubmittedMarker) {
+        submittedBeforeConfirmation = retriedSubmittedMarker;
+        collectionAttempt = retriedSubmittedMarker.attempt;
+        transfer = retriedSubmittedMarker.transfer;
+      }
+      console.error("Recurring collection submitted on-chain but confirmation failed", {
+        recurringPaymentId: input.recurringPaymentId,
+        attemptId: collectionAttempt.id,
+        transferId: transfer.id,
+        signature:
+          submittedBeforeConfirmation?.transfer.signature ??
+          submittedBeforeConfirmation?.attempt.signature ??
+          submittedSignature,
+        error: toErrorMessage(error),
+      });
+      throw error;
+    }
+
+    const message = toErrorMessage(error);
+    await markRecurringCollectionFailedBeforeSubmission({
+      env: input.env,
+      attempt: collectionAttempt,
+      transfer,
+      error: message,
+      retryImmediately: isImmediateRecurringSubscriptionRetryError(error),
+    });
+
+    throw error;
+  }
 }
 
 async function markRecurringCollectionFailedBeforeSubmission(input: {
@@ -2651,64 +2812,21 @@ export async function collectRecurringPayment(input: {
   let collectionAttempt: PaymentSubscriptionCollectionAttemptRow = linked.attempt;
   let transfer = linked.transfer;
 
-  const submittedCollection = {
-    current: null as Awaited<ReturnType<typeof markRecurringCollectionSubmitted>> | null,
-  };
-  let submittedSignature: string | null = null;
-  let executed: Awaited<ReturnType<typeof collectSubscriptionOnChain>>;
-  try {
-    executed = await collectSubscriptionOnChain({
-      env: input.env,
-      sourceSigner,
-      sourceAddress,
-      destinationAddress,
-      planPda,
-      subscriptionPda,
-      runtime,
-      onSubmitted: async (submittedTransaction) => {
-        submittedSignature = submittedTransaction.signature;
-        submittedCollection.current = await markRecurringCollectionSubmitted({
-          env: input.env,
-          attempt: collectionAttempt,
-          transfer,
-          signature: submittedTransaction.signature,
-          slot: null,
-          blockTime: null,
-          destinationTokenAccount: String(submittedTransaction.destinationTokenAccount),
-        });
-        collectionAttempt = submittedCollection.current.attempt;
-        transfer = submittedCollection.current.transfer;
-      },
-    });
-  } catch (error) {
-    const submittedBeforeConfirmation = submittedCollection.current;
-    if (submittedBeforeConfirmation || submittedSignature) {
-      console.error("Recurring collection submitted on-chain but confirmation failed", {
-        recurringPaymentId: recurringPayment.id,
-        attemptId: collectionAttempt.id,
-        transferId: transfer.id,
-        signature:
-          submittedBeforeConfirmation?.transfer.signature ??
-          submittedBeforeConfirmation?.attempt.signature ??
-          submittedSignature,
-        error: toErrorMessage(error),
-      });
-      throw error;
-    }
-
-    const message = toErrorMessage(error);
-    const failed = await markRecurringCollectionFailedBeforeSubmission({
-      env: input.env,
-      attempt: collectionAttempt,
-      transfer,
-      error: message,
-      retryImmediately: isImmediateRecurringSubscriptionRetryError(error),
-    });
-    collectionAttempt = failed.attempt;
-    transfer = failed.transfer;
-
-    throw error;
-  }
+  const collectionExecution = await executeRecurringCollectionOnChainWithRecoveryMarker({
+    env: input.env,
+    recurringPaymentId: recurringPayment.id,
+    attempt: collectionAttempt,
+    transfer,
+    sourceSigner,
+    sourceAddress,
+    destinationAddress,
+    planPda,
+    subscriptionPda,
+    runtime,
+  });
+  const { executed } = collectionExecution;
+  collectionAttempt = collectionExecution.attempt;
+  transfer = collectionExecution.transfer;
 
   let submitted = await markRecurringCollectionSubmitted({
     env: input.env,
@@ -2954,6 +3072,7 @@ export async function executeRecurringPaymentLifecycle(input: {
   }
 
   let executed: ExecutedSubscriptionTransaction | null;
+  let submittedLifecycleTransaction: SubmittedSubscriptionTransaction | null = null;
   try {
     if (lifecycleAttemptSubmitted) {
       const targetReached = await isSubscriptionLifecycleTargetReachedOnChain({
@@ -2986,6 +3105,7 @@ export async function executeRecurringPaymentLifecycle(input: {
         subscriptionPda,
         onSubmitted: async (submitted) => {
           lifecycleAttemptSubmitted = true;
+          submittedLifecycleTransaction = submitted;
           await markRecurringLifecycleAttemptSubmitted({
             env: input.env,
             attemptId: lifecycleAttemptId,
@@ -2996,6 +3116,13 @@ export async function executeRecurringPaymentLifecycle(input: {
     }
   } catch (error) {
     if (lifecycleAttemptSubmitted) {
+      await retryPersistRecurringLifecycleSubmittedMarker({
+        env: input.env,
+        recurringPaymentId: claim.recurringPayment.id,
+        attemptId: lifecycleAttemptId,
+        operation: input.operation,
+        submitted: submittedLifecycleTransaction,
+      });
       console.error("Recurring lifecycle submitted on-chain but confirmation failed", {
         recurringPaymentId: claim.recurringPayment.id,
         attemptId: lifecycleAttemptId,

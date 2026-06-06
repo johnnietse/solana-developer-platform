@@ -2133,7 +2133,7 @@ describe("Payments routes", () => {
         retryAfter: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
         limit: 10,
       });
-    expect(dueAfterFinalizeFailure.map((payment) => payment.id)).toContain(recurringPaymentId);
+    expect(dueAfterFinalizeFailure.map((payment) => payment.id)).not.toContain(recurringPaymentId);
     const confirmCallsAfterSubmittedCollection = confirmTransactionMock.mock.calls.length;
 
     const collectRes = await app.request(
