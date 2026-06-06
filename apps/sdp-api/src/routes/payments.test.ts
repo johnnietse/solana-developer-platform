@@ -505,26 +505,29 @@ function mockRecurringLifecycleSubscriptionState(input: {
   planPda: string;
   subscriptionPda: string;
   expiresAtTs: bigint;
+  times?: number;
 }): void {
-  fetchMaybeSubscriptionDelegationMock.mockResolvedValueOnce({
-    exists: true,
-    address: address(input.subscriptionPda),
-    data: {
-      header: {
-        discriminator: subscriptionsSdk.AccountDiscriminator.SubscriptionDelegation,
-        version: 1,
-        bump: 255,
-        delegator: TEST_SOLANA_ADDRESSES.wallet1,
-        delegatee: address(input.planPda),
-        payer: TEST_SOLANA_ADDRESSES.wallet1,
-        initId: 0n,
+  for (let index = 0; index < (input.times ?? 1); index += 1) {
+    fetchMaybeSubscriptionDelegationMock.mockResolvedValueOnce({
+      exists: true,
+      address: address(input.subscriptionPda),
+      data: {
+        header: {
+          discriminator: subscriptionsSdk.AccountDiscriminator.SubscriptionDelegation,
+          version: 1,
+          bump: 255,
+          delegator: TEST_SOLANA_ADDRESSES.wallet1,
+          delegatee: address(input.planPda),
+          payer: TEST_SOLANA_ADDRESSES.wallet1,
+          initId: 0n,
+        },
+        terms: { amount: 500000n, periodHours: 24n, createdAt: 1_700_000_000n },
+        amountPulledInPeriod: 0n,
+        currentPeriodStartTs: 1_700_000_000n,
+        expiresAtTs: input.expiresAtTs,
       },
-      terms: { amount: 500000n, periodHours: 24n, createdAt: 1_700_000_000n },
-      amountPulledInPeriod: 0n,
-      currentPeriodStartTs: 1_700_000_000n,
-      expiresAtTs: input.expiresAtTs,
-    },
-  } as Awaited<ReturnType<typeof subscriptionsSdk.fetchMaybeSubscriptionDelegation>>);
+    } as Awaited<ReturnType<typeof subscriptionsSdk.fetchMaybeSubscriptionDelegation>>);
+  }
 }
 
 function expectPreparedSubscriptionTransaction(
@@ -2399,6 +2402,7 @@ describe("Payments routes", () => {
       planPda: recurringPlanPda,
       subscriptionPda: recurringSubscriptionPda,
       expiresAtTs: 1_800_000_000n,
+      times: 2,
     });
     let resumedDueAt = "";
     try {
