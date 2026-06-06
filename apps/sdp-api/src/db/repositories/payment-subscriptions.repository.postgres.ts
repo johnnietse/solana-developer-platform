@@ -596,7 +596,10 @@ export function createPostgresPaymentSubscriptionsRepository(
         .prepare(
           `SELECT a.*
              FROM payment_subscription_collection_attempts a
-             JOIN payment_transfers t ON t.id = a.transfer_id
+             JOIN payment_transfers t
+               ON t.id = a.transfer_id
+              AND t.organization_id = a.organization_id
+              AND t.project_id = a.project_id
             WHERE a.recurring_payment_id IS NOT NULL
               AND a.status IN ('processing', 'confirmed')
               AND a.transfer_id IS NOT NULL

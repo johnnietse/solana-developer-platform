@@ -1128,7 +1128,7 @@ describe("Payments routes", () => {
     });
     const originalCreatePaymentSubscriptionsRepositoryForFailedMarker =
       repositories.createPaymentSubscriptionsRepository;
-    let failFailedAttemptMarker = true;
+    let failedAttemptMarkerWriteFailures = 0;
     const failedAttemptMarkerSpy = vi
       .spyOn(repositories, "createPaymentSubscriptionsRepository")
       .mockImplementation((repoEnv) => {
@@ -1138,11 +1138,11 @@ describe("Payments routes", () => {
           ...repo,
           createCollectionAttempt: vi.fn(async (input) => {
             if (
-              failFailedAttemptMarker &&
+              failedAttemptMarkerWriteFailures < 2 &&
               input.status === "failed" &&
               input.error === "Transfer amount exceeds wallet policy maxTransferAmount"
             ) {
-              failFailedAttemptMarker = false;
+              failedAttemptMarkerWriteFailures += 1;
               throw new Error("simulated failed-attempt marker write failure");
             }
 
@@ -1160,11 +1160,15 @@ describe("Payments routes", () => {
         },
         env
       );
-      expect(failedMarkerRes.status).toBe(403);
+      expect(failedMarkerRes.status).toBe(500);
       const failedMarkerBody = (await failedMarkerRes.json()) as {
-        error: { message: string };
+        error: { code: string; message: string; details?: { originalError?: string } };
       };
+      expect(failedMarkerBody.error.code).toBe("INTERNAL_ERROR");
       expect(failedMarkerBody.error.message).toBe(
+        "Recurring collection failed and retry backoff could not be recorded"
+      );
+      expect(failedMarkerBody.error.details?.originalError).toBe(
         "Transfer amount exceeds wallet policy maxTransferAmount"
       );
     } finally {
@@ -1174,7 +1178,7 @@ describe("Payments routes", () => {
         .bind("pwp_allowlist_test", "pwp_limits_test")
         .run();
     }
-    expect(failFailedAttemptMarker).toBe(false);
+    expect(failedAttemptMarkerWriteFailures).toBe(2);
 
     const failedAttemptsRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/collection-attempts?status=failed`,

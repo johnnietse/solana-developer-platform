@@ -152,6 +152,24 @@ function isRecurringPaymentLifecycleFinalized(input: {
   );
 }
 
+function isRecurringPaymentLifecycleClaimStillFinalizable(input: {
+  recurringPayment: PaymentRecurringPaymentRow;
+  subscription: PaymentSubscriptionRow;
+  operation: RecurringLifecycleOperation;
+}): boolean {
+  const claimStatus = getLifecycleClaimStatus(input.operation);
+  if (
+    input.recurringPayment.status !== claimStatus ||
+    input.recurringPayment.next_collection_due_at !== input.subscription.next_collection_due_at
+  ) {
+    return false;
+  }
+
+  return input.operation === "cancel"
+    ? input.subscription.status === "canceling"
+    : input.subscription.status === "canceled" || input.subscription.status === "paused";
+}
+
 function assertRecurringPaymentCanClaimLifecycle(input: {
   recurringPayment: PaymentRecurringPaymentRow;
   operation: RecurringLifecycleOperation;
@@ -1007,6 +1025,14 @@ async function finalizeRecurringPaymentLifecycleAfterChain(input: {
     if (isRecurringPaymentLifecycleFinalized({ ...current, operation: input.operation })) {
       return current.recurringPayment;
     }
+    if (
+      !isRecurringPaymentLifecycleClaimStillFinalizable({
+        ...current,
+        operation: input.operation,
+      })
+    ) {
+      throw error;
+    }
 
     try {
       return await finalizeRecurringPaymentLifecycle({
@@ -1458,8 +1484,8 @@ async function createFailedCollectionAttemptForRetry(input: {
   initiatedByKeyId?: string | null;
 }) {
   const now = new Date().toISOString();
-  try {
-    await createPaymentSubscriptionsRepository(input.env).createCollectionAttempt({
+  const recordAttempt = () =>
+    createPaymentSubscriptionsRepository(input.env).createCollectionAttempt({
       id: `psca_${crypto.randomUUID()}`,
       organizationId: input.organizationId,
       projectId: input.projectId,
@@ -1480,6 +1506,9 @@ async function createFailedCollectionAttemptForRetry(input: {
       createdAt: now,
       updatedAt: now,
     });
+
+  try {
+    await recordAttempt();
   } catch (recordError) {
     console.error("Failed to record recurring collection retry backoff attempt", {
       recurringPaymentId: input.recurringPayment.id,
@@ -1487,6 +1516,21 @@ async function createFailedCollectionAttemptForRetry(input: {
       originalError: input.error,
       error: recordError instanceof Error ? recordError.message : String(recordError),
     });
+    try {
+      await recordAttempt();
+    } catch (retryError) {
+      throw new AppError(
+        "INTERNAL_ERROR",
+        "Recurring collection failed and retry backoff could not be recorded",
+        {
+          recurringPaymentId: input.recurringPayment.id,
+          dueAt: input.dueAt,
+          originalError: input.error,
+          recordError: toErrorMessage(recordError),
+          retryError: toErrorMessage(retryError),
+        }
+      );
+    }
   }
 }
 
