@@ -2256,6 +2256,7 @@ describe("Payments routes", () => {
       planPda: recurringPlanPda,
       subscriptionPda: recurringSubscriptionPda,
       expiresAtTs: 0n,
+      times: 2,
     });
     try {
       const recoveredCancelRes = await app.request(
