@@ -234,6 +234,38 @@ describe("collectDueRecurringPayments", () => {
     expect(collectRecurringPayment).not.toHaveBeenCalled();
   });
 
+  it("records a collection failure when listing due recurring payments fails", async () => {
+    const expireStaleUnsignedProcessingAttempts = vi.fn().mockResolvedValue(0);
+    const listSubmittedRecurringCollectionAttempts = vi.fn().mockResolvedValue([]);
+    const listStaleLifecycleClaims = vi.fn().mockResolvedValue([]);
+    const listDueRecurringPayments = vi
+      .fn()
+      .mockRejectedValue(new Error("temporary due-list outage"));
+    vi.mocked(createPaymentSubscriptionsRepository).mockReturnValue({
+      expireStaleUnsignedProcessingAttempts,
+      listSubmittedRecurringCollectionAttempts,
+    } as unknown as ReturnType<typeof createPaymentSubscriptionsRepository>);
+    vi.mocked(createPaymentRecurringPaymentsRepository).mockReturnValue({
+      listStaleLifecycleClaims,
+      listDueRecurringPayments,
+    } as unknown as ReturnType<typeof createPaymentRecurringPaymentsRepository>);
+
+    const result = await collectDueRecurringPayments(enabledEnv);
+
+    expect(result).toEqual({
+      scanned: 0,
+      collected: 0,
+      failed: 1,
+      expirationFailures: 0,
+      lifecycleRecovered: 0,
+      lifecycleFailures: 0,
+      submittedCollectionRecovered: 0,
+      submittedCollectionFailures: 0,
+      collectionFailures: 1,
+    });
+    expect(collectRecurringPayment).not.toHaveBeenCalled();
+  });
+
   it("recovers submitted recurring collections even when they are not due-active", async () => {
     const submittedAttempt = {
       id: "psca_submitted_recovery",

@@ -211,11 +211,22 @@ async function collectDueActivePayments(input: {
     return { scanned: 0, collected: 0, failures: 0 };
   }
 
-  const due = await input.recurringPaymentsRepo.listDueRecurringPayments({
-    now: input.now,
-    retryAfter: input.retryAfter,
-    limit: input.batchSize,
-  });
+  let due: Awaited<ReturnType<RecurringPaymentsRepository["listDueRecurringPayments"]>> = [];
+  try {
+    due = await input.recurringPaymentsRepo.listDueRecurringPayments({
+      now: input.now,
+      retryAfter: input.retryAfter,
+      limit: input.batchSize,
+    });
+  } catch (error) {
+    console.warn("Failed to list due recurring payments", {
+      now: input.now,
+      retryAfter: input.retryAfter,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { scanned: 0, collected: 0, failures: 1 };
+  }
+
   let collected = 0;
   let failures = 0;
 

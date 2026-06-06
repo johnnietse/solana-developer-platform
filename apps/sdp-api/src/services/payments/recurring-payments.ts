@@ -2776,6 +2776,53 @@ async function assertPendingResumeLifecycleCanProceed(input: {
   }
 }
 
+async function reconcileCanceledLifecycleBeforeSubmission(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  operation: RecurringLifecycleOperation;
+  lifecycleAttemptSubmitted: boolean;
+  lifecycleAttemptId: string;
+  recurringPayment: PaymentRecurringPaymentRow;
+  subscription: PaymentSubscriptionRow;
+  sourceAddress: ReturnType<typeof assertValidAddress>;
+  planPda: ReturnType<typeof assertValidAddress>;
+  subscriptionPda: ReturnType<typeof assertValidAddress>;
+}): Promise<PaymentRecurringPaymentRow | null> {
+  if (input.operation !== "cancel" || input.lifecycleAttemptSubmitted) {
+    return null;
+  }
+
+  const reconciledCanceledPayment = await reconcileCanceledRecurringPaymentFromChain({
+    env: input.env,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    recurringPayment: input.recurringPayment,
+    subscriptionId: input.subscription.id,
+    sourceAddress: input.sourceAddress,
+    planPda: input.planPda,
+    subscriptionPda: input.subscriptionPda,
+  });
+  if (reconciledCanceledPayment?.status !== "canceled") {
+    return null;
+  }
+
+  try {
+    await markRecurringLifecycleAttemptFinalized({
+      env: input.env,
+      attemptId: input.lifecycleAttemptId,
+    });
+  } catch (error) {
+    console.warn("Failed to mark reconciled recurring cancel attempt confirmed", {
+      recurringPaymentId: input.recurringPayment.id,
+      attemptId: input.lifecycleAttemptId,
+      error: toErrorMessage(error),
+    });
+  }
+
+  return reconciledCanceledPayment;
+}
+
 export async function executeRecurringPaymentLifecycle(input: {
   env: Env;
   organizationId: string;
@@ -2824,6 +2871,22 @@ export async function executeRecurringPaymentLifecycle(input: {
     planPda,
     subscriptionPda,
   });
+  const reconciledCanceledPayment = await reconcileCanceledLifecycleBeforeSubmission({
+    env: input.env,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    operation: input.operation,
+    lifecycleAttemptSubmitted,
+    lifecycleAttemptId,
+    recurringPayment: claim.recurringPayment,
+    subscription: claim.subscription,
+    sourceAddress,
+    planPda,
+    subscriptionPda,
+  });
+  if (reconciledCanceledPayment) {
+    return reconciledCanceledPayment;
+  }
   if (!lifecycleAttemptSubmitted) {
     // claimLifecycleRecords inserts this attempt in the same transaction as the
     // canceling/resuming status claim, so signer failures below have an audit row.

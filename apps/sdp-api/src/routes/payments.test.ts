@@ -2285,6 +2285,61 @@ describe("Payments routes", () => {
     const canceledAt = canceledSubscription?.canceled_at ?? "";
     expect(canceledAt).toBeTruthy();
 
+    const staleCancelRecoveryAt = new Date(Date.now() - 11 * 60 * 1000).toISOString();
+    await repositories.createPaymentRecurringPaymentsRepository(env).updateRecurringPayment({
+      recurringPaymentId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      status: "canceling",
+      updatedAt: staleCancelRecoveryAt,
+    });
+    await repositories.createPaymentSubscriptionsRepository(env).updateSubscription({
+      subscriptionId: recurringSubscriptionId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      status: "canceling",
+      canceledAt: null,
+      updatedAt: staleCancelRecoveryAt,
+    });
+    const feePaymentCallsBeforeStaleCancelRecovery = createFeePaymentAdapterMock.mock.calls.length;
+    const signerCallsBeforeStaleCancelRecovery = createOrgSignerMock.mock.calls.length;
+    mockRecurringLifecycleSubscriptionState({
+      planPda: recurringPlanPda,
+      subscriptionPda: recurringSubscriptionPda,
+      expiresAtTs: 1_800_000_000n,
+    });
+    await clearRateLimits();
+    const staleCancelRecoveryRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/cancel`,
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: "{}",
+      },
+      env
+    );
+    expect(staleCancelRecoveryRes.status).toBe(200);
+    const staleCancelRecoveryBody = (await staleCancelRecoveryRes.json()) as {
+      data: { recurringPayment: { status: string } };
+    };
+    expect(staleCancelRecoveryBody.data.recurringPayment.status).toBe("canceled");
+    expect(createFeePaymentAdapterMock.mock.calls.length).toBe(
+      feePaymentCallsBeforeStaleCancelRecovery
+    );
+    expect(createOrgSignerMock.mock.calls.length).toBe(signerCallsBeforeStaleCancelRecovery);
+    const staleCancelAttempt = await getDb(env)
+      .prepare(
+        `SELECT status
+           FROM payment_recurring_operation_attempts
+          WHERE recurring_payment_id = ?
+            AND operation = 'cancel'
+          ORDER BY updated_at DESC
+          LIMIT 1`
+      )
+      .bind(recurringPaymentId)
+      .first<{ status: string }>();
+    expect(staleCancelAttempt?.status).toBe("confirmed");
+
     const submittedCancelRecoveryAt = new Date().toISOString();
     await repositories.createPaymentRecurringPaymentsRepository(env).updateRecurringPayment({
       recurringPaymentId,
