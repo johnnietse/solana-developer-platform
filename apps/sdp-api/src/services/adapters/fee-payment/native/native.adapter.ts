@@ -87,10 +87,11 @@ export class NativeAdapter implements FeePaymentPort {
       if (error instanceof FeePaymentError) {
         throw error;
       }
+      const errorMessage = error instanceof Error ? error.message : String(error);
       throw new FeePaymentError(
-        "Failed to submit transaction with native fee payer",
+        `Failed to submit transaction with native fee payer: ${errorMessage}`,
         "SUBMISSION_FAILED",
-        error as Error
+        error instanceof Error ? error : undefined
       );
     }
   }
