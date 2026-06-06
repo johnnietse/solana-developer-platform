@@ -1572,7 +1572,7 @@ describe("Payments routes", () => {
     });
     await repositories.createPaymentsRepository(env).updateTransfer({
       transferId: transferSignatureOnlyTransferId,
-      signature: `6${MOCK_SIGNATURE_TAIL}`,
+      signature: `z${MOCK_SIGNATURE_TAIL}`,
       updatedAt: new Date().toISOString(),
     });
     await repositories.createPaymentSubscriptionsRepository(env).createCollectionAttempt({
