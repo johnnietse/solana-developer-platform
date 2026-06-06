@@ -3431,17 +3431,66 @@ export async function collectRecurringPayment(input: {
       collectionAttempt = submitted.attempt;
       transfer = submitted.transfer;
     }
-    console.error("Recurring collection finalized on-chain but DB finalization failed", {
+
+    try {
+      const recovered = await recoverSubmittedRecurringCollection({
+        env: input.env,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        recurringPayment,
+        subscriptionId,
+        dueAt,
+        attempt: collectionAttempt,
+      });
+      if (recovered) {
+        return recovered;
+      }
+    } catch (retryError) {
+      console.error("Recurring collection finalized on-chain but DB recovery retry failed", {
+        recurringPaymentId: recurringPayment.id,
+        attemptId: collectionAttempt.id,
+        transferId: transfer.id,
+        signature: executed.signature,
+        hasRecoveryMarker: submitted.hasRecoveryMarker,
+        hasAttemptRecoveryMarker: submitted.hasAttemptRecoveryMarker,
+        originalError: toErrorMessage(error),
+        retryError: toErrorMessage(retryError),
+      });
+      throw new AppError(
+        "INTERNAL_ERROR",
+        "Recurring collection finalized on-chain but DB finalization could not be recovered",
+        {
+          recurringPaymentId: recurringPayment.id,
+          attemptId: collectionAttempt.id,
+          transferId: transfer.id,
+          signature: executed.signature,
+          originalError: toErrorMessage(error),
+          retryError: toErrorMessage(retryError),
+        }
+      );
+    }
+
+    console.error("Recurring collection finalized on-chain but no recovery marker was readable", {
       recurringPaymentId: recurringPayment.id,
       attemptId: collectionAttempt.id,
       transferId: transfer.id,
       signature: executed.signature,
       hasRecoveryMarker: submitted.hasRecoveryMarker,
       hasAttemptRecoveryMarker: submitted.hasAttemptRecoveryMarker,
-      error: error instanceof Error ? error.message : String(error),
+      error: toErrorMessage(error),
     });
 
-    throw error;
+    throw new AppError(
+      "INTERNAL_ERROR",
+      "Recurring collection finalized on-chain but no recovery marker was readable",
+      {
+        recurringPaymentId: recurringPayment.id,
+        attemptId: collectionAttempt.id,
+        transferId: transfer.id,
+        signature: executed.signature,
+        originalError: toErrorMessage(error),
+      }
+    );
   }
 }
 

@@ -2192,8 +2192,15 @@ describe("Payments routes", () => {
           }),
         };
       });
+    let recoveredFinalizeBody!: {
+      data: {
+        recurringPayment: { nextCollectionDueAt: string | null };
+        collectionAttempt: { status: string; recurringPaymentId: string | null };
+        transfer: { status: string; signature: string | null; blockTime: string | null };
+      };
+    };
     try {
-      const failedFinalizeRes = await app.request(
+      const recoveredFinalizeRes = await app.request(
         `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
         {
           method: "POST",
@@ -2202,96 +2209,26 @@ describe("Payments routes", () => {
         },
         env
       );
-      expect(failedFinalizeRes.status).toBe(500);
+      expect(recoveredFinalizeRes.status).toBe(200);
+      recoveredFinalizeBody = (await recoveredFinalizeRes.json()) as typeof recoveredFinalizeBody;
     } finally {
       recurringRepoSpy.mockRestore();
       subscriptionsRepoSpy.mockRestore();
     }
+    expect(failFinalRecurringPaymentUpdate).toBe(false);
     expect(failAttemptRecoveryMarker).toBe(false);
-
-    const processingAttemptsRes = await app.request(
-      `/v1/payments/recurring-payments/${recurringPaymentId}/collection-attempts?status=processing`,
-      {
-        method: "GET",
-        headers: authHeaders,
-      },
-      env
-    );
-    expect(processingAttemptsRes.status).toBe(200);
-    const processingAttemptsBody = (await processingAttemptsRes.json()) as {
-      data: {
-        collectionAttempts: Array<{
-          recurringPaymentId: string | null;
-          status: string;
-          transferId: string | null;
-          signature: string | null;
-        }>;
-      };
-    };
-    expect(processingAttemptsBody.data.collectionAttempts).toEqual([
-      expect.objectContaining({
-        recurringPaymentId,
-        status: "processing",
-        transferId: expect.any(String),
-        signature: expect.any(String),
-      }),
-    ]);
-
-    const dueAfterFinalizeFailure = await repositories
-      .createPaymentRecurringPaymentsRepository(env)
-      .listDueRecurringPayments({
-        now: new Date().toISOString(),
-        retryAfter: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-        limit: 10,
-      });
-    expect(dueAfterFinalizeFailure.map((payment) => payment.id)).not.toContain(recurringPaymentId);
-    const submittedCollectOperationAttempt = await getDb(env)
-      .prepare(
-        `SELECT status, signature
-           FROM payment_recurring_operation_attempts
-          WHERE recurring_payment_id = ?
-            AND operation = 'collect'
-          ORDER BY updated_at DESC
-          LIMIT 1`
-      )
-      .bind(recurringPaymentId)
-      .first<{ status: string; signature: string | null }>();
-    expect(submittedCollectOperationAttempt).toMatchObject({
-      status: "submitted",
-      signature: expect.any(String),
-    });
-    const confirmCallsAfterSubmittedCollection = confirmTransactionMock.mock.calls.length;
-
-    const collectRes = await app.request(
-      `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
-      {
-        method: "POST",
-        headers: jsonHeaders,
-        body: "{}",
-      },
-      env
-    );
-    expect(collectRes.status).toBe(200);
-    const collectBody = (await collectRes.json()) as {
-      data: {
-        recurringPayment: { nextCollectionDueAt: string | null };
-        collectionAttempt: { status: string; recurringPaymentId: string | null };
-        transfer: { status: string; signature: string | null; blockTime: string | null };
-      };
-    };
-    expect(collectBody.data.collectionAttempt).toMatchObject({
+    expect(recoveredFinalizeBody.data.collectionAttempt).toMatchObject({
       status: "confirmed",
       recurringPaymentId,
     });
-    expect(collectBody.data.transfer).toMatchObject({
+    expect(recoveredFinalizeBody.data.transfer).toMatchObject({
       status: "confirmed",
       signature: expect.any(String),
       blockTime: "2023-11-14T22:13:20.000Z",
     });
-    expect(confirmTransactionMock.mock.calls.length).toBe(confirmCallsAfterSubmittedCollection);
-    expect(new Date(collectBody.data.recurringPayment.nextCollectionDueAt ?? "").getTime()).toBe(
-      new Date(firstCollectionAt).getTime() + 24 * 60 * 60 * 1000
-    );
+    expect(
+      new Date(recoveredFinalizeBody.data.recurringPayment.nextCollectionDueAt ?? "").getTime()
+    ).toBe(new Date(firstCollectionAt).getTime() + 24 * 60 * 60 * 1000);
     const confirmedCollectOperationAttempt = await getDb(env)
       .prepare(
         `SELECT status
