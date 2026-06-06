@@ -1232,8 +1232,11 @@ describe("Payments routes", () => {
         };
       };
       expect(failedMarkerBody.error.code).toBe("INTERNAL_ERROR");
-      expect(failedMarkerBody.error.message).toBe(
+      expect(failedMarkerBody.error.message).toContain(
         "Recurring collection failed and retry backoff could not be recorded"
+      );
+      expect(failedMarkerBody.error.message).toContain(
+        "Transfer amount exceeds wallet policy maxTransferAmount"
       );
       expect(failedMarkerBody.error.details?.originalError).toBe(
         "Transfer amount exceeds wallet policy maxTransferAmount"
