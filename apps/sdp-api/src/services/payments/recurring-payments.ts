@@ -756,6 +756,40 @@ async function claimLifecycleRecords(input: {
           lifecycleAttemptSubmitted: true,
         };
       }
+
+      if (isFreshLifecycleClaim(recurringPayment.updated_at)) {
+        throw new AppError("CONFLICT", "Recurring payment lifecycle update is already in progress");
+      }
+    }
+    if (
+      input.operation === "cancel" &&
+      recurringPayment.status !== claimStatus &&
+      recurringPayment.next_collection_due_at
+    ) {
+      const activeCollectionAttempt = await tx
+        .prepare(
+          `SELECT id
+             FROM payment_subscription_collection_attempts
+            WHERE organization_id = ?
+              AND project_id = ?
+              AND recurring_payment_id = ?
+              AND due_at = ?
+              AND status IN ('pending', 'processing')
+            ORDER BY updated_at DESC
+            LIMIT 1
+            FOR UPDATE`
+        )
+        .bind(
+          input.organizationId,
+          input.projectId,
+          recurringPayment.id,
+          recurringPayment.next_collection_due_at
+        )
+        .first<{ id: string }>();
+
+      if (activeCollectionAttempt) {
+        throw new AppError("CONFLICT", "Recurring payment collection is already in progress");
+      }
     }
     const claimedPayment = await txRecurringRepo.updateRecurringPayment({
       recurringPaymentId: recurringPayment.id,
@@ -995,6 +1029,136 @@ async function readRecurringPaymentLifecycleRecords(input: {
   }
 
   return { recurringPayment, subscription };
+}
+
+async function reconcileCanceledRecurringPaymentFromChain(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  recurringPayment: PaymentRecurringPaymentRow;
+  subscriptionId: string;
+  sourceAddress: ReturnType<typeof assertValidAddress>;
+  planPda: ReturnType<typeof assertValidAddress>;
+  subscriptionPda: ReturnType<typeof assertValidAddress>;
+}): Promise<PaymentRecurringPaymentRow | null> {
+  let canceledOnChain = false;
+  try {
+    canceledOnChain = await isSubscriptionLifecycleTargetReachedOnChain({
+      env: input.env,
+      operation: "cancel",
+      sourceAddress: input.sourceAddress,
+      planPda: input.planPda,
+      subscriptionPda: input.subscriptionPda,
+    });
+  } catch {
+    return null;
+  }
+  if (!canceledOnChain) {
+    return null;
+  }
+
+  const now = new Date().toISOString();
+  return getDb(input.env).transaction(async (tx) => {
+    const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+    const txSubscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
+
+    await tx
+      .prepare(
+        `SELECT id
+           FROM payment_recurring_payments
+          WHERE id = ?
+            AND organization_id = ?
+            AND project_id = ?
+          FOR UPDATE`
+      )
+      .bind(input.recurringPayment.id, input.organizationId, input.projectId)
+      .first();
+    await tx
+      .prepare(
+        `SELECT id
+           FROM payment_subscriptions
+          WHERE id = ?
+            AND organization_id = ?
+            AND project_id = ?
+          FOR UPDATE`
+      )
+      .bind(input.subscriptionId, input.organizationId, input.projectId)
+      .first();
+
+    const currentRecurringPayment = await txRecurringRepo.getRecurringPaymentById({
+      recurringPaymentId: input.recurringPayment.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+    });
+    const currentSubscription = await txSubscriptionsRepo.getSubscriptionById({
+      subscriptionId: input.subscriptionId,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+    });
+    if (!currentRecurringPayment || !currentSubscription) {
+      throw new AppError("NOT_FOUND", "Recurring payment lifecycle state not found");
+    }
+    if (
+      currentRecurringPayment.status === "canceled" &&
+      currentSubscription.status === "canceled"
+    ) {
+      return currentRecurringPayment;
+    }
+    if (
+      !["active", "paused", "canceling", "canceled"].includes(currentRecurringPayment.status) ||
+      !["active", "paused", "canceling", "canceled"].includes(currentSubscription.status)
+    ) {
+      return null;
+    }
+
+    const updatedRecurringPayment = await txRecurringRepo.updateRecurringPayment({
+      recurringPaymentId: input.recurringPayment.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      expectedStatus: currentRecurringPayment.status,
+      expectedNextCollectionDueAt: currentRecurringPayment.next_collection_due_at,
+      status: "canceled",
+      updatedAt: now,
+    });
+    const updatedSubscription = await txSubscriptionsRepo.updateSubscription({
+      subscriptionId: input.subscriptionId,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      expectedStatus: currentSubscription.status,
+      expectedNextCollectionDueAt: currentSubscription.next_collection_due_at,
+      status: "canceled",
+      canceledAt: currentSubscription.canceled_at ?? now,
+      updatedAt: now,
+    });
+
+    if (!updatedRecurringPayment || !updatedSubscription) {
+      throw new AppError(
+        "CONFLICT",
+        "Recurring payment lifecycle state changed before canceled-state reconciliation completed"
+      );
+    }
+
+    return updatedRecurringPayment;
+  });
+}
+
+async function assertRecurringPaymentNotCanceledOnChain(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  recurringPayment: PaymentRecurringPaymentRow;
+  subscriptionId: string;
+  sourceAddress: ReturnType<typeof assertValidAddress>;
+  planPda: ReturnType<typeof assertValidAddress>;
+  subscriptionPda: ReturnType<typeof assertValidAddress>;
+}) {
+  const reconciledCanceledPayment = await reconcileCanceledRecurringPaymentFromChain(input);
+  if (reconciledCanceledPayment?.status === "canceled") {
+    throw new AppError(
+      "BAD_REQUEST",
+      "Recurring payment subscription is already canceled on-chain"
+    );
+  }
 }
 
 async function finalizeRecurringPaymentLifecycleAfterChain(input: {
@@ -1714,31 +1878,84 @@ async function createProcessingCollectionAttempt(input: {
   dueAt: string;
 }): Promise<PaymentSubscriptionCollectionAttemptRow> {
   const now = new Date().toISOString();
-  const subscriptionsRepo = createPaymentSubscriptionsRepository(input.env);
-  const attempt = await subscriptionsRepo.createCollectionAttempt({
-    id: `psca_${crypto.randomUUID()}`,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    subscriptionId: input.subscriptionId,
-    recurringPaymentId: input.recurringPayment.id,
-    transferId: null,
-    token: input.recurringPayment.token,
-    amount: input.recurringPayment.amount,
-    dueAt: input.dueAt,
-    attemptedAt: now,
-    status: "processing",
-    signature: null,
-    error: null,
-    metadata: { source: "recurring_payments" },
-    createdAt: now,
-    updatedAt: now,
+  return getDb(input.env).transaction(async (tx) => {
+    const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+    const txSubscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
+
+    await tx
+      .prepare(
+        `SELECT id
+           FROM payment_recurring_payments
+          WHERE id = ?
+            AND organization_id = ?
+            AND project_id = ?
+          FOR UPDATE`
+      )
+      .bind(input.recurringPayment.id, input.organizationId, input.projectId)
+      .first();
+    await tx
+      .prepare(
+        `SELECT id
+           FROM payment_subscriptions
+          WHERE id = ?
+            AND organization_id = ?
+            AND project_id = ?
+          FOR UPDATE`
+      )
+      .bind(input.subscriptionId, input.organizationId, input.projectId)
+      .first();
+
+    const currentRecurringPayment = await txRecurringRepo.getRecurringPaymentById({
+      recurringPaymentId: input.recurringPayment.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+    });
+    const currentSubscription = await txSubscriptionsRepo.getSubscriptionById({
+      subscriptionId: input.subscriptionId,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+    });
+
+    if (!currentRecurringPayment || !currentSubscription) {
+      throw new AppError("NOT_FOUND", "Recurring payment collection state not found");
+    }
+    if (
+      currentRecurringPayment.status !== "active" ||
+      currentRecurringPayment.next_collection_due_at !== input.dueAt ||
+      currentSubscription.status !== "active" ||
+      currentSubscription.next_collection_due_at !== input.dueAt
+    ) {
+      throw new AppError(
+        "CONFLICT",
+        "Recurring payment collection state changed before the attempt was claimed"
+      );
+    }
+
+    const attempt = await txSubscriptionsRepo.createCollectionAttempt({
+      id: `psca_${crypto.randomUUID()}`,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      subscriptionId: input.subscriptionId,
+      recurringPaymentId: input.recurringPayment.id,
+      transferId: null,
+      token: input.recurringPayment.token,
+      amount: input.recurringPayment.amount,
+      dueAt: input.dueAt,
+      attemptedAt: now,
+      status: "processing",
+      signature: null,
+      error: null,
+      metadata: { source: "recurring_payments" },
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    if (!attempt) {
+      throw new AppError("INTERNAL_ERROR", "Failed to create collection attempt");
+    }
+
+    return attempt;
   });
-
-  if (!attempt) {
-    throw new AppError("INTERNAL_ERROR", "Failed to create collection attempt");
-  }
-
-  return attempt;
 }
 
 async function createTransferAndLinkCollectionAttempt(input: {
@@ -2193,6 +2410,16 @@ export async function collectRecurringPayment(input: {
   try {
     planPda = assertValidAddress(recurringPayment.plan_pda, "planPda");
     subscriptionPda = assertValidAddress(recurringPayment.subscription_pda, "subscriptionPda");
+    await assertRecurringPaymentNotCanceledOnChain({
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPayment,
+      subscriptionId,
+      sourceAddress,
+      planPda,
+      subscriptionPda,
+    });
     sourceSigner = await getSourceSigner({
       env: input.env,
       organizationId: input.organizationId,

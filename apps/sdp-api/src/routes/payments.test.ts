@@ -477,16 +477,28 @@ function mockRecurringCollectionAccounts(): void {
       data: { terms: { createdAt: 1_700_000_000n } },
     },
   } as Awaited<ReturnType<typeof subscriptionsSdk.fetchMaybePlan>>);
-  fetchMaybeSubscriptionDelegationMock.mockResolvedValueOnce({
+  const activeDelegation = {
     exists: true,
     address: TEST_SOLANA_ADDRESSES.wallet2,
     data: {
+      header: {
+        discriminator: subscriptionsSdk.AccountDiscriminator.SubscriptionDelegation,
+        version: 1,
+        bump: 255,
+        delegator: TEST_SOLANA_ADDRESSES.wallet1,
+        delegatee: TEST_SOLANA_ADDRESSES.wallet2,
+        payer: TEST_SOLANA_ADDRESSES.wallet1,
+        initId: 0n,
+      },
       terms: { amount: 500000n, periodHours: 24n, createdAt: 1_700_000_000n },
       amountPulledInPeriod: 0n,
       currentPeriodStartTs: 1_700_000_000n,
       expiresAtTs: 0n,
     },
-  } as Awaited<ReturnType<typeof subscriptionsSdk.fetchMaybeSubscriptionDelegation>>);
+  } as Awaited<ReturnType<typeof subscriptionsSdk.fetchMaybeSubscriptionDelegation>>;
+  fetchMaybeSubscriptionDelegationMock
+    .mockResolvedValueOnce(activeDelegation)
+    .mockResolvedValueOnce(activeDelegation);
 }
 
 function mockRecurringLifecycleSubscriptionState(input: {
@@ -1222,13 +1234,13 @@ describe("Payments routes", () => {
       ])
     );
 
-    const originalCreatePaymentSubscriptionsRepositoryForClaimFailure =
-      repositories.createPaymentSubscriptionsRepository;
+    const originalCreatePostgresPaymentSubscriptionsRepositoryForClaimFailure =
+      repositories.createPostgresPaymentSubscriptionsRepository;
     let failProcessingAttemptClaim = true;
     const processingAttemptClaimRepoSpy = vi
-      .spyOn(repositories, "createPaymentSubscriptionsRepository")
-      .mockImplementation((repoEnv) => {
-        const repo = originalCreatePaymentSubscriptionsRepositoryForClaimFailure(repoEnv);
+      .spyOn(repositories, "createPostgresPaymentSubscriptionsRepository")
+      .mockImplementation((db) => {
+        const repo = originalCreatePostgresPaymentSubscriptionsRepositoryForClaimFailure(db);
 
         return {
           ...repo,
@@ -1569,6 +1581,151 @@ describe("Payments routes", () => {
       status: "active",
       nextCollectionDueAt: firstCollectionAt,
       updatedAt: restoredActiveAt,
+    });
+    await clearRateLimits();
+
+    const blockingCollectionAttemptAt = new Date().toISOString();
+    await repositories.createPaymentSubscriptionsRepository(env).createCollectionAttempt({
+      id: "psca_processing_cancel_block",
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      subscriptionId: recurringSubscriptionId,
+      recurringPaymentId,
+      transferId: null,
+      token: DEVNET_USDC_MINT,
+      amount: "0.50",
+      dueAt: firstCollectionAt,
+      attemptedAt: blockingCollectionAttemptAt,
+      status: "processing",
+      signature: null,
+      error: null,
+      metadata: { source: "recurring_payments" },
+      createdAt: blockingCollectionAttemptAt,
+      updatedAt: blockingCollectionAttemptAt,
+    });
+    const cancelDuringProcessingCollectionRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/cancel`,
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: "{}",
+      },
+      env
+    );
+    expect(cancelDuringProcessingCollectionRes.status).toBe(409);
+    const cancelDuringProcessingCollectionBody =
+      (await cancelDuringProcessingCollectionRes.json()) as { error: { message: string } };
+    expect(cancelDuringProcessingCollectionBody.error.message).toContain(
+      "collection is already in progress"
+    );
+    await repositories.createPaymentSubscriptionsRepository(env).updateCollectionAttempt({
+      attemptId: "psca_processing_cancel_block",
+      status: "failed",
+      error: "cleared for cancel test",
+      attemptedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    await clearRateLimits();
+
+    const duplicateLifecycleClaimAt = new Date().toISOString();
+    await repositories.createPaymentRecurringPaymentsRepository(env).updateRecurringPayment({
+      recurringPaymentId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      status: "canceling",
+      updatedAt: duplicateLifecycleClaimAt,
+    });
+    await repositories.createPaymentSubscriptionsRepository(env).updateSubscription({
+      subscriptionId: recurringSubscriptionId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      status: "canceling",
+      updatedAt: duplicateLifecycleClaimAt,
+    });
+    const duplicateCancelClaimRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/cancel`,
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: "{}",
+      },
+      env
+    );
+    expect(duplicateCancelClaimRes.status).toBe(409);
+    const duplicateCancelClaimBody = (await duplicateCancelClaimRes.json()) as {
+      error: { message: string };
+    };
+    expect(duplicateCancelClaimBody.error.message).toContain("already in progress");
+
+    const restoredAfterDuplicateClaimAt = new Date().toISOString();
+    await repositories.createPaymentRecurringPaymentsRepository(env).updateRecurringPayment({
+      recurringPaymentId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      status: "active",
+      nextCollectionDueAt: firstCollectionAt,
+      updatedAt: restoredAfterDuplicateClaimAt,
+    });
+    await repositories.createPaymentSubscriptionsRepository(env).updateSubscription({
+      subscriptionId: recurringSubscriptionId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      status: "active",
+      nextCollectionDueAt: firstCollectionAt,
+      updatedAt: restoredAfterDuplicateClaimAt,
+    });
+    await clearRateLimits();
+
+    mockRecurringLifecycleSubscriptionState({
+      planPda: recurringPlanPda,
+      subscriptionPda: recurringSubscriptionPda,
+      expiresAtTs: 1_800_000_000n,
+    });
+    const canceledOnChainCollectRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: "{}",
+      },
+      env
+    );
+    expect(canceledOnChainCollectRes.status).toBe(400);
+    const canceledOnChainPayment = await repositories
+      .createPaymentRecurringPaymentsRepository(env)
+      .getRecurringPaymentById({
+        recurringPaymentId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+      });
+    const canceledOnChainSubscription = await repositories
+      .createPaymentSubscriptionsRepository(env)
+      .getSubscriptionById({
+        subscriptionId: recurringSubscriptionId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+      });
+    expect(canceledOnChainPayment?.status).toBe("canceled");
+    expect(canceledOnChainSubscription?.status).toBe("canceled");
+    expect(canceledOnChainSubscription?.canceled_at).toBeTruthy();
+
+    const restoredAfterChainReconcileAt = new Date().toISOString();
+    await repositories.createPaymentRecurringPaymentsRepository(env).updateRecurringPayment({
+      recurringPaymentId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      status: "active",
+      nextCollectionDueAt: firstCollectionAt,
+      updatedAt: restoredAfterChainReconcileAt,
+    });
+    await repositories.createPaymentSubscriptionsRepository(env).updateSubscription({
+      subscriptionId: recurringSubscriptionId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      status: "active",
+      nextCollectionDueAt: firstCollectionAt,
+      canceledAt: null,
+      updatedAt: restoredAfterChainReconcileAt,
     });
     await clearRateLimits();
 
