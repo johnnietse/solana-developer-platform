@@ -1184,6 +1184,25 @@ describe("Payments routes", () => {
     );
     expect(failedSignerCollectRes.status).toBe(500);
 
+    await getDb(env)
+      .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE wallet_id = ?")
+      .bind(TEST_WALLET_ID)
+      .run();
+    const missingWalletCollectRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: "{}",
+      },
+      env
+    );
+    expect(missingWalletCollectRes.status).toBe(404);
+    await getDb(env)
+      .prepare("UPDATE custody_wallets SET status = 'active' WHERE wallet_id = ?")
+      .bind(TEST_WALLET_ID)
+      .run();
+
     await clearRateLimits();
     await seedWalletPolicy({
       destinationAllowlist: [],
@@ -1324,6 +1343,12 @@ describe("Payments routes", () => {
           status: "failed",
           transferId: null,
           error: "simulated signer resolution failure",
+        }),
+        expect.objectContaining({
+          recurringPaymentId,
+          status: "failed",
+          transferId: null,
+          error: "Wallet not found. Provision wallets through /v1/wallets",
         }),
       ])
     );
@@ -1739,6 +1764,106 @@ describe("Payments routes", () => {
       status: "failed",
       error: "cleared transfer-signature-only recovery fixture",
       updatedAt: new Date().toISOString(),
+    });
+
+    const staleSubmittedUnsignedUpdatedAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const staleSubmittedUnsignedTransferId = "ptr_stale_submitted_unsigned_recovery";
+    await repositories.createPaymentsRepository(env).createTransfer({
+      id: staleSubmittedUnsignedTransferId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      walletId: TEST_WALLET_ID,
+      counterpartyId,
+      sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
+      destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      token: DEVNET_USDC_MINT,
+      amount: "0.50",
+      memo: null,
+      type: "transfer",
+      direction: "outbound",
+      status: "processing",
+      provider: null,
+      providerReference: null,
+      deliveryMode: null,
+      fiatCurrency: null,
+      fiatAmount: null,
+      providerData: { source: "recurring_payments" },
+      serializedTx: "stale-submitted-unsigned-transaction",
+      initiatedByKeyId: TEST_API_KEY.id,
+      createdAt: staleSubmittedUnsignedUpdatedAt,
+      updatedAt: staleSubmittedUnsignedUpdatedAt,
+    });
+    await repositories.createPaymentSubscriptionsRepository(env).createCollectionAttempt({
+      id: "psca_stale_submitted_unsigned_recovery",
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      subscriptionId: recurringSubscriptionId,
+      recurringPaymentId,
+      transferId: staleSubmittedUnsignedTransferId,
+      token: DEVNET_USDC_MINT,
+      amount: "0.50",
+      dueAt: firstCollectionAt,
+      attemptedAt: staleSubmittedUnsignedUpdatedAt,
+      status: "processing",
+      signature: null,
+      error: null,
+      metadata: { source: "recurring_payments" },
+      createdAt: staleSubmittedUnsignedUpdatedAt,
+      updatedAt: staleSubmittedUnsignedUpdatedAt,
+    });
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_recurring_operation_attempts (
+           id,
+           organization_id,
+           project_id,
+           recurring_payment_id,
+           operation,
+           status,
+           signature,
+           created_at,
+           updated_at
+         ) VALUES (?, ?, ?, ?, 'collect', 'submitted', NULL, ?, ?)`
+      )
+      .bind(
+        "prlo_stale_submitted_unsigned_recovery",
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        recurringPaymentId,
+        staleSubmittedUnsignedUpdatedAt,
+        staleSubmittedUnsignedUpdatedAt
+      )
+      .run();
+    await repositories
+      .createPaymentSubscriptionsRepository(env)
+      .expireStaleUnsignedProcessingAttempts({
+        olderThan: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+        updatedAt: new Date().toISOString(),
+        limit: 10,
+      });
+    const staleSubmittedUnsignedRows = await getDb(env)
+      .prepare(
+        `SELECT a.status AS attempt_status,
+                t.status AS transfer_status,
+                op.status AS operation_status
+           FROM payment_subscription_collection_attempts a
+           JOIN payment_transfers t ON t.id = a.transfer_id
+           JOIN payment_recurring_operation_attempts op
+             ON op.recurring_payment_id = a.recurring_payment_id
+            AND op.operation = 'collect'
+          WHERE a.id = ?
+            AND op.id = ?`
+      )
+      .bind("psca_stale_submitted_unsigned_recovery", "prlo_stale_submitted_unsigned_recovery")
+      .first<{
+        attempt_status: string;
+        transfer_status: string;
+        operation_status: string;
+      }>();
+    expect(staleSubmittedUnsignedRows).toMatchObject({
+      attempt_status: "failed",
+      transfer_status: "failed",
+      operation_status: "failed",
     });
 
     const operationSignatureOnlyUpdatedAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();

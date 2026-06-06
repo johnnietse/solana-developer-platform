@@ -48,11 +48,17 @@ function mapRecurringPaymentRow(row: Record<string, unknown>): PaymentRecurringP
 
 async function getRecurringPaymentByIdInternal(
   db: DatabaseExecutor,
-  recurringPaymentId: string
+  params: { recurringPaymentId: string; organizationId: string; projectId: string }
 ): Promise<PaymentRecurringPaymentRow | null> {
   const row = await db
-    .prepare("SELECT * FROM payment_recurring_payments WHERE id = ?")
-    .bind(recurringPaymentId)
+    .prepare(
+      `SELECT *
+         FROM payment_recurring_payments
+        WHERE id = ?
+          AND organization_id = ?
+          AND project_id = ?`
+    )
+    .bind(params.recurringPaymentId, params.organizationId, params.projectId)
     .first<Record<string, unknown>>();
 
   return row ? mapRecurringPaymentRow(row) : null;
@@ -104,7 +110,11 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         )
         .run();
 
-      return getRecurringPaymentByIdInternal(db, input.id);
+      return getRecurringPaymentByIdInternal(db, {
+        recurringPaymentId: input.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+      });
     },
 
     async updateRecurringPayment(input: UpdatePaymentRecurringPaymentInput) {
@@ -181,7 +191,11 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         return null;
       }
 
-      return getRecurringPaymentByIdInternal(db, input.recurringPaymentId);
+      return getRecurringPaymentByIdInternal(db, {
+        recurringPaymentId: input.recurringPaymentId,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+      });
     },
 
     async getRecurringPaymentById(params) {

@@ -156,6 +156,8 @@ async function expireStaleUnsignedProcessingAttemptsWithExecutor(
   db: DatabaseExecutor,
   params: ExpireStaleUnsignedProcessingAttemptsInput
 ): Promise<number> {
+  // A submitted collect operation with a signature is a recovery marker; unsigned
+  // processing/submitted operation claims are stale and expire with the attempt.
   const result = await db.queryOne<{
     expired_linked_attempts: number;
     expired_failed_attempt_transfers: number;

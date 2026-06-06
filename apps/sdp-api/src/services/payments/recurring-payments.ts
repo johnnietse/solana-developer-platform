@@ -3704,10 +3704,10 @@ export async function executeRecurringPaymentLifecycle(input: {
       if (!sourceSigner) {
         throw new AppError("INTERNAL_ERROR", "Recurring lifecycle signer was not resolved");
       }
-      // claimLifecycleRecords commits the canceling/resuming claim before this
-      // submission, and onSubmitted persists the recovery marker before final
-      // confirmation. If DB finalization fails after confirmation, the cron
-      // lifecycle recovery finalizes the stale claim before due collection runs.
+      // claimLifecycleRecords commits the canceling/resuming status claim plus
+      // the active operation-attempt mutex before this submission. That unique
+      // active attempt blocks concurrent collect/cancel/resume work; onSubmitted
+      // then persists the recovery marker before final confirmation.
       executed = await executeSubscriptionLifecycleOnChain({
         env: input.env,
         operation: input.operation,

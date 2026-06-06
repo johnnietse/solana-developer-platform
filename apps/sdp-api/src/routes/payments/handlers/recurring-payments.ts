@@ -277,9 +277,6 @@ export const collectRecurringPayment = async (c: AppContext) => {
   }
   assertRecurringPaymentWalletAccess(auth, recurringPayment, ["payments:write"]);
 
-  const scope = await resolveScope(c);
-  const sourceWallet = resolveWallet(scope.wallets, recurringPayment.source_wallet_id);
-
   const result = await collectRecurringPaymentRecord({
     env: c.env,
     organizationId: auth.organizationId,
@@ -287,7 +284,6 @@ export const collectRecurringPayment = async (c: AppContext) => {
     recurringPaymentId: params.data.id,
     initiatedByKeyId: auth.apiKeyId ?? auth.id ?? null,
     enforceDue: true,
-    sourceWallet,
   });
   const response: ExecutePaymentRecurringPaymentResponse = {
     recurringPayment: mapRecurringPayment(result.recurringPayment),
