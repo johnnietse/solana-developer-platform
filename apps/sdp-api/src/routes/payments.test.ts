@@ -1814,6 +1814,78 @@ describe("Payments routes", () => {
     const canceledAt = canceledSubscription?.canceled_at ?? "";
     expect(canceledAt).toBeTruthy();
 
+    const submittedCancelRecoveryAt = new Date().toISOString();
+    await repositories.createPaymentRecurringPaymentsRepository(env).updateRecurringPayment({
+      recurringPaymentId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      status: "canceling",
+      updatedAt: submittedCancelRecoveryAt,
+    });
+    await repositories.createPaymentSubscriptionsRepository(env).updateSubscription({
+      subscriptionId: recurringSubscriptionId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      status: "canceling",
+      updatedAt: submittedCancelRecoveryAt,
+    });
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_recurring_operation_attempts (
+           id,
+           organization_id,
+           project_id,
+           recurring_payment_id,
+           operation,
+           status,
+           signature,
+           created_at,
+           updated_at
+         ) VALUES (?, ?, ?, ?, 'cancel', 'submitted', ?, ?, ?)`
+      )
+      .bind(
+        "prlo_submitted_cancel_recovery",
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        recurringPaymentId,
+        `4${MOCK_SIGNATURE_TAIL}`,
+        submittedCancelRecoveryAt,
+        submittedCancelRecoveryAt
+      )
+      .run();
+    const feePaymentCallsBeforeSubmittedCancelRecovery =
+      createFeePaymentAdapterMock.mock.calls.length;
+    const signerCallsBeforeSubmittedCancelRecovery = createOrgSignerMock.mock.calls.length;
+    mockRecurringLifecycleSubscriptionState({
+      planPda: recurringPlanPda,
+      subscriptionPda: recurringSubscriptionPda,
+      expiresAtTs: 1_800_000_000n,
+    });
+    await clearRateLimits();
+    const submittedCancelRecoveryRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/cancel`,
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: "{}",
+      },
+      env
+    );
+    expect(submittedCancelRecoveryRes.status).toBe(200);
+    const submittedCancelRecoveryBody = (await submittedCancelRecoveryRes.json()) as {
+      data: { recurringPayment: { status: string } };
+    };
+    expect(submittedCancelRecoveryBody.data.recurringPayment.status).toBe("canceled");
+    expect(createFeePaymentAdapterMock.mock.calls.length).toBe(
+      feePaymentCallsBeforeSubmittedCancelRecovery
+    );
+    expect(createOrgSignerMock.mock.calls.length).toBe(signerCallsBeforeSubmittedCancelRecovery);
+    const submittedCancelAttempt = await getDb(env)
+      .prepare("SELECT status FROM payment_recurring_operation_attempts WHERE id = ?")
+      .bind("prlo_submitted_cancel_recovery")
+      .first<{ status: string }>();
+    expect(submittedCancelAttempt?.status).toBe("confirmed");
+
     const repeatedCancelRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/cancel`,
       {

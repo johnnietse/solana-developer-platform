@@ -37,6 +37,7 @@ import {
   executeSubscriptionLifecycleOnChain,
   generateProgramPlanId,
   isImmediateRecurringSubscriptionRetryError,
+  isSubscriptionLifecycleTargetReachedOnChain,
   resolveRecurringSubscriptionRuntime,
 } from "./solana-subscriptions-adapter";
 
@@ -2373,19 +2374,20 @@ export async function executeRecurringPaymentLifecycle(input: {
   }
   const lifecycleAttemptId = claim.lifecycleAttemptId;
 
-  // claimLifecycleRecords inserts this attempt in the same transaction as the
-  // canceling/resuming status claim, so signer failures below have an audit row.
-  let sourceSigner: Awaited<ReturnType<typeof getSourceSigner>>;
-  try {
-    sourceSigner = await getSourceSigner({
-      env: input.env,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      sourceWalletId: claim.recurringPayment.source_wallet_id,
-      expectedAddress: sourceAddress,
-    });
-  } catch (error) {
-    if (!claim.lifecycleAttemptSubmitted) {
+  let lifecycleAttemptSubmitted = claim.lifecycleAttemptSubmitted;
+  let sourceSigner: Awaited<ReturnType<typeof getSourceSigner>> | null = null;
+  if (!lifecycleAttemptSubmitted) {
+    // claimLifecycleRecords inserts this attempt in the same transaction as the
+    // canceling/resuming status claim, so signer failures below have an audit row.
+    try {
+      sourceSigner = await getSourceSigner({
+        env: input.env,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        sourceWalletId: claim.recurringPayment.source_wallet_id,
+        expectedAddress: sourceAddress,
+      });
+    } catch (error) {
       try {
         await markRecurringLifecycleAttemptFailed({
           env: input.env,
@@ -2400,28 +2402,47 @@ export async function executeRecurringPaymentLifecycle(input: {
           error: toErrorMessage(markerError),
         });
       }
+      throw error;
     }
-    throw error;
   }
 
-  let lifecycleAttemptSubmitted = claim.lifecycleAttemptSubmitted;
   let executed: ExecutedSubscriptionTransaction | null;
   try {
-    executed = await executeSubscriptionLifecycleOnChain({
-      env: input.env,
-      operation: input.operation,
-      sourceSigner,
-      planPda,
-      subscriptionPda,
-      onSubmitted: async (submitted) => {
-        lifecycleAttemptSubmitted = true;
-        await markRecurringLifecycleAttemptSubmitted({
-          env: input.env,
-          attemptId: lifecycleAttemptId,
-          executed: { ...submitted, slot: null, blockTime: null },
-        });
-      },
-    });
+    if (lifecycleAttemptSubmitted) {
+      const targetReached = await isSubscriptionLifecycleTargetReachedOnChain({
+        env: input.env,
+        operation: input.operation,
+        sourceAddress,
+        planPda,
+        subscriptionPda,
+      });
+      if (!targetReached) {
+        throw new AppError(
+          "CONFLICT",
+          "Recurring payment lifecycle transaction is still pending confirmation"
+        );
+      }
+      executed = null;
+    } else {
+      if (!sourceSigner) {
+        throw new AppError("INTERNAL_ERROR", "Recurring lifecycle signer was not resolved");
+      }
+      executed = await executeSubscriptionLifecycleOnChain({
+        env: input.env,
+        operation: input.operation,
+        sourceSigner,
+        planPda,
+        subscriptionPda,
+        onSubmitted: async (submitted) => {
+          lifecycleAttemptSubmitted = true;
+          await markRecurringLifecycleAttemptSubmitted({
+            env: input.env,
+            attemptId: lifecycleAttemptId,
+            executed: { ...submitted, slot: null, blockTime: null },
+          });
+        },
+      });
+    }
   } catch (error) {
     if (lifecycleAttemptSubmitted) {
       console.error("Recurring lifecycle submitted on-chain but confirmation failed", {

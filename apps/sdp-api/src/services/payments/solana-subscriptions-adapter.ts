@@ -448,22 +448,12 @@ export async function executeSubscriptionLifecycleOnChain(input: {
   subscriptionPda: Address;
   onSubmitted?: (submitted: SubmittedSubscriptionTransaction) => Promise<void>;
 }): Promise<ExecutedSubscriptionTransaction | null> {
-  const rpc = solanaRpc.createRpc(input.env);
-  const subscriptionAccount = await fetchMaybeSubscriptionDelegation(rpc, input.subscriptionPda, {
-    commitment: "confirmed",
+  const isCanceledOnChain = await readSubscriptionCanceledStateOnChain({
+    env: input.env,
+    sourceAddress: input.sourceSigner.address,
+    planPda: input.planPda,
+    subscriptionPda: input.subscriptionPda,
   });
-
-  if (!subscriptionAccount.exists) {
-    throw new AppError("BAD_REQUEST", "Recurring payment subscription is missing on-chain");
-  }
-  if (subscriptionAccount.data.header.delegator !== input.sourceSigner.address) {
-    throw new AppError("BAD_REQUEST", "Recurring payment subscription owner mismatch");
-  }
-  if (subscriptionAccount.data.header.delegatee !== input.planPda) {
-    throw new AppError("BAD_REQUEST", "Recurring payment subscription plan mismatch");
-  }
-
-  const isCanceledOnChain = subscriptionAccount.data.expiresAtTs !== 0n;
   if (
     (input.operation === "cancel" && isCanceledOnChain) ||
     (input.operation === "resume" && !isCanceledOnChain)
@@ -490,4 +480,40 @@ export async function executeSubscriptionLifecycleOnChain(input: {
     signers: [input.sourceSigner],
     onSubmitted: input.onSubmitted,
   });
+}
+
+async function readSubscriptionCanceledStateOnChain(input: {
+  env: Env;
+  sourceAddress: Address;
+  planPda: Address;
+  subscriptionPda: Address;
+}): Promise<boolean> {
+  const rpc = solanaRpc.createRpc(input.env);
+  const subscriptionAccount = await fetchMaybeSubscriptionDelegation(rpc, input.subscriptionPda, {
+    commitment: "confirmed",
+  });
+
+  if (!subscriptionAccount.exists) {
+    throw new AppError("BAD_REQUEST", "Recurring payment subscription is missing on-chain");
+  }
+  if (subscriptionAccount.data.header.delegator !== input.sourceAddress) {
+    throw new AppError("BAD_REQUEST", "Recurring payment subscription owner mismatch");
+  }
+  if (subscriptionAccount.data.header.delegatee !== input.planPda) {
+    throw new AppError("BAD_REQUEST", "Recurring payment subscription plan mismatch");
+  }
+
+  return subscriptionAccount.data.expiresAtTs !== 0n;
+}
+
+export async function isSubscriptionLifecycleTargetReachedOnChain(input: {
+  env: Env;
+  operation: "cancel" | "resume";
+  sourceAddress: Address;
+  planPda: Address;
+  subscriptionPda: Address;
+}): Promise<boolean> {
+  const isCanceledOnChain = await readSubscriptionCanceledStateOnChain(input);
+
+  return input.operation === "cancel" ? isCanceledOnChain : !isCanceledOnChain;
 }
