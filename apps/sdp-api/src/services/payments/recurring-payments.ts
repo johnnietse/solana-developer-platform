@@ -38,6 +38,7 @@ import {
   generateProgramPlanId,
   isImmediateRecurringSubscriptionRetryError,
   isSubscriptionLifecycleTargetReachedOnChain,
+  readSubscriptionLifecycleStateOnChain,
   resolveRecurringSubscriptionRuntime,
 } from "./solana-subscriptions-adapter";
 
@@ -936,6 +937,15 @@ async function finalizeRecurringPaymentLifecycle(input: {
       throw new AppError("NOT_FOUND", "Recurring payment lifecycle state not found");
     }
     if (
+      isRecurringPaymentLifecycleFinalized({
+        recurringPayment: lockedRecurringPayment,
+        subscription: lockedSubscription,
+        operation: input.operation,
+      })
+    ) {
+      return lockedRecurringPayment;
+    }
+    if (
       lockedRecurringPayment.status !== claimStatus ||
       lockedRecurringPayment.next_collection_due_at !==
         input.recurringPayment.next_collection_due_at
@@ -1040,18 +1050,21 @@ async function reconcileCanceledRecurringPaymentFromChain(input: {
   sourceAddress: ReturnType<typeof assertValidAddress>;
   planPda: ReturnType<typeof assertValidAddress>;
   subscriptionPda: ReturnType<typeof assertValidAddress>;
+  knownCanceledOnChain?: boolean;
 }): Promise<PaymentRecurringPaymentRow | null> {
-  let canceledOnChain = false;
-  try {
-    canceledOnChain = await isSubscriptionLifecycleTargetReachedOnChain({
-      env: input.env,
-      operation: "cancel",
-      sourceAddress: input.sourceAddress,
-      planPda: input.planPda,
-      subscriptionPda: input.subscriptionPda,
-    });
-  } catch {
-    return null;
+  let canceledOnChain = input.knownCanceledOnChain === true;
+  if (!canceledOnChain) {
+    try {
+      canceledOnChain = await isSubscriptionLifecycleTargetReachedOnChain({
+        env: input.env,
+        operation: "cancel",
+        sourceAddress: input.sourceAddress,
+        planPda: input.planPda,
+        subscriptionPda: input.subscriptionPda,
+      });
+    } catch {
+      return null;
+    }
   }
   if (!canceledOnChain) {
     return null;
@@ -1105,7 +1118,9 @@ async function reconcileCanceledRecurringPaymentFromChain(input: {
       return currentRecurringPayment;
     }
     if (
-      !["active", "paused", "canceling", "canceled"].includes(currentRecurringPayment.status) ||
+      !["active", "paused", "canceling", "resuming", "canceled"].includes(
+        currentRecurringPayment.status
+      ) ||
       !["active", "paused", "canceling", "canceled"].includes(currentSubscription.status)
     ) {
       return null;
@@ -1159,6 +1174,36 @@ async function assertRecurringPaymentNotCanceledOnChain(input: {
       "Recurring payment subscription is already canceled on-chain"
     );
   }
+}
+
+async function assertRecurringPaymentCanResumeOnChain(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  recurringPayment: PaymentRecurringPaymentRow;
+  subscriptionId: string;
+  sourceAddress: ReturnType<typeof assertValidAddress>;
+  planPda: ReturnType<typeof assertValidAddress>;
+  subscriptionPda: ReturnType<typeof assertValidAddress>;
+}) {
+  const lifecycleState = await readSubscriptionLifecycleStateOnChain({
+    env: input.env,
+    sourceAddress: input.sourceAddress,
+    planPda: input.planPda,
+    subscriptionPda: input.subscriptionPda,
+  });
+
+  if (!lifecycleState.isCanceled) {
+    return;
+  }
+
+  const nowSeconds = BigInt(Math.floor(Date.now() / 1000));
+  if (lifecycleState.expiresAtTs > nowSeconds) {
+    return;
+  }
+
+  await reconcileCanceledRecurringPaymentFromChain({ ...input, knownCanceledOnChain: true });
+  throw new AppError("BAD_REQUEST", "Recurring payment subscription is already canceled on-chain");
 }
 
 async function finalizeRecurringPaymentLifecycleAfterChain(input: {
@@ -2684,6 +2729,53 @@ export async function collectRecurringPayment(input: {
   }
 }
 
+async function assertPendingResumeLifecycleCanProceed(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  operation: RecurringLifecycleOperation;
+  lifecycleAttemptSubmitted: boolean;
+  lifecycleAttemptId: string;
+  recurringPayment: PaymentRecurringPaymentRow;
+  subscription: PaymentSubscriptionRow;
+  sourceAddress: ReturnType<typeof assertValidAddress>;
+  planPda: ReturnType<typeof assertValidAddress>;
+  subscriptionPda: ReturnType<typeof assertValidAddress>;
+}) {
+  if (input.operation !== "resume" || input.lifecycleAttemptSubmitted) {
+    return;
+  }
+
+  try {
+    await assertRecurringPaymentCanResumeOnChain({
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPayment: input.recurringPayment,
+      subscriptionId: input.subscription.id,
+      sourceAddress: input.sourceAddress,
+      planPda: input.planPda,
+      subscriptionPda: input.subscriptionPda,
+    });
+  } catch (error) {
+    try {
+      await markRecurringLifecycleAttemptFailed({
+        env: input.env,
+        attemptId: input.lifecycleAttemptId,
+        error: toErrorMessage(error),
+      });
+    } catch (markerError) {
+      console.warn("Failed to mark recurring lifecycle attempt failed after preflight error", {
+        recurringPaymentId: input.recurringPayment.id,
+        attemptId: input.lifecycleAttemptId,
+        operation: input.operation,
+        error: toErrorMessage(markerError),
+      });
+    }
+    throw error;
+  }
+}
+
 export async function executeRecurringPaymentLifecycle(input: {
   env: Env;
   organizationId: string;
@@ -2719,6 +2811,19 @@ export async function executeRecurringPaymentLifecycle(input: {
 
   let lifecycleAttemptSubmitted = claim.lifecycleAttemptSubmitted;
   let sourceSigner: Awaited<ReturnType<typeof getSourceSigner>> | null = null;
+  await assertPendingResumeLifecycleCanProceed({
+    env: input.env,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    operation: input.operation,
+    lifecycleAttemptSubmitted,
+    lifecycleAttemptId,
+    recurringPayment: claim.recurringPayment,
+    subscription: claim.subscription,
+    sourceAddress,
+    planPda,
+    subscriptionPda,
+  });
   if (!lifecycleAttemptSubmitted) {
     // claimLifecycleRecords inserts this attempt in the same transaction as the
     // canceling/resuming status claim, so signer failures below have an audit row.

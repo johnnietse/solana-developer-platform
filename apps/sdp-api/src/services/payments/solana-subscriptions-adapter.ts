@@ -448,7 +448,7 @@ export async function executeSubscriptionLifecycleOnChain(input: {
   subscriptionPda: Address;
   onSubmitted?: (submitted: SubmittedSubscriptionTransaction) => Promise<void>;
 }): Promise<ExecutedSubscriptionTransaction | null> {
-  const isCanceledOnChain = await readSubscriptionCanceledStateOnChain({
+  const { isCanceled: isCanceledOnChain } = await readSubscriptionLifecycleStateOnChain({
     env: input.env,
     sourceAddress: input.sourceSigner.address,
     planPda: input.planPda,
@@ -482,12 +482,12 @@ export async function executeSubscriptionLifecycleOnChain(input: {
   });
 }
 
-async function readSubscriptionCanceledStateOnChain(input: {
+export async function readSubscriptionLifecycleStateOnChain(input: {
   env: Env;
   sourceAddress: Address;
   planPda: Address;
   subscriptionPda: Address;
-}): Promise<boolean> {
+}): Promise<{ isCanceled: boolean; expiresAtTs: bigint }> {
   const rpc = solanaRpc.createRpc(input.env);
   const subscriptionAccount = await fetchMaybeSubscriptionDelegation(rpc, input.subscriptionPda, {
     commitment: "confirmed",
@@ -503,7 +503,8 @@ async function readSubscriptionCanceledStateOnChain(input: {
     throw new AppError("BAD_REQUEST", "Recurring payment subscription plan mismatch");
   }
 
-  return subscriptionAccount.data.expiresAtTs !== 0n;
+  const expiresAtTs = subscriptionAccount.data.expiresAtTs;
+  return { isCanceled: expiresAtTs !== 0n, expiresAtTs };
 }
 
 export async function isSubscriptionLifecycleTargetReachedOnChain(input: {
@@ -513,7 +514,7 @@ export async function isSubscriptionLifecycleTargetReachedOnChain(input: {
   planPda: Address;
   subscriptionPda: Address;
 }): Promise<boolean> {
-  const isCanceledOnChain = await readSubscriptionCanceledStateOnChain(input);
+  const { isCanceled: isCanceledOnChain } = await readSubscriptionLifecycleStateOnChain(input);
 
   return input.operation === "cancel" ? isCanceledOnChain : !isCanceledOnChain;
 }

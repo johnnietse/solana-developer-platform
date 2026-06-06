@@ -2321,6 +2321,38 @@ describe("Payments routes", () => {
     };
     expect(repeatedCancelBody.data.recurringPayment.status).toBe("canceled");
 
+    const signerCallsBeforeExpiredResume = createOrgSignerMock.mock.calls.length;
+    const feeAdapterCallsBeforeExpiredResume = createFeePaymentAdapterMock.mock.calls.length;
+    mockRecurringLifecycleSubscriptionState({
+      planPda: recurringPlanPda,
+      subscriptionPda: recurringSubscriptionPda,
+      expiresAtTs: 1_700_000_000n,
+    });
+    const expiredResumeRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/resume`,
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: "{}",
+      },
+      env
+    );
+    expect(expiredResumeRes.status).toBe(400);
+    const expiredResumeBody = (await expiredResumeRes.json()) as {
+      error: { message: string };
+    };
+    expect(expiredResumeBody.error.message).toContain("already canceled on-chain");
+    const expiredResumePayment = await repositories
+      .createPaymentRecurringPaymentsRepository(env)
+      .getRecurringPaymentById({
+        recurringPaymentId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+      });
+    expect(expiredResumePayment?.status).toBe("canceled");
+    expect(createOrgSignerMock.mock.calls.length).toBe(signerCallsBeforeExpiredResume);
+    expect(createFeePaymentAdapterMock.mock.calls.length).toBe(feeAdapterCallsBeforeExpiredResume);
+
     const staleResumeDueAt = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
     const staleResumePeriodStartAt = new Date(
       new Date(staleResumeDueAt).getTime() - 24 * 60 * 60 * 1000
