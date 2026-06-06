@@ -100,7 +100,11 @@ async function recoverStaleLifecycleClaims(input: {
   recurringPaymentsRepo: RecurringPaymentsRepository;
   retryAfter: string;
   batchSize: number;
-}): Promise<{ recovered: number; failures: number }> {
+}): Promise<{ scanned: number; recovered: number; failures: number }> {
+  if (input.batchSize <= 0) {
+    return { scanned: 0, recovered: 0, failures: 0 };
+  }
+
   let staleLifecycleClaims: Awaited<
     ReturnType<RecurringPaymentsRepository["listStaleLifecycleClaims"]>
   > = [];
@@ -114,7 +118,7 @@ async function recoverStaleLifecycleClaims(input: {
       retryAfter: input.retryAfter,
       error: error instanceof Error ? error.message : String(error),
     });
-    return { recovered: 0, failures: 1 };
+    return { scanned: 0, recovered: 0, failures: 1 };
   }
 
   let recovered = 0;
@@ -139,14 +143,18 @@ async function recoverStaleLifecycleClaims(input: {
     }
   }
 
-  return { recovered, failures };
+  return { scanned: staleLifecycleClaims.length, recovered, failures };
 }
 
 async function recoverSubmittedCollections(input: {
   env: Env;
   subscriptionsRepo: PaymentSubscriptionsRepository;
   batchSize: number;
-}): Promise<{ recovered: number; failures: number }> {
+}): Promise<{ scanned: number; recovered: number; failures: number }> {
+  if (input.batchSize <= 0) {
+    return { scanned: 0, recovered: 0, failures: 0 };
+  }
+
   let submittedCollectionAttempts: Awaited<
     ReturnType<PaymentSubscriptionsRepository["listSubmittedRecurringCollectionAttempts"]>
   > = [];
@@ -159,7 +167,7 @@ async function recoverSubmittedCollections(input: {
     console.warn("Failed to list submitted recurring collection recoveries", {
       error: error instanceof Error ? error.message : String(error),
     });
-    return { recovered: 0, failures: 1 };
+    return { scanned: 0, recovered: 0, failures: 1 };
   }
 
   let recovered = 0;
@@ -189,7 +197,7 @@ async function recoverSubmittedCollections(input: {
     }
   }
 
-  return { recovered, failures };
+  return { scanned: submittedCollectionAttempts.length, recovered, failures };
 }
 
 async function collectDueActivePayments(input: {
@@ -199,6 +207,10 @@ async function collectDueActivePayments(input: {
   retryAfter: string;
   batchSize: number;
 }): Promise<{ scanned: number; collected: number; failures: number }> {
+  if (input.batchSize <= 0) {
+    return { scanned: 0, collected: 0, failures: 0 };
+  }
+
   const due = await input.recurringPaymentsRepo.listDueRecurringPayments({
     now: input.now,
     retryAfter: input.retryAfter,
@@ -247,6 +259,7 @@ export async function collectDueRecurringPayments(
   const retryAfter = new Date(now.getTime() - retryAfterMinutes * 60 * 1000).toISOString();
   const subscriptionsRepo = createPaymentSubscriptionsRepository(env);
   const recurringPaymentsRepo = createPaymentRecurringPaymentsRepository(env);
+  let remainingCollectionBudget = batchSize;
 
   const expirationFailures = await expireStaleUnsignedAttempts({
     subscriptionsRepo,
@@ -258,19 +271,24 @@ export async function collectDueRecurringPayments(
     env,
     recurringPaymentsRepo,
     retryAfter,
-    batchSize,
+    batchSize: remainingCollectionBudget,
   });
+  remainingCollectionBudget = Math.max(remainingCollectionBudget - lifecycleRecovery.scanned, 0);
   const submittedCollectionRecovery = await recoverSubmittedCollections({
     env,
     subscriptionsRepo,
-    batchSize,
+    batchSize: remainingCollectionBudget,
   });
+  remainingCollectionBudget = Math.max(
+    remainingCollectionBudget - submittedCollectionRecovery.scanned,
+    0
+  );
   const dueCollection = await collectDueActivePayments({
     env,
     recurringPaymentsRepo,
     now: nowIso,
     retryAfter,
-    batchSize,
+    batchSize: remainingCollectionBudget,
   });
 
   return {

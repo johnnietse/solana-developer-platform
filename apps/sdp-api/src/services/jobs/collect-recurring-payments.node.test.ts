@@ -181,6 +181,59 @@ describe("collectDueRecurringPayments", () => {
     );
   });
 
+  it("does not exceed the collection batch budget across recovery and due phases", async () => {
+    const cancelingPayment = makeRecurringPayment({
+      id: "prp_canceling_budget",
+      status: "canceling",
+    });
+    const resumingPayment = makeRecurringPayment({
+      id: "prp_resuming_budget",
+      status: "resuming",
+    });
+    const budgetedEnv = {
+      ...enabledEnv,
+      PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE: "2",
+    } as Env;
+    const expireStaleUnsignedProcessingAttempts = vi.fn().mockResolvedValue(0);
+    const listSubmittedRecurringCollectionAttempts = vi.fn().mockResolvedValue([]);
+    const listStaleLifecycleClaims = vi.fn().mockResolvedValue([cancelingPayment, resumingPayment]);
+    const listDueRecurringPayments = vi.fn().mockResolvedValue([makeRecurringPayment()]);
+    vi.mocked(createPaymentSubscriptionsRepository).mockReturnValue({
+      expireStaleUnsignedProcessingAttempts,
+      listSubmittedRecurringCollectionAttempts,
+    } as unknown as ReturnType<typeof createPaymentSubscriptionsRepository>);
+    vi.mocked(createPaymentRecurringPaymentsRepository).mockReturnValue({
+      listStaleLifecycleClaims,
+      listDueRecurringPayments,
+    } as unknown as ReturnType<typeof createPaymentRecurringPaymentsRepository>);
+    vi.mocked(executeRecurringPaymentLifecycle).mockResolvedValue(
+      {} as Awaited<ReturnType<typeof executeRecurringPaymentLifecycle>>
+    );
+
+    const result = await collectDueRecurringPayments(budgetedEnv);
+
+    expect(result).toEqual({
+      scanned: 0,
+      collected: 0,
+      failed: 0,
+      expirationFailures: 0,
+      lifecycleRecovered: 2,
+      lifecycleFailures: 0,
+      submittedCollectionRecovered: 0,
+      submittedCollectionFailures: 0,
+      collectionFailures: 0,
+    });
+    expect(listStaleLifecycleClaims).toHaveBeenCalledWith(
+      expect.objectContaining({
+        limit: 2,
+      })
+    );
+    expect(listSubmittedRecurringCollectionAttempts).not.toHaveBeenCalled();
+    expect(listDueRecurringPayments).not.toHaveBeenCalled();
+    expect(executeRecurringPaymentLifecycle).toHaveBeenCalledTimes(2);
+    expect(collectRecurringPayment).not.toHaveBeenCalled();
+  });
+
   it("recovers submitted recurring collections even when they are not due-active", async () => {
     const submittedAttempt = {
       id: "psca_submitted_recovery",

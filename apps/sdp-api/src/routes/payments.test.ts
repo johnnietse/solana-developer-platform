@@ -1074,6 +1074,54 @@ describe("Payments routes", () => {
     );
     await clearRateLimits();
 
+    const pausedManagedAt = new Date().toISOString();
+    await repositories.createPaymentRecurringPaymentsRepository(env).updateRecurringPayment({
+      recurringPaymentId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      status: "paused",
+      updatedAt: pausedManagedAt,
+    });
+    await repositories.createPaymentSubscriptionsRepository(env).updateSubscription({
+      subscriptionId: recurringSubscriptionId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      status: "paused",
+      updatedAt: pausedManagedAt,
+    });
+    const pausedManagedSubscriptionResumeRes = await app.request(
+      `/v1/payments/subscriptions/${recurringSubscriptionId}`,
+      {
+        method: "PATCH",
+        headers: jsonHeaders,
+        body: JSON.stringify({ status: "active" }),
+      },
+      env
+    );
+    expect(pausedManagedSubscriptionResumeRes.status).toBe(400);
+    const pausedManagedSubscriptionResumeBody =
+      (await pausedManagedSubscriptionResumeRes.json()) as {
+        error: { message: string };
+      };
+    expect(pausedManagedSubscriptionResumeBody.error.message).toContain(
+      "recurring payment lifecycle endpoints"
+    );
+    await repositories.createPaymentRecurringPaymentsRepository(env).updateRecurringPayment({
+      recurringPaymentId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      status: "active",
+      updatedAt: new Date().toISOString(),
+    });
+    await repositories.createPaymentSubscriptionsRepository(env).updateSubscription({
+      subscriptionId: recurringSubscriptionId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      status: "active",
+      updatedAt: new Date().toISOString(),
+    });
+    await clearRateLimits();
+
     const staleUnsignedAttemptUpdatedAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     await repositories.createPaymentSubscriptionsRepository(env).createCollectionAttempt({
       id: "psca_stale_unsigned_retry",

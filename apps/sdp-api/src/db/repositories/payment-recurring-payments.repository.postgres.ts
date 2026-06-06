@@ -199,7 +199,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
       return row ? mapRecurringPaymentRow(row) : null;
     },
 
-    async getActiveRecurringPaymentBySubscriptionId(params) {
+    async getRecurringPaymentBySubscriptionId(params) {
       const row = await db
         .prepare(
           `SELECT *
@@ -207,7 +207,6 @@ export function createPostgresPaymentRecurringPaymentsRepository(
             WHERE subscription_id = ?
               AND organization_id = ?
               AND project_id = ?
-              AND status = 'active'
             LIMIT 1`
         )
         .bind(params.subscriptionId, params.organizationId, params.projectId)

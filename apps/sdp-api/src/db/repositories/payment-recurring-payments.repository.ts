@@ -107,7 +107,7 @@ export interface PaymentRecurringPaymentsRepository {
     organizationId: string;
     projectId: string;
   }): Promise<PaymentRecurringPaymentRow | null>;
-  getActiveRecurringPaymentBySubscriptionId(params: {
+  getRecurringPaymentBySubscriptionId(params: {
     subscriptionId: string;
     organizationId: string;
     projectId: string;
