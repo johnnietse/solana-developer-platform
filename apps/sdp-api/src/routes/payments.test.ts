@@ -1741,6 +1741,117 @@ describe("Payments routes", () => {
       updatedAt: new Date().toISOString(),
     });
 
+    const operationSignatureOnlyUpdatedAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const operationSignatureOnlyTransferId = "ptr_operation_signature_only_recovery";
+    await repositories.createPaymentsRepository(env).createTransfer({
+      id: operationSignatureOnlyTransferId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      walletId: TEST_WALLET_ID,
+      counterpartyId,
+      sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
+      destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      token: DEVNET_USDC_MINT,
+      amount: "0.50",
+      memo: null,
+      type: "transfer",
+      direction: "outbound",
+      status: "processing",
+      provider: null,
+      providerReference: null,
+      deliveryMode: null,
+      fiatCurrency: null,
+      fiatAmount: null,
+      providerData: { source: "recurring_payments" },
+      serializedTx: "operation-signature-only-transaction",
+      initiatedByKeyId: TEST_API_KEY.id,
+      createdAt: operationSignatureOnlyUpdatedAt,
+      updatedAt: operationSignatureOnlyUpdatedAt,
+    });
+    await repositories.createPaymentSubscriptionsRepository(env).createCollectionAttempt({
+      id: "psca_operation_signature_only_recovery",
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      subscriptionId: recurringSubscriptionId,
+      recurringPaymentId,
+      transferId: operationSignatureOnlyTransferId,
+      token: DEVNET_USDC_MINT,
+      amount: "0.50",
+      dueAt: firstCollectionAt,
+      attemptedAt: operationSignatureOnlyUpdatedAt,
+      status: "processing",
+      signature: null,
+      error: null,
+      metadata: { source: "recurring_payments" },
+      createdAt: operationSignatureOnlyUpdatedAt,
+      updatedAt: operationSignatureOnlyUpdatedAt,
+    });
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_recurring_operation_attempts (
+           id,
+           organization_id,
+           project_id,
+           recurring_payment_id,
+           operation,
+           status,
+           signature,
+           created_at,
+           updated_at
+         ) VALUES (?, ?, ?, ?, 'collect', 'submitted', ?, ?, ?)`
+      )
+      .bind(
+        "prlo_operation_signature_only_recovery",
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        recurringPaymentId,
+        `5${MOCK_SIGNATURE_TAIL}`,
+        operationSignatureOnlyUpdatedAt,
+        operationSignatureOnlyUpdatedAt
+      )
+      .run();
+    await repositories
+      .createPaymentSubscriptionsRepository(env)
+      .expireStaleUnsignedProcessingAttempts({
+        olderThan: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+        updatedAt: new Date().toISOString(),
+        limit: 10,
+      });
+    const operationSignatureOnlyAttempt = await getDb(env)
+      .prepare("SELECT status FROM payment_subscription_collection_attempts WHERE id = ?")
+      .bind("psca_operation_signature_only_recovery")
+      .first<{ status: string }>();
+    expect(operationSignatureOnlyAttempt?.status).toBe("processing");
+    const operationSignatureRecoveries = await repositories
+      .createPaymentSubscriptionsRepository(env)
+      .listSubmittedRecurringCollectionAttempts({ limit: 10 });
+    expect(operationSignatureRecoveries.map((attempt) => attempt.id)).toContain(
+      "psca_operation_signature_only_recovery"
+    );
+    await getDb(env)
+      .prepare(
+        `UPDATE payment_recurring_operation_attempts
+            SET status = 'failed',
+                error = 'cleared operation-signature-only recovery fixture',
+                updated_at = ?
+          WHERE id = ?`
+      )
+      .bind(new Date().toISOString(), "prlo_operation_signature_only_recovery")
+      .run();
+    await repositories.createPaymentSubscriptionsRepository(env).updateCollectionAttempt({
+      attemptId: "psca_operation_signature_only_recovery",
+      status: "failed",
+      error: "cleared operation-signature-only recovery fixture",
+      attemptedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    await repositories.createPaymentsRepository(env).updateTransfer({
+      transferId: operationSignatureOnlyTransferId,
+      status: "failed",
+      error: "cleared operation-signature-only recovery fixture",
+      updatedAt: new Date().toISOString(),
+    });
+
     const staleLinkedAttemptUpdatedAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     const staleLinkedTransferId = "ptr_stale_linked_cancel_race";
     const staleLinkedTransfer = await repositories.createPaymentsRepository(env).createTransfer({

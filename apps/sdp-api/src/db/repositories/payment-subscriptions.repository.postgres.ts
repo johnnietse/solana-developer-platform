@@ -162,7 +162,14 @@ async function expireStaleUnsignedProcessingAttemptsWithExecutor(
     expired_unlinked_attempts: number;
     expired_collect_operation_attempts: number;
   }>(
-    `WITH stale_linked AS (
+    `WITH submitted_collect_claims AS (
+          SELECT recurring_payment_id
+            FROM payment_recurring_operation_attempts
+           WHERE operation = 'collect'
+             AND status IN ('processing', 'submitted')
+             AND signature IS NOT NULL
+        ),
+        stale_linked AS (
           SELECT a.id AS attempt_id,
                  a.transfer_id AS transfer_id,
                  a.recurring_payment_id AS recurring_payment_id
@@ -178,6 +185,11 @@ async function expireStaleUnsignedProcessingAttemptsWithExecutor(
              AND a.updated_at <= ?
              AND t.status = 'processing'
              AND t.signature IS NULL
+             AND NOT EXISTS (
+                   SELECT 1
+                     FROM submitted_collect_claims submitted
+                    WHERE submitted.recurring_payment_id = a.recurring_payment_id
+                 )
            ORDER BY a.updated_at ASC
            LIMIT ?
         ),
@@ -196,19 +208,29 @@ async function expireStaleUnsignedProcessingAttemptsWithExecutor(
              AND a.updated_at <= ?
              AND t.status = 'processing'
              AND t.signature IS NULL
+             AND NOT EXISTS (
+                   SELECT 1
+                     FROM submitted_collect_claims submitted
+                    WHERE submitted.recurring_payment_id = a.recurring_payment_id
+                 )
            ORDER BY a.updated_at ASC
            LIMIT ?
         ),
         stale_unlinked AS (
-          SELECT id AS attempt_id,
-                 recurring_payment_id AS recurring_payment_id
-            FROM payment_subscription_collection_attempts
-           WHERE status = 'processing'
-             AND recurring_payment_id IS NOT NULL
-             AND transfer_id IS NULL
-             AND signature IS NULL
-             AND updated_at <= ?
-           ORDER BY updated_at ASC
+          SELECT a.id AS attempt_id,
+                 a.recurring_payment_id AS recurring_payment_id
+            FROM payment_subscription_collection_attempts a
+           WHERE a.status = 'processing'
+             AND a.recurring_payment_id IS NOT NULL
+             AND a.transfer_id IS NULL
+             AND a.signature IS NULL
+             AND a.updated_at <= ?
+             AND NOT EXISTS (
+                   SELECT 1
+                     FROM submitted_collect_claims submitted
+                    WHERE submitted.recurring_payment_id = a.recurring_payment_id
+                 )
+           ORDER BY a.updated_at ASC
            LIMIT ?
         ),
         updated_linked_transfers AS (
