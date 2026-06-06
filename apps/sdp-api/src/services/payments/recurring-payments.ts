@@ -1204,6 +1204,113 @@ async function reconcileCanceledRecurringPaymentFromChain(input: {
   });
 }
 
+async function reconcileActiveRecurringPaymentFromChain(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  recurringPayment: PaymentRecurringPaymentRow;
+  subscriptionId: string;
+}): Promise<PaymentRecurringPaymentRow | null> {
+  const now = new Date().toISOString();
+  return getDb(input.env).transaction(async (tx) => {
+    const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+    const txSubscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
+
+    await tx
+      .prepare(
+        `SELECT id
+           FROM payment_recurring_payments
+          WHERE id = ?
+            AND organization_id = ?
+            AND project_id = ?
+          FOR UPDATE`
+      )
+      .bind(input.recurringPayment.id, input.organizationId, input.projectId)
+      .first();
+    await tx
+      .prepare(
+        `SELECT id
+           FROM payment_subscriptions
+          WHERE id = ?
+            AND organization_id = ?
+            AND project_id = ?
+          FOR UPDATE`
+      )
+      .bind(input.subscriptionId, input.organizationId, input.projectId)
+      .first();
+
+    const currentRecurringPayment = await txRecurringRepo.getRecurringPaymentById({
+      recurringPaymentId: input.recurringPayment.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+    });
+    const currentSubscription = await txSubscriptionsRepo.getSubscriptionById({
+      subscriptionId: input.subscriptionId,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+    });
+    if (!currentRecurringPayment || !currentSubscription) {
+      throw new AppError("NOT_FOUND", "Recurring payment lifecycle state not found");
+    }
+    if (
+      isRecurringPaymentLifecycleFinalized({
+        recurringPayment: currentRecurringPayment,
+        subscription: currentSubscription,
+        operation: "resume",
+      })
+    ) {
+      return currentRecurringPayment;
+    }
+    if (
+      !["active", "paused", "resuming", "canceled"].includes(currentRecurringPayment.status) ||
+      !["active", "paused", "canceled"].includes(currentSubscription.status)
+    ) {
+      return null;
+    }
+
+    const nextCollectionDueAt = advanceCollectionDueAtAfter({
+      nextCollectionDueAt: currentRecurringPayment.next_collection_due_at,
+      periodHours: currentRecurringPayment.period_hours,
+      after: now,
+    });
+    const currentPeriodStartAt = addPeriodHours(
+      nextCollectionDueAt,
+      -currentRecurringPayment.period_hours
+    );
+    const updatedRecurringPayment = await txRecurringRepo.updateRecurringPayment({
+      recurringPaymentId: input.recurringPayment.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      expectedStatus: currentRecurringPayment.status,
+      expectedNextCollectionDueAt: currentRecurringPayment.next_collection_due_at,
+      status: "active",
+      nextCollectionDueAt,
+      updatedAt: now,
+    });
+    const updatedSubscription = await txSubscriptionsRepo.updateSubscription({
+      subscriptionId: input.subscriptionId,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      expectedStatus: currentSubscription.status,
+      expectedNextCollectionDueAt: currentSubscription.next_collection_due_at,
+      status: "active",
+      currentPeriodStartAt,
+      nextCollectionDueAt,
+      canceledAt: null,
+      updatedAt: now,
+    });
+
+    if (!updatedRecurringPayment || !updatedSubscription) {
+      throw new AppError(
+        "CONFLICT",
+        "Recurring payment lifecycle state changed before active-state reconciliation completed"
+      );
+    }
+
+    return updatedRecurringPayment;
+  });
+}
+
 async function assertRecurringPaymentNotCanceledOnChain(input: {
   env: Env;
   organizationId: string;
@@ -1260,7 +1367,47 @@ async function finalizeRecurringPaymentLifecycleAfterChain(input: {
   recurringPayment: PaymentRecurringPaymentRow;
   subscription: PaymentSubscriptionRow;
   operation: RecurringLifecycleOperation;
+  sourceAddress: ReturnType<typeof assertValidAddress>;
+  planPda: ReturnType<typeof assertValidAddress>;
+  subscriptionPda: ReturnType<typeof assertValidAddress>;
 }): Promise<PaymentRecurringPaymentRow> {
+  // If the normal optimistic finalization loses the DB race after the chain
+  // confirms, use the on-chain target state as the recovery source of truth.
+  const reconcileFromConfirmedChain = async () => {
+    const targetReached = await isSubscriptionLifecycleTargetReachedOnChain({
+      env: input.env,
+      operation: input.operation,
+      sourceAddress: input.sourceAddress,
+      planPda: input.planPda,
+      subscriptionPda: input.subscriptionPda,
+    });
+    if (!targetReached) {
+      return null;
+    }
+
+    if (input.operation === "cancel") {
+      return reconcileCanceledRecurringPaymentFromChain({
+        env: input.env,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        recurringPayment: input.recurringPayment,
+        subscriptionId: input.subscription.id,
+        sourceAddress: input.sourceAddress,
+        planPda: input.planPda,
+        subscriptionPda: input.subscriptionPda,
+        knownCanceledOnChain: true,
+      });
+    }
+
+    return reconcileActiveRecurringPaymentFromChain({
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPayment: input.recurringPayment,
+      subscriptionId: input.subscription.id,
+    });
+  };
+
   try {
     return await finalizeRecurringPaymentLifecycle(input);
   } catch (error) {
@@ -1287,6 +1434,11 @@ async function finalizeRecurringPaymentLifecycleAfterChain(input: {
         operation: input.operation,
       })
     ) {
+      const reconciled = await reconcileFromConfirmedChain();
+      if (reconciled) {
+        return reconciled;
+      }
+
       throw error;
     }
 
@@ -1311,6 +1463,10 @@ async function finalizeRecurringPaymentLifecycleAfterChain(input: {
         })
       ) {
         return reconciled.recurringPayment;
+      }
+      const chainReconciled = await reconcileFromConfirmedChain();
+      if (chainReconciled) {
+        return chainReconciled;
       }
 
       throw new AppError(
@@ -2351,6 +2507,83 @@ async function createTransferAndLinkCollectionAttempt(input: {
   }
 }
 
+async function assertRecurringCollectionClaimStillActive(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  recurringPaymentId: string;
+  subscriptionId: string;
+  attemptId: string;
+  transferId: string;
+  dueAt: string;
+}) {
+  await getDb(input.env).transaction(async (tx) => {
+    const recurringPayment = await tx.queryOne<{
+      status: string;
+      next_collection_due_at: string | null;
+    }>(
+      `SELECT status, next_collection_due_at
+         FROM payment_recurring_payments
+        WHERE id = ?
+          AND organization_id = ?
+          AND project_id = ?
+        FOR UPDATE`,
+      [input.recurringPaymentId, input.organizationId, input.projectId]
+    );
+    const subscription = await tx.queryOne<{
+      status: string;
+      next_collection_due_at: string | null;
+    }>(
+      `SELECT status, next_collection_due_at
+         FROM payment_subscriptions
+        WHERE id = ?
+          AND organization_id = ?
+          AND project_id = ?
+        FOR UPDATE`,
+      [input.subscriptionId, input.organizationId, input.projectId]
+    );
+    const attempt = await tx.queryOne<{
+      status: string;
+      transfer_id: string | null;
+      signature: string | null;
+    }>(
+      `SELECT status, transfer_id, signature
+         FROM payment_subscription_collection_attempts
+        WHERE id = ?
+          AND organization_id = ?
+          AND project_id = ?
+          AND recurring_payment_id = ?
+          AND due_at = ?
+        FOR UPDATE`,
+      [
+        input.attemptId,
+        input.organizationId,
+        input.projectId,
+        input.recurringPaymentId,
+        input.dueAt,
+      ]
+    );
+
+    if (!recurringPayment || !subscription || !attempt) {
+      throw new AppError("NOT_FOUND", "Recurring payment collection claim not found");
+    }
+    if (
+      recurringPayment.status !== "active" ||
+      recurringPayment.next_collection_due_at !== input.dueAt ||
+      subscription.status !== "active" ||
+      subscription.next_collection_due_at !== input.dueAt ||
+      attempt.status !== "processing" ||
+      attempt.transfer_id !== input.transferId ||
+      attempt.signature !== null
+    ) {
+      throw new AppError(
+        "CONFLICT",
+        "Recurring payment collection state changed before on-chain submission"
+      );
+    }
+  });
+}
+
 export async function createRecurringPayment(input: {
   env: Env;
   organizationId: string;
@@ -2812,6 +3045,30 @@ export async function collectRecurringPayment(input: {
   let collectionAttempt: PaymentSubscriptionCollectionAttemptRow = linked.attempt;
   let transfer = linked.transfer;
 
+  // Last no-money-moved checkpoint: if lifecycle state changed after the
+  // transfer was linked, fail the DB records before signing anything on-chain.
+  try {
+    await assertRecurringCollectionClaimStillActive({
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPaymentId: recurringPayment.id,
+      subscriptionId,
+      attemptId: collectionAttempt.id,
+      transferId: transfer.id,
+      dueAt,
+    });
+  } catch (error) {
+    await markRecurringCollectionFailedBeforeSubmission({
+      env: input.env,
+      attempt: collectionAttempt,
+      transfer,
+      error: toErrorMessage(error),
+    });
+
+    throw error;
+  }
+
   const collectionExecution = await executeRecurringCollectionOnChainWithRecoveryMarker({
     env: input.env,
     recurringPaymentId: recurringPayment.id,
@@ -3171,6 +3428,9 @@ export async function executeRecurringPaymentLifecycle(input: {
     recurringPayment: claim.recurringPayment,
     subscription: claim.subscription,
     operation: input.operation,
+    sourceAddress,
+    planPda,
+    subscriptionPda,
   });
   try {
     await markRecurringLifecycleAttemptFinalized({

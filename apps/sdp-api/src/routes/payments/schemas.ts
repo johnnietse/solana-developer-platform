@@ -168,6 +168,8 @@ export const listRecurringPaymentsQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
 
+// Lifecycle routes intentionally accept an empty JSON body for now. Add service
+// wiring in the handlers before adding any fields here.
 export const recurringPaymentLifecycleSchema = z.object({}).strict();
 
 const createSubscriptionPlanStatusSchema = paymentSubscriptionPlanStatusSchema.default("draft");
