@@ -1664,7 +1664,16 @@ async function assertRecurringPaymentNotCanceledOnChain(input: {
   planPda: ReturnType<typeof assertValidAddress>;
   subscriptionPda: ReturnType<typeof assertValidAddress>;
 }) {
-  const reconciledCanceledPayment = await reconcileCanceledRecurringPaymentFromChain(input);
+  const reconciledCanceledPayment = await reconcileCanceledRecurringPaymentFromChain({
+    env: input.env,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    recurringPayment: input.recurringPayment,
+    subscriptionId: input.subscriptionId,
+    sourceAddress: input.sourceAddress,
+    planPda: input.planPda,
+    subscriptionPda: input.subscriptionPda,
+  });
   if (reconciledCanceledPayment?.status === "canceled") {
     throw new AppError(
       "BAD_REQUEST",
@@ -1699,7 +1708,17 @@ async function assertRecurringPaymentCanResumeOnChain(input: {
     return;
   }
 
-  await reconcileCanceledRecurringPaymentFromChain({ ...input, knownCanceledOnChain: true });
+  await reconcileCanceledRecurringPaymentFromChain({
+    env: input.env,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    recurringPayment: input.recurringPayment,
+    subscriptionId: input.subscriptionId,
+    sourceAddress: input.sourceAddress,
+    planPda: input.planPda,
+    subscriptionPda: input.subscriptionPda,
+    knownCanceledOnChain: true,
+  });
   throw new AppError("BAD_REQUEST", "Recurring payment subscription is already canceled on-chain");
 }
 

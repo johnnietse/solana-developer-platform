@@ -87,13 +87,6 @@ CREATE INDEX IF NOT EXISTS idx_payment_recurring_operation_attempts_submitted
     ON payment_recurring_operation_attempts(status, updated_at)
     WHERE status IN ('processing', 'submitted');
 
-ALTER TABLE payment_recurring_operation_attempts
-    DROP CONSTRAINT IF EXISTS payment_recurring_operation_attempts_operation_check;
-
-ALTER TABLE payment_recurring_operation_attempts
-    ADD CONSTRAINT payment_recurring_operation_attempts_operation_check
-        CHECK (operation IN ('cancel', 'resume', 'collect'));
-
 DROP INDEX IF EXISTS idx_payment_recurring_operation_attempts_active_operation;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_recurring_operation_attempts_active_recurring_payment
