@@ -207,6 +207,24 @@ export function createPostgresPaymentRecurringPaymentsRepository(
       return row ? mapRecurringPaymentRow(row) : null;
     },
 
+    async resetRecurringPaymentActivationIfNotActive(params) {
+      const row = await db
+        .prepare(
+          `UPDATE payment_recurring_payments
+              SET status = 'pending_activation',
+                  updated_at = ?
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND status <> 'active'
+          RETURNING *`
+        )
+        .bind(params.updatedAt, params.recurringPaymentId, params.organizationId, params.projectId)
+        .first<Record<string, unknown>>();
+
+      return row ? mapRecurringPaymentRow(row) : null;
+    },
+
     async updateRecurringPaymentActivation(input: UpdatePaymentRecurringPaymentActivationInput) {
       const existing = await getRecurringPaymentByIdInternal(db, {
         recurringPaymentId: input.recurringPaymentId,

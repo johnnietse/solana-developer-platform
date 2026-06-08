@@ -79,6 +79,15 @@ function staleActivationCutoff(now = new Date()): string {
   return new Date(now.getTime() - ACTIVATION_STALE_MS).toISOString();
 }
 
+function isActivationAttemptStale(
+  attempt: { status: string; updated_at: string } | null,
+  staleBefore: string
+): boolean {
+  return (
+    attempt?.status === "processing" && Date.parse(attempt.updated_at) < Date.parse(staleBefore)
+  );
+}
+
 function serializeError(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
@@ -253,20 +262,10 @@ async function resetRecurringPaymentActivationIfNotActive(input: {
   projectId: string;
   updatedAt: string;
 }): Promise<void> {
-  const latest = await input.recurringRepo.getRecurringPaymentById({
+  await input.recurringRepo.resetRecurringPaymentActivationIfNotActive({
     recurringPaymentId: input.recurringPaymentId,
     organizationId: input.organizationId,
     projectId: input.projectId,
-  });
-  if (latest?.status === "active") {
-    return;
-  }
-
-  await input.recurringRepo.updateRecurringPaymentActivation({
-    recurringPaymentId: input.recurringPaymentId,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    status: "pending_activation",
     updatedAt: input.updatedAt,
   });
 }
@@ -416,7 +415,7 @@ export async function activateRecurringPayment(input: {
     organizationId: input.organizationId,
     projectId: input.projectId,
   });
-  if (staleAttempt?.status === "processing" && staleAttempt.updated_at < staleBefore) {
+  if (staleAttempt && isActivationAttemptStale(staleAttempt, staleBefore)) {
     await recurringRepo.updateActivationAttempt({
       attemptId: staleAttempt.id,
       organizationId: input.organizationId,

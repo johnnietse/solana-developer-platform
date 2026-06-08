@@ -150,6 +150,12 @@ export interface PaymentRecurringPaymentsRepository {
     staleBefore?: string;
     updatedAt: string;
   }): Promise<PaymentRecurringPaymentRow | null>;
+  resetRecurringPaymentActivationIfNotActive(params: {
+    recurringPaymentId: string;
+    organizationId: string;
+    projectId: string;
+    updatedAt: string;
+  }): Promise<PaymentRecurringPaymentRow | null>;
   updateRecurringPaymentActivation(
     input: UpdatePaymentRecurringPaymentActivationInput
   ): Promise<PaymentRecurringPaymentRow | null>;
