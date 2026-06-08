@@ -178,10 +178,31 @@ export function createPostgresPaymentRecurringPaymentsRepository(
     async claimRecurringPaymentActivation(params) {
       let reclaimClause = "";
       const reclaimValues: unknown[] = [];
+      let freshAttemptClause = "";
+      const freshAttemptValues: unknown[] = [];
 
       if (params.staleBefore) {
         reclaimClause = " OR (status = 'activating' AND updated_at < ?)";
         reclaimValues.push(params.staleBefore);
+        freshAttemptClause = `AND NOT EXISTS (
+                SELECT 1
+                  FROM payment_recurring_payment_activation_attempts attempts
+                 WHERE attempts.recurring_payment_id = payment_recurring_payments.id
+                   AND attempts.organization_id = payment_recurring_payments.organization_id
+                   AND attempts.project_id = payment_recurring_payments.project_id
+                   AND attempts.status = 'processing'
+                   AND attempts.updated_at >= ?
+              )`;
+        freshAttemptValues.push(params.staleBefore);
+      } else {
+        freshAttemptClause = `AND NOT EXISTS (
+                SELECT 1
+                  FROM payment_recurring_payment_activation_attempts attempts
+                 WHERE attempts.recurring_payment_id = payment_recurring_payments.id
+                   AND attempts.organization_id = payment_recurring_payments.organization_id
+                   AND attempts.project_id = payment_recurring_payments.project_id
+                   AND attempts.status = 'processing'
+              )`;
       }
 
       const row = await db
@@ -193,6 +214,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
               AND organization_id = ?
               AND project_id = ?
               AND (status = 'pending_activation'${reclaimClause})
+              ${freshAttemptClause}
           RETURNING *`
         )
         .bind(
@@ -200,7 +222,8 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           params.recurringPaymentId,
           params.organizationId,
           params.projectId,
-          ...reclaimValues
+          ...reclaimValues,
+          ...freshAttemptValues
         )
         .first<Record<string, unknown>>();
 
@@ -226,14 +249,8 @@ export function createPostgresPaymentRecurringPaymentsRepository(
     },
 
     async updateRecurringPaymentActivation(input: UpdatePaymentRecurringPaymentActivationInput) {
-      const existing = await getRecurringPaymentByIdInternal(db, {
-        recurringPaymentId: input.recurringPaymentId,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-      });
-      if (!existing) return null;
-
-      await db
+      const allowActiveUpdate = input.status === "active";
+      const row = await db
         .prepare(
           `UPDATE payment_recurring_payments
               SET status = COALESCE(?, status),
@@ -256,7 +273,9 @@ export function createPostgresPaymentRecurringPaymentsRepository(
                   updated_at = ?
             WHERE id = ?
               AND organization_id = ?
-              AND project_id = ?`
+              AND project_id = ?
+              AND (status <> 'active' OR ?::boolean)
+          RETURNING *`
         )
         .bind(
           input.status ?? null,
@@ -283,15 +302,12 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.updatedAt,
           input.recurringPaymentId,
           input.organizationId,
-          input.projectId
+          input.projectId,
+          allowActiveUpdate
         )
-        .run();
+        .first<Record<string, unknown>>();
 
-      return getRecurringPaymentByIdInternal(db, {
-        recurringPaymentId: input.recurringPaymentId,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-      });
+      return row ? mapRecurringPaymentRow(row) : null;
     },
 
     async getRecurringPaymentById(params) {
@@ -415,14 +431,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
     },
 
     async updateActivationAttempt(input: UpdatePaymentRecurringPaymentActivationAttemptInput) {
-      const existing = await getActivationAttemptByIdInternal(db, {
-        attemptId: input.attemptId,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-      });
-      if (!existing) return null;
-
-      await db
+      const row = await db
         .prepare(
           `UPDATE payment_recurring_payment_activation_attempts
               SET plan_id = CASE WHEN ?::boolean THEN ? ELSE plan_id END,
@@ -438,7 +447,8 @@ export function createPostgresPaymentRecurringPaymentsRepository(
                   updated_at = ?
             WHERE id = ?
               AND organization_id = ?
-              AND project_id = ?`
+              AND project_id = ?
+          RETURNING *`
         )
         .bind(
           input.planId !== undefined,
@@ -460,13 +470,9 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.organizationId,
           input.projectId
         )
-        .run();
+        .first<Record<string, unknown>>();
 
-      return getActivationAttemptByIdInternal(db, {
-        attemptId: input.attemptId,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-      });
+      return row ? mapActivationAttemptRow(row) : null;
     },
 
     async getLatestActivationAttempt(params) {

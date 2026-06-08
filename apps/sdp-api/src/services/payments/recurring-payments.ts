@@ -177,7 +177,7 @@ async function confirmPersistedSubscriptionSignature(input: {
   }
 }
 
-async function fetchPreservedPlanOrClearSignature(input: {
+async function fetchExistingPlanOrClearFailedSignature(input: {
   rpc: ReturnType<typeof solanaRpc.createRpc>;
   recurringRepo: ReturnType<typeof createPaymentRecurringPaymentsRepository>;
   recurringPaymentId: string;
@@ -185,11 +185,14 @@ async function fetchPreservedPlanOrClearSignature(input: {
   projectId: string;
   planPda: Address;
   planCreationSignature: string | null;
+  probeWithoutSignature: boolean;
 }): Promise<Awaited<ReturnType<typeof subscriptionsProgram.fetchMaybePlan>> | null> {
-  if (!input.planCreationSignature) {
+  if (!input.planCreationSignature && !input.probeWithoutSignature) {
     return null;
   }
 
+  // Deterministic PDAs let a retry recover even when the transaction landed but
+  // the DB write that persisted its signature failed.
   const onChainPlan = await subscriptionsProgram.fetchMaybePlan(input.rpc, input.planPda, {
     commitment: "confirmed",
   });
@@ -197,17 +200,19 @@ async function fetchPreservedPlanOrClearSignature(input: {
     return onChainPlan;
   }
 
-  await clearRecurringPaymentFailedSignature({
-    recurringRepo: input.recurringRepo,
-    recurringPaymentId: input.recurringPaymentId,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    field: "planCreationSignature",
-  });
+  if (input.planCreationSignature) {
+    await clearRecurringPaymentFailedSignature({
+      recurringRepo: input.recurringRepo,
+      recurringPaymentId: input.recurringPaymentId,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      field: "planCreationSignature",
+    });
+  }
   return null;
 }
 
-async function fetchPreservedSubscriptionOrClearSignature(input: {
+async function fetchExistingSubscriptionOrClearFailedSignature(input: {
   rpc: ReturnType<typeof solanaRpc.createRpc>;
   recurringRepo: ReturnType<typeof createPaymentRecurringPaymentsRepository>;
   recurringPaymentId: string;
@@ -215,13 +220,16 @@ async function fetchPreservedSubscriptionOrClearSignature(input: {
   projectId: string;
   subscriptionPda: Address;
   authorizationSignature: string | null;
+  probeWithoutSignature: boolean;
 }): Promise<Awaited<
   ReturnType<typeof subscriptionsProgram.fetchMaybeSubscriptionDelegation>
 > | null> {
-  if (!input.authorizationSignature) {
+  if (!input.authorizationSignature && !input.probeWithoutSignature) {
     return null;
   }
 
+  // As with plans, the subscription PDA is the source of truth for retry
+  // recovery when signature persistence did not complete.
   const onChainSubscription = await subscriptionsProgram.fetchMaybeSubscriptionDelegation(
     input.rpc,
     input.subscriptionPda,
@@ -231,13 +239,15 @@ async function fetchPreservedSubscriptionOrClearSignature(input: {
     return onChainSubscription;
   }
 
-  await clearRecurringPaymentFailedSignature({
-    recurringRepo: input.recurringRepo,
-    recurringPaymentId: input.recurringPaymentId,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    field: "authorizationSignature",
-  });
+  if (input.authorizationSignature) {
+    await clearRecurringPaymentFailedSignature({
+      recurringRepo: input.recurringRepo,
+      recurringPaymentId: input.recurringPaymentId,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      field: "authorizationSignature",
+    });
+  }
   return null;
 }
 
@@ -255,13 +265,15 @@ async function clearActivationSignatureIfPresent(input: {
   await clearRecurringPaymentFailedSignature(input);
 }
 
-async function resetRecurringPaymentActivationIfNotActive(input: {
+async function resetRecurringPaymentActivationUnlessAlreadyActive(input: {
   recurringRepo: ReturnType<typeof createPaymentRecurringPaymentsRepository>;
   recurringPaymentId: string;
   organizationId: string;
   projectId: string;
   updatedAt: string;
 }): Promise<void> {
+  // The repository performs this as one guarded UPDATE so a concurrent success
+  // cannot be reverted from active back to pending_activation.
   await input.recurringRepo.resetRecurringPaymentActivationIfNotActive({
     recurringPaymentId: input.recurringPaymentId,
     organizationId: input.organizationId,
@@ -270,17 +282,20 @@ async function resetRecurringPaymentActivationIfNotActive(input: {
   });
 }
 
-function logFailedActivationCleanup(
+function logActivationAttemptJournalFailures(
   results: PromiseSettledResult<unknown>[],
   context: { recurringPaymentId: string; attemptId: string }
 ): void {
   for (const result of results) {
     if (result.status === "rejected") {
-      console.error("activateRecurringPayment: failed to record activation failure cleanup", {
-        recurringPaymentId: context.recurringPaymentId,
-        attemptId: context.attemptId,
-        error: serializeError(result.reason),
-      });
+      console.error(
+        "activateRecurringPayment: failed to record activation attempt journal update",
+        {
+          recurringPaymentId: context.recurringPaymentId,
+          attemptId: context.attemptId,
+          error: serializeError(result.reason),
+        }
+      );
     }
   }
 }
@@ -444,13 +459,6 @@ export async function activateRecurringPayment(input: {
   });
 
   if (!attempt) {
-    await recurringRepo.updateRecurringPaymentActivation({
-      recurringPaymentId: claimed.id,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      status: "pending_activation",
-      updatedAt: new Date().toISOString(),
-    });
     throw new AppError("CONFLICT", "Recurring payment activation is already processing");
   }
 
@@ -532,7 +540,7 @@ export async function activateRecurringPayment(input: {
     });
 
     let planCreationSignature = claimed.plan_creation_signature;
-    let onChainPlan = await fetchPreservedPlanOrClearSignature({
+    let onChainPlan = await fetchExistingPlanOrClearFailedSignature({
       rpc,
       recurringRepo,
       recurringPaymentId: claimed.id,
@@ -540,10 +548,10 @@ export async function activateRecurringPayment(input: {
       projectId: input.projectId,
       planPda,
       planCreationSignature,
+      probeWithoutSignature: claimed.plan_id !== null,
     });
-    planCreationSignature = onChainPlan ? planCreationSignature : null;
 
-    if (!planCreationSignature) {
+    if (!onChainPlan) {
       const createPlanInstruction = await subscriptionsProgram.getCreatePlanOverlayInstructionAsync(
         {
           amount: amountBaseUnits,
@@ -699,7 +707,7 @@ export async function activateRecurringPayment(input: {
     let authorizationSignature = claimed.authorization_signature;
     let onChainSubscription: Awaited<
       ReturnType<typeof subscriptionsProgram.fetchMaybeSubscriptionDelegation>
-    > | null = await fetchPreservedSubscriptionOrClearSignature({
+    > | null = await fetchExistingSubscriptionOrClearFailedSignature({
       rpc,
       recurringRepo,
       recurringPaymentId: claimed.id,
@@ -707,10 +715,10 @@ export async function activateRecurringPayment(input: {
       projectId: input.projectId,
       subscriptionPda,
       authorizationSignature,
+      probeWithoutSignature: claimed.subscription_id !== null,
     });
-    authorizationSignature = onChainSubscription ? authorizationSignature : null;
 
-    if (!authorizationSignature) {
+    if (!onChainSubscription) {
       const subscriptionAuthority = await subscriptionsProgram.fetchMaybeSubscriptionAuthority(
         rpc,
         subscriptionAuthorityAddress,
@@ -824,27 +832,35 @@ export async function activateRecurringPayment(input: {
       updatedAt: activatedAt,
     });
 
-    await recurringRepo.updateActivationAttempt({
-      attemptId: attempt.id,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      status: "confirmed",
-      phase: "finalize",
-      planId: plan.id,
-      subscriptionId: subscription.id,
-      planCreationSignature,
-      authorizationSignature,
-      updatedAt: activatedAt,
-    });
-
     if (!finalized) {
       throw new AppError("INTERNAL_ERROR", "Failed to finalize recurring payment activation");
     }
+
+    const confirmedAttemptResults = await Promise.allSettled([
+      recurringRepo.updateActivationAttempt({
+        attemptId: attempt.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        status: "confirmed",
+        phase: "finalize",
+        planId: plan.id,
+        subscriptionId: subscription.id,
+        planCreationSignature,
+        authorizationSignature,
+        updatedAt: activatedAt,
+      }),
+    ]);
+    logActivationAttemptJournalFailures(confirmedAttemptResults, {
+      recurringPaymentId: claimed.id,
+      attemptId: attempt.id,
+    });
 
     return finalized;
   } catch (error) {
     const failedAt = new Date().toISOString();
 
+    // Record failure state best-effort without masking the original activation
+    // error thrown from the chain, signer, RPC, or database path above.
     const cleanupResults = await Promise.allSettled([
       recurringRepo.updateActivationAttempt({
         attemptId: attempt.id,
@@ -854,7 +870,7 @@ export async function activateRecurringPayment(input: {
         error: serializeError(error),
         updatedAt: failedAt,
       }),
-      resetRecurringPaymentActivationIfNotActive({
+      resetRecurringPaymentActivationUnlessAlreadyActive({
         recurringRepo,
         recurringPaymentId: claimed.id,
         organizationId: input.organizationId,
@@ -862,7 +878,7 @@ export async function activateRecurringPayment(input: {
         updatedAt: failedAt,
       }),
     ]);
-    logFailedActivationCleanup(cleanupResults, {
+    logActivationAttemptJournalFailures(cleanupResults, {
       recurringPaymentId: claimed.id,
       attemptId: attempt.id,
     });
