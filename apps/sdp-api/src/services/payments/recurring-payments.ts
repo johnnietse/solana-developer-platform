@@ -1067,6 +1067,10 @@ async function claimLifecycleRecords(input: {
         .bind(now, input.organizationId, input.projectId, recurringPayment.id, input.operation)
         .run();
     }
+    // Collection claims insert a collect operation attempt before creating or
+    // signing a transfer. Holding this lifecycle-side mutex check in the claim
+    // transaction prevents cancel/resume from racing a collection into an
+    // orphaned processing transfer.
     await assertNoActiveRecurringOperationAttempt({
       executor: tx,
       organizationId: input.organizationId,

@@ -2166,6 +2166,57 @@ describe("Payments routes", () => {
     });
     await clearRateLimits();
 
+    const blockingCollectOperationAttemptAt = new Date().toISOString();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_recurring_operation_attempts (
+           id,
+           organization_id,
+           project_id,
+           recurring_payment_id,
+           operation,
+           status,
+           created_at,
+           updated_at
+         ) VALUES (?, ?, ?, ?, 'collect', 'processing', ?, ?)`
+      )
+      .bind(
+        "prlo_processing_collect_cancel_block",
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        recurringPaymentId,
+        blockingCollectOperationAttemptAt,
+        blockingCollectOperationAttemptAt
+      )
+      .run();
+    const cancelDuringCollectOperationRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/cancel`,
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: "{}",
+      },
+      env
+    );
+    expect(cancelDuringCollectOperationRes.status).toBe(409);
+    const cancelDuringCollectOperationBody = (await cancelDuringCollectOperationRes.json()) as {
+      error: { message: string };
+    };
+    expect(cancelDuringCollectOperationBody.error.message).toContain(
+      "collection is already in progress"
+    );
+    await getDb(env)
+      .prepare(
+        `UPDATE payment_recurring_operation_attempts
+            SET status = 'failed',
+                error = 'cleared for cancel test',
+                updated_at = ?
+          WHERE id = ?`
+      )
+      .bind(new Date().toISOString(), "prlo_processing_collect_cancel_block")
+      .run();
+    await clearRateLimits();
+
     const duplicateLifecycleClaimAt = new Date().toISOString();
     await repositories.createPaymentRecurringPaymentsRepository(env).updateRecurringPayment({
       recurringPaymentId,
@@ -2448,6 +2499,18 @@ describe("Payments routes", () => {
       signature: `5${MOCK_SIGNATURE_TAIL}`,
     });
     expect(signedRaceFeePaymentAdapter.signAndSend).toHaveBeenCalledTimes(1);
+    const signedRaceCollectOperationAttempt = await getDb(env)
+      .prepare(
+        `SELECT status
+           FROM payment_recurring_operation_attempts
+          WHERE recurring_payment_id = ?
+            AND operation = 'collect'
+          ORDER BY updated_at DESC
+          LIMIT 1`
+      )
+      .bind(recurringPaymentId)
+      .first<{ status: string }>();
+    expect(signedRaceCollectOperationAttempt?.status).toBe("confirmed");
 
     const overdueCollectionAt = new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString();
     const overduePeriodStartAt = new Date(
