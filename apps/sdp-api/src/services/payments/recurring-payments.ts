@@ -246,6 +246,46 @@ async function clearActivationSignatureIfPresent(input: {
   await clearRecurringPaymentFailedSignature(input);
 }
 
+async function resetRecurringPaymentActivationIfNotActive(input: {
+  recurringRepo: ReturnType<typeof createPaymentRecurringPaymentsRepository>;
+  recurringPaymentId: string;
+  organizationId: string;
+  projectId: string;
+  updatedAt: string;
+}): Promise<void> {
+  const latest = await input.recurringRepo.getRecurringPaymentById({
+    recurringPaymentId: input.recurringPaymentId,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+  });
+  if (latest?.status === "active") {
+    return;
+  }
+
+  await input.recurringRepo.updateRecurringPaymentActivation({
+    recurringPaymentId: input.recurringPaymentId,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    status: "pending_activation",
+    updatedAt: input.updatedAt,
+  });
+}
+
+function logFailedActivationCleanup(
+  results: PromiseSettledResult<unknown>[],
+  context: { recurringPaymentId: string; attemptId: string }
+): void {
+  for (const result of results) {
+    if (result.status === "rejected") {
+      console.error("activateRecurringPayment: failed to record activation failure cleanup", {
+        recurringPaymentId: context.recurringPaymentId,
+        attemptId: context.attemptId,
+        error: serializeError(result.reason),
+      });
+    }
+  }
+}
+
 export async function createRecurringPayment(input: {
   env: Env;
   organizationId: string;
@@ -806,28 +846,27 @@ export async function activateRecurringPayment(input: {
   } catch (error) {
     const failedAt = new Date().toISOString();
 
-    await recurringRepo.updateActivationAttempt({
-      attemptId: attempt.id,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      status: "failed",
-      error: serializeError(error),
-      updatedAt: failedAt,
-    });
-    const latest = await recurringRepo.getRecurringPaymentById({
-      recurringPaymentId: claimed.id,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-    });
-    if (latest?.status !== "active") {
-      await recurringRepo.updateRecurringPaymentActivation({
+    const cleanupResults = await Promise.allSettled([
+      recurringRepo.updateActivationAttempt({
+        attemptId: attempt.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        status: "failed",
+        error: serializeError(error),
+        updatedAt: failedAt,
+      }),
+      resetRecurringPaymentActivationIfNotActive({
+        recurringRepo,
         recurringPaymentId: claimed.id,
         organizationId: input.organizationId,
         projectId: input.projectId,
-        status: "pending_activation",
         updatedAt: failedAt,
-      });
-    }
+      }),
+    ]);
+    logFailedActivationCleanup(cleanupResults, {
+      recurringPaymentId: claimed.id,
+      attemptId: attempt.id,
+    });
 
     throw error;
   }
