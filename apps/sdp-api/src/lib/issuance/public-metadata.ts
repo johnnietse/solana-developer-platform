@@ -16,16 +16,32 @@ function getByPath(source: unknown, path: string): unknown {
 
 function setByPath(target: Record<string, unknown>, path: string, value: unknown): void {
   const keys = path.split(".");
+  if (keys.length === 0) {
+    return;
+  }
+
+  const isUnsafeKey = (key: string): boolean =>
+    key === "__proto__" || key === "constructor" || key === "prototype";
+
   let cursor = target;
   for (let i = 0; i < keys.length - 1; i += 1) {
     const key = keys[i];
+    if (isUnsafeKey(key)) {
+      return;
+    }
+
     const next = cursor[key];
     if (!next || typeof next !== "object") {
       cursor[key] = {};
     }
     cursor = cursor[key] as Record<string, unknown>;
   }
-  cursor[keys[keys.length - 1]] = value;
+
+  const lastKey = keys[keys.length - 1];
+  if (isUnsafeKey(lastKey)) {
+    return;
+  }
+  cursor[lastKey] = value;
 }
 
 /**
