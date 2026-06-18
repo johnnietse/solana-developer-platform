@@ -6,9 +6,10 @@
 
 import type { ApiKeyEnvironment, ApiKeyRole, ApiKeyStatus, Permission } from "@sdp/types";
 import type { DatabaseExecutor } from "@/db";
+import { parseOptionalPostgresJson, parsePostgresJson } from "@/db/postgres-utils";
 import { AppError, badRequest } from "@/lib/errors";
 import { hashString } from "@/lib/hash";
-import { createApiKeyMaterial, parseJsonArray } from "./api-key.utils";
+import { createApiKeyMaterial } from "./api-key.utils";
 import { assertGrantableApiKeyPermissions } from "./api-key-scope.service";
 
 export interface ApiKeyListItem {
@@ -166,8 +167,8 @@ export class ApiKeyService {
     return {
       ...this.mapListRow(row),
       projectId: row.project_id,
-      allowedIps: parseJsonArray(row.allowed_ips),
-      permissions: row.permissions ? (JSON.parse(row.permissions) as Permission[]) : null,
+      allowedIps: parseOptionalPostgresJson<string[]>(row.allowed_ips),
+      permissions: row.permissions ? parsePostgresJson<Permission[]>(row.permissions) : null,
       signingWalletId: row.signing_wallet_id,
       rotatedFrom: row.rotated_from,
       rotationDeadline: row.rotation_deadline,
