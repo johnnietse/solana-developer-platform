@@ -18,10 +18,10 @@
   <text x="520" y="68" text-anchor="middle" font-size="13" fill="#64748b">SDP-owned issued-asset identity · private master metadata + cached public projection</text>
 
   <!-- Legend -->
-  <rect x="876" y="84" width="14" height="14" rx="3" fill="#fee2e2" stroke="#dc2626"/>
-  <text x="896" y="96" font-size="12" fill="#334155">private</text>
-  <rect x="876" y="104" width="14" height="14" rx="3" fill="#dcfce7" stroke="#16a34a"/>
-  <text x="896" y="116" font-size="12" fill="#334155">public</text>
+  <rect x="40" y="86" width="14" height="14" rx="3" fill="#fee2e2" stroke="#dc2626"/>
+  <text x="60" y="98" font-size="12" fill="#334155">private</text>
+  <rect x="120" y="86" width="14" height="14" rx="3" fill="#dcfce7" stroke="#16a34a"/>
+  <text x="140" y="98" font-size="12" fill="#334155">public</text>
 
   <!-- Clients -->
   <rect x="110" y="110" width="250" height="58" rx="8" fill="#eef2f7" stroke="#64748b"/>
