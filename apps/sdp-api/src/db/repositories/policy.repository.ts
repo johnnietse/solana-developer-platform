@@ -150,6 +150,28 @@ export interface ActiveApiKeyControlProfileResult {
   revision: ApiKeyControlProfileRevisionRow | null;
 }
 
+export interface ApiKeyPolicySubjectRow {
+  api_key_id: string;
+  organization_id: string;
+  project_id: string | null;
+}
+
+export interface ApiKeyWalletPolicyTargetRow {
+  api_key_id: string;
+  organization_id: string;
+  project_id: string | null;
+  wallet_id: string;
+  custody_wallet_id: string;
+  wallet_project_id: string | null;
+  endpoint_binding_count: number;
+  endpoint_wallet_binding_id: string | null;
+}
+
+export interface ApiKeyWalletPolicyBindingResolutionRow {
+  total_binding_count: number;
+  binding: ApiKeyWalletPolicyBindingRow | null;
+}
+
 export interface CreateWalletControlProfileInput {
   organizationId: string;
   projectId: string | null;
@@ -264,6 +286,9 @@ export interface PolicyRepository {
   getActiveWalletControlProfileByCustodyWalletId(
     custodyWalletId: string
   ): Promise<ActiveWalletControlProfileResult | null>;
+  getActiveWalletControlProfileByProfileId(
+    profileId: string
+  ): Promise<ActiveWalletControlProfileResult | null>;
 
   createApiKeyControlProfile(
     input: CreateApiKeyControlProfileInput
@@ -277,11 +302,23 @@ export interface PolicyRepository {
   getActiveApiKeyControlProfileByApiKeyId(
     apiKeyId: string
   ): Promise<ActiveApiKeyControlProfileResult | null>;
+  getActiveApiKeyControlProfileByProfileId(
+    profileId: string
+  ): Promise<ActiveApiKeyControlProfileResult | null>;
+  getApiKeyPolicySubject(apiKeyId: string): Promise<ApiKeyPolicySubjectRow | null>;
 
   upsertApiKeyWalletPolicyBinding(
     input: UpsertApiKeyWalletPolicyBindingInput
   ): Promise<ApiKeyWalletPolicyBindingRow | null>;
   listApiKeyWalletPolicyBindings(apiKeyId: string): Promise<ApiKeyWalletPolicyBindingRow[]>;
+  getApiKeyWalletPolicyBindingResolution(
+    apiKeyId: string,
+    walletId: string
+  ): Promise<ApiKeyWalletPolicyBindingResolutionRow>;
+  getApiKeyWalletPolicyTarget(
+    apiKeyId: string,
+    walletId: string
+  ): Promise<ApiKeyWalletPolicyTargetRow | null>;
 
   createWalletOperation(input: CreateWalletOperationInput): Promise<WalletOperationRow | null>;
   getWalletOperationById(walletOperationId: string): Promise<WalletOperationRow | null>;

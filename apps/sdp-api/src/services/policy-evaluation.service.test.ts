@@ -489,6 +489,13 @@ describe("PolicyFoundationService policy evaluation", () => {
         },
       })),
       getActiveApiKeyControlProfileByApiKeyId: vi.fn(async () => null),
+      getApiKeyWalletPolicyBindingResolution: vi.fn(async () => ({
+        total_binding_count: 0,
+        binding: null,
+      })),
+      getApiKeyWalletPolicyTarget: vi.fn(async () => {
+        throw new Error("No-policy API key evaluation should not validate wallet scope");
+      }),
       createPolicyEvaluation,
     } as unknown as PolicyRepository;
     const service = new PolicyFoundationService(repository);
@@ -509,5 +516,211 @@ describe("PolicyFoundationService policy evaluation", () => {
         decision: "deny",
       })
     );
+    expect(repository.getApiKeyWalletPolicyTarget).not.toHaveBeenCalled();
+  });
+
+  it("evaluates a scoped API key policy when wallet policy bindings exist", async () => {
+    const repository = {
+      getApiKeyWalletPolicyBindingResolution: vi.fn(async () => ({
+        total_binding_count: 1,
+        binding: {
+          id: "akwpol_1",
+          api_key_id: "key_1",
+          binding_scope: "selected",
+          wallet_id: "wal_1",
+          custody_wallet_id: "cw_1",
+          wallet_control_profile_id: null,
+          api_key_control_profile_id: "akcp_scoped",
+          created_at: "2026-06-18T00:00:00.000Z",
+          updated_at: "2026-06-18T00:00:00.000Z",
+        },
+      })),
+      getApiKeyWalletPolicyTarget: vi.fn(async () => ({
+        api_key_id: "key_1",
+        organization_id: "org_1",
+        project_id: "prj_1",
+        wallet_id: "wal_1",
+        custody_wallet_id: "cw_1",
+        wallet_project_id: "prj_1",
+        endpoint_binding_count: 1,
+        endpoint_wallet_binding_id: "akw_1",
+      })),
+      getActiveWalletControlProfileByCustodyWalletId: vi.fn(async () => null),
+      getActiveApiKeyControlProfileByApiKeyId: vi.fn(async () => null),
+      getActiveApiKeyControlProfileByProfileId: vi.fn(async () => ({
+        profile: {
+          id: "akcp_scoped",
+          organization_id: "org_1",
+          project_id: "prj_1",
+          api_key_id: "key_1",
+          name: "Scoped API key controls",
+          status: "active",
+          active_revision_id: "akcpr_scoped",
+          created_by: "usr_1",
+          created_at: "2026-06-18T00:00:00.000Z",
+          updated_at: "2026-06-18T00:00:00.000Z",
+          activated_at: "2026-06-18T00:00:00.000Z",
+          archived_at: null,
+        },
+        revision: {
+          id: "akcpr_scoped",
+          profile_id: "akcp_scoped",
+          revision_number: 1,
+          rules: [
+            {
+              id: "scoped-blocklist",
+              kind: "destination",
+              blocklist: ["recipient_blocked"],
+            },
+          ],
+          default_action: "allow",
+          created_by: "usr_1",
+          created_at: "2026-06-18T00:00:00.000Z",
+          activated_at: "2026-06-18T00:00:00.000Z",
+        },
+      })),
+    } as unknown as PolicyRepository;
+    const service = new PolicyFoundationService(repository);
+
+    const result = await service.evaluateWalletOperationPolicies(operation);
+
+    expect(result).toMatchObject({
+      decision: "deny",
+      reasonCode: "api_key_policy_match",
+      apiKeyPolicyRevisionId: "akcpr_scoped",
+    });
+    expect(result.apiKey).toMatchObject({
+      profileId: "akcp_scoped",
+      revisionId: "akcpr_scoped",
+    });
+    expect(repository.getApiKeyWalletPolicyTarget).toHaveBeenCalledWith("key_1", "wal_1");
+    expect(repository.getActiveApiKeyControlProfileByApiKeyId).not.toHaveBeenCalled();
+  });
+
+  it("uses a scoped wallet policy profile referenced by the binding", async () => {
+    const repository = {
+      getApiKeyWalletPolicyBindingResolution: vi.fn(async () => ({
+        total_binding_count: 1,
+        binding: {
+          id: "akwpol_1",
+          api_key_id: "key_1",
+          binding_scope: "selected",
+          wallet_id: "wal_1",
+          custody_wallet_id: "cw_1",
+          wallet_control_profile_id: "wcp_bound",
+          api_key_control_profile_id: null,
+          created_at: "2026-06-18T00:00:00.000Z",
+          updated_at: "2026-06-18T00:00:00.000Z",
+        },
+      })),
+      getApiKeyWalletPolicyTarget: vi.fn(async () => ({
+        api_key_id: "key_1",
+        organization_id: "org_1",
+        project_id: "prj_1",
+        wallet_id: "wal_1",
+        custody_wallet_id: "cw_1",
+        wallet_project_id: "prj_1",
+        endpoint_binding_count: 0,
+        endpoint_wallet_binding_id: null,
+      })),
+      getActiveWalletControlProfileByCustodyWalletId: vi.fn(async () => {
+        throw new Error("Scoped wallet policy should be resolved from the binding");
+      }),
+      getActiveWalletControlProfileByProfileId: vi.fn(async () => ({
+        profile: {
+          id: "wcp_bound",
+          organization_id: "org_1",
+          project_id: "prj_1",
+          custody_wallet_id: "cw_1",
+          name: "Bound wallet controls",
+          status: "active",
+          active_revision_id: "wcpr_bound",
+          created_by: "usr_1",
+          created_at: "2026-06-18T00:00:00.000Z",
+          updated_at: "2026-06-18T00:00:00.000Z",
+          activated_at: "2026-06-18T00:00:00.000Z",
+          archived_at: null,
+        },
+        revision: {
+          id: "wcpr_bound",
+          profile_id: "wcp_bound",
+          revision_number: 1,
+          rules: [
+            {
+              id: "bound-wallet-blocklist",
+              kind: "destination",
+              blocklist: ["recipient_blocked"],
+            },
+          ],
+          default_action: "allow",
+          created_by: "usr_1",
+          created_at: "2026-06-18T00:00:00.000Z",
+          activated_at: "2026-06-18T00:00:00.000Z",
+        },
+      })),
+      getActiveApiKeyControlProfileByApiKeyId: vi.fn(async () => null),
+    } as unknown as PolicyRepository;
+    const service = new PolicyFoundationService(repository);
+
+    const result = await service.evaluateWalletOperationPolicies(operation);
+
+    expect(result).toMatchObject({
+      decision: "deny",
+      reasonCode: "wallet_policy_match",
+      walletPolicyRevisionId: "wcpr_bound",
+    });
+    expect(repository.getActiveWalletControlProfileByProfileId).toHaveBeenCalledWith("wcp_bound");
+    expect(repository.getActiveWalletControlProfileByCustodyWalletId).not.toHaveBeenCalled();
+  });
+
+  it("reports a missing scoped binding before wallet target validation", async () => {
+    const repository = {
+      getApiKeyWalletPolicyBindingResolution: vi.fn(async () => ({
+        total_binding_count: 1,
+        binding: null,
+      })),
+      getApiKeyWalletPolicyTarget: vi.fn(async () => {
+        throw new Error("Missing bindings should be reported before wallet target validation");
+      }),
+      getActiveWalletControlProfileByCustodyWalletId: vi.fn(async () => null),
+      getActiveApiKeyControlProfileByApiKeyId: vi.fn(async () => null),
+    } as unknown as PolicyRepository;
+    const service = new PolicyFoundationService(repository);
+
+    await expect(service.evaluateWalletOperationPolicies(operation)).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "API key policy binding is not configured for the requested wallet",
+    });
+    expect(repository.getApiKeyWalletPolicyTarget).not.toHaveBeenCalled();
+  });
+
+  it("fails closed during evaluation when bindings exist but the wallet target is invalid", async () => {
+    const repository = {
+      getApiKeyWalletPolicyBindingResolution: vi.fn(async () => ({
+        total_binding_count: 1,
+        binding: {
+          id: "akwpol_1",
+          api_key_id: "key_1",
+          binding_scope: "all",
+          wallet_id: null,
+          custody_wallet_id: null,
+          wallet_control_profile_id: null,
+          api_key_control_profile_id: "akcp_scoped",
+          created_at: "2026-06-18T00:00:00.000Z",
+          updated_at: "2026-06-18T00:00:00.000Z",
+        },
+      })),
+      getApiKeyWalletPolicyTarget: vi.fn(async () => null),
+      getActiveWalletControlProfileByCustodyWalletId: vi.fn(async () => null),
+      getActiveApiKeyControlProfileByApiKeyId: vi.fn(async () => null),
+      getActiveApiKeyControlProfileByProfileId: vi.fn(async () => null),
+    } as unknown as PolicyRepository;
+    const service = new PolicyFoundationService(repository);
+
+    await expect(service.evaluateWalletOperationPolicies(operation)).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "API key is not authorized for the requested wallet",
+    });
+    expect(repository.getActiveApiKeyControlProfileByProfileId).not.toHaveBeenCalled();
   });
 });
