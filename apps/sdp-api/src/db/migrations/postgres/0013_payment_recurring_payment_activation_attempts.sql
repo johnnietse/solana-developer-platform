@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS payment_recurring_payment_activation_attempts (
     FOREIGN KEY (recurring_payment_id) REFERENCES payment_recurring_payments(id) ON DELETE CASCADE,
     CONSTRAINT payment_recurring_payment_activation_attempts_status_check
         CHECK (status IN ('processing', 'confirmed', 'failed')),
+    CONSTRAINT payment_recurring_payment_activation_attempts_stage_check
+        CHECK (stage IN ('claim', 'create_plan', 'authorize_subscription', 'finalize')),
     CONSTRAINT payment_recurring_payment_activation_attempts_metadata_is_object
         CHECK (jsonb_typeof(metadata) = 'object')
 );

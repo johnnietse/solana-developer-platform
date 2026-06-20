@@ -1215,6 +1215,138 @@ describe("Payments routes", () => {
     expect(signAndSendMock).toHaveBeenCalledTimes(3);
   });
 
+  it("clears failed authorization signatures when finalization cannot find the subscription", async () => {
+    env.PAYMENTS_RECURRING_ENABLED = "true";
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValue(sourceSigner);
+    mockRecurringActivationRpc();
+    fetchMaybeSubscriptionDelegationMock
+      .mockResolvedValueOnce({
+        exists: false,
+        address: address(TEST_SOLANA_ADDRESSES.wallet3),
+      } as Awaited<ReturnType<typeof subscriptionsProgram.fetchMaybeSubscriptionDelegation>>)
+      .mockResolvedValue({
+        exists: true,
+        address: address(TEST_SOLANA_ADDRESSES.wallet3),
+        data: {},
+      } as Awaited<ReturnType<typeof subscriptionsProgram.fetchMaybeSubscriptionDelegation>>);
+    const planSignature =
+      "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature;
+    const failedAuthorizationSignature =
+      "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV" as Signature;
+    const retryAuthorizationSignature =
+      "3eWxmHfS3EPf7nmtdDQ6CTwWqCnX2bAdtc9h1kReBLbqjP99kphnf3UhpSGA8qpmkHxnhqsWyVbRoQY2yagRZkzp" as Signature;
+    const signAndSendMock = vi
+      .fn()
+      .mockResolvedValueOnce(planSignature)
+      .mockResolvedValueOnce(failedAuthorizationSignature)
+      .mockResolvedValueOnce(retryAuthorizationSignature);
+    createFeePaymentAdapterMock.mockReturnValue({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      signAsFeePayer: vi.fn(),
+      signAndSend: signAndSendMock,
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const counterpartyId = await seedCounterparty({
+      externalId: "recurring_activation_missing_delegation_counterparty",
+    });
+    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      address: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+
+    const createRes = await app.request(
+      "/v1/payments/recurring-payments",
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          sourceWalletId: TEST_WALLET_ID,
+          counterpartyId,
+          counterpartyAccountId,
+          token: DEVNET_USDC_MINT,
+          amount: "25.00",
+          periodHours: 24,
+        }),
+      },
+      env
+    );
+    expect(createRes.status).toBe(201);
+    const createBody = (await createRes.json()) as {
+      data: { recurringPayment: { id: string } };
+    };
+
+    const failedRes = await app.request(
+      `/v1/payments/recurring-payments/${createBody.data.recurringPayment.id}/activate`,
+      { method: "POST", headers },
+      env
+    );
+
+    expect(failedRes.status).toBe(400);
+    const getAfterFailureRes = await app.request(
+      `/v1/payments/recurring-payments/${createBody.data.recurringPayment.id}`,
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+    const getAfterFailureBody = (await getAfterFailureRes.json()) as {
+      data: {
+        recurringPayment: {
+          status: string;
+          planCreationSignature: string | null;
+          authorizationSignature: string | null;
+        };
+      };
+    };
+    expect(getAfterFailureBody.data.recurringPayment).toMatchObject({
+      status: "pending_activation",
+      planCreationSignature: planSignature,
+      authorizationSignature: null,
+    });
+
+    const attempts = await getDb(env)
+      .prepare(
+        `SELECT status, stage, error
+           FROM payment_recurring_payment_activation_attempts
+          WHERE recurring_payment_id = ?
+          ORDER BY created_at DESC`
+      )
+      .bind(createBody.data.recurringPayment.id)
+      .all<{ status: string; stage: string; error: string | null }>();
+    expect(attempts.results[0]).toMatchObject({
+      status: "failed",
+      stage: "finalize",
+      error: "Subscription authorization was not found on-chain",
+    });
+
+    const retryRes = await app.request(
+      `/v1/payments/recurring-payments/${createBody.data.recurringPayment.id}/activate`,
+      { method: "POST", headers },
+      env
+    );
+
+    expect(retryRes.status).toBe(200);
+    const retryBody = (await retryRes.json()) as {
+      data: {
+        recurringPayment: {
+          status: string;
+          planCreationSignature: string;
+          authorizationSignature: string;
+        };
+      };
+    };
+    expect(retryBody.data.recurringPayment).toMatchObject({
+      status: "active",
+      planCreationSignature: planSignature,
+      authorizationSignature: retryAuthorizationSignature,
+    });
+    expect(signAndSendMock).toHaveBeenCalledTimes(3);
+  });
+
   it("requires owner wallet access when updating subscription plans", async () => {
     env.PAYMENTS_RECURRING_ENABLED = "true";
     const headers = {

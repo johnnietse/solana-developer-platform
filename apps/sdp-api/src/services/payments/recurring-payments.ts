@@ -287,12 +287,14 @@ async function recordActivationFailure(input: {
   });
 
   if (input.error instanceof AppError && input.error.code === "TRANSACTION_FAILED") {
+    const shouldClearAuthorizationSignature =
+      input.stage === "authorize_subscription" || input.stage === "finalize";
     await input.recurringRepo.updateRecurringPaymentActivation({
       recurringPaymentId: input.claimed.id,
       organizationId: input.organizationId,
       projectId: input.projectId,
       ...(input.stage === "create_plan" ? { planCreationSignature: null } : {}),
-      ...(input.stage === "authorize_subscription" ? { authorizationSignature: null } : {}),
+      ...(shouldClearAuthorizationSignature ? { authorizationSignature: null } : {}),
       updatedAt: input.failedAt,
     });
   }

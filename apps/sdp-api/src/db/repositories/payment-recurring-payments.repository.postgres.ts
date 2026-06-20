@@ -157,6 +157,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
     },
 
     async claimRecurringPaymentActivation(params) {
+      const staleBefore = params.staleBefore ?? null;
       const row = await db
         .prepare(
           `UPDATE payment_recurring_payments
@@ -167,7 +168,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
               AND project_id = ?
               AND (
                 status = 'pending_activation'
-                OR (status = 'activating' AND updated_at <= ?)
+                OR (status = 'activating' AND ?::text IS NOT NULL AND updated_at <= ?)
               )
           RETURNING *`
         )
@@ -176,7 +177,8 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           params.recurringPaymentId,
           params.organizationId,
           params.projectId,
-          params.staleBefore ?? ""
+          staleBefore,
+          staleBefore
         )
         .first<Record<string, unknown>>();
 
