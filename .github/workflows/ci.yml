@@ -450,9 +450,19 @@ jobs:
 
       - name: Surfpool integration tests
         if: matrix.provider == 'surfpool'
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+          DOPPLER_CONFIG: dev_ci
         run: |
           read -r -a test_files <<< "${INTEGRATION_TEST_FILES}"
-          pnpm kora:surfpool:integration -- "${test_files[@]}"
+          if [ "${CI_HAS_DOPPLER_TOKEN}" = "true" ]; then
+            scripts/doppler/run-with-config.sh pnpm kora:surfpool:integration -- "${test_files[@]}"
+          elif [ "${CI_IS_FORK_PULL_REQUEST}" = "true" ]; then
+            echo "::notice title=Fork-safe Surfpool integration skip::Forked pull requests cannot access managed Solana RPC secrets, so Surfpool-backed integration shards are skipped."
+          else
+            echo "DOPPLER_TOKEN_CI must be configured for Surfpool integration shards." >&2
+            exit 1
+          fi
 
       - name: Live Kora integration tests
         if: matrix.provider == 'kora' && env.CI_HAS_DOPPLER_TOKEN == 'true'
