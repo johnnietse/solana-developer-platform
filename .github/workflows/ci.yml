@@ -357,19 +357,24 @@ jobs:
       max-parallel: 2
       matrix:
         include:
-          - name: Kora
+          - name: Kora / Live Smoke
+            provider: kora
             test_files: src/tests/kora.test.ts src/tests/kora-flow.test.ts
             rpc_provider: alchemy
-          - name: Issuance
+          - name: Surfpool / Issuance
+            provider: surfpool
             test_files: src/tests/issuance-endpoints.test.ts src/tests/token2022.test.ts
             rpc_provider: quicknode
-          - name: Mosaic
+          - name: Surfpool / Mosaic
+            provider: surfpool
             test_files: src/tests/mosaic-token-acl.test.ts src/tests/mosaic-abl.test.ts src/tests/mosaic-templates.test.ts
             rpc_provider: triton
-          - name: Token Flows
+          - name: Surfpool / Token Flows
+            provider: surfpool
             test_files: src/tests/deploy.test.ts src/tests/mint.test.ts src/tests/burn.test.ts src/tests/freeze.test.ts
             rpc_provider: quicknode
-          - name: Access
+          - name: Kora / Access
+            provider: kora
             test_files: src/tests/payments-wallet-scope.test.ts src/tests/api-keys-flow.test.ts src/tests/api-keys-rotation.test.ts src/tests/custody-local.test.ts
             rpc_provider: alchemy
     env:
@@ -413,7 +418,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Validate Doppler bootstrap secret
-        if: env.CI_IS_FORK_PULL_REQUEST != 'true'
+        if: matrix.provider == 'kora' && env.CI_IS_FORK_PULL_REQUEST != 'true'
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
         run: |
@@ -427,7 +432,7 @@ jobs:
         uses: dopplerhq/cli-action@v4
 
       - name: Validate integration runtime secrets
-        if: env.CI_HAS_DOPPLER_TOKEN == 'true'
+        if: matrix.provider == 'kora' && env.CI_HAS_DOPPLER_TOKEN == 'true'
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
         run: |
@@ -443,8 +448,14 @@ jobs:
           fi
           EOF
 
-      - name: Integration tests
-        if: env.CI_HAS_DOPPLER_TOKEN == 'true'
+      - name: Surfpool integration tests
+        if: matrix.provider == 'surfpool'
+        run: |
+          read -r -a test_files <<< "${INTEGRATION_TEST_FILES}"
+          pnpm kora:surfpool:integration -- "${test_files[@]}"
+
+      - name: Live Kora integration tests
+        if: matrix.provider == 'kora' && env.CI_HAS_DOPPLER_TOKEN == 'true'
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
           DOPPLER_CONFIG: dev_ci
@@ -453,12 +464,12 @@ jobs:
           pnpm test:integration -- "${test_files[@]}"
 
       - name: Skip secret-backed integration tests for fork
-        if: env.CI_IS_FORK_PULL_REQUEST == 'true' && env.CI_HAS_DOPPLER_TOKEN != 'true'
+        if: matrix.provider == 'kora' && env.CI_IS_FORK_PULL_REQUEST == 'true' && env.CI_HAS_DOPPLER_TOKEN != 'true'
         run: |
           echo "::notice title=Fork-safe integration skip::Forked pull requests cannot access DOPPLER_TOKEN_CI, so Kora/Privy-backed integration tests are skipped. Run this PR from an upstream branch before merge if secret-backed coverage is required."
 
   integration_tests:
-    name: Integration Tests (Devnet/Kora)
+    name: Integration Tests (Surfpool/Kora)
     runs-on: ubuntu-latest
     needs:
       - integration_tests_shard

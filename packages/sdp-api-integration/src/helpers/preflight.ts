@@ -13,6 +13,12 @@ const REQUIRED_KORA_ALLOWED_PROGRAMS = [
   "GATEzzqxhJnsWF6vHRsgtixxSB8PaQdcqGEVTEHWiULz",
 ] as const;
 
+type IntegrationCustodyProvider = "local" | "privy";
+
+type IntegrationEnv = typeof env & {
+  SDP_INTEGRATION_CUSTODY_PROVIDER?: string;
+};
+
 type PreflightState = {
   promise: Promise<void>;
 };
@@ -32,11 +38,16 @@ export async function ensureIntegrationPreflight(): Promise<void> {
 }
 
 async function runPreflight(): Promise<void> {
+  const integrationCustodyProvider = getIntegrationCustodyProvider();
   const missing: string[] = [];
   if (!env.SOLANA_RPC_URL) missing.push("SOLANA_RPC_URL");
-  if (!env.PRIVY_APP_ID) missing.push("PRIVY_APP_ID");
-  if (!env.PRIVY_APP_SECRET) missing.push("PRIVY_APP_SECRET");
   if (!env.KORA_RPC_URL) missing.push("KORA_RPC_URL");
+  if (integrationCustodyProvider === "local") {
+    if (!env.CUSTODY_PRIVATE_KEY) missing.push("CUSTODY_PRIVATE_KEY");
+  } else {
+    if (!env.PRIVY_APP_ID) missing.push("PRIVY_APP_ID");
+    if (!env.PRIVY_APP_SECRET) missing.push("PRIVY_APP_SECRET");
+  }
 
   if (missing.length > 0) {
     throw new Error(
@@ -93,6 +104,18 @@ async function runPreflight(): Promise<void> {
       `Kora preflight failed: fee payer balance too low (${feePayerLamports} lamports, min ${minLamports}).`
     );
   }
+}
+
+function getIntegrationCustodyProvider(): IntegrationCustodyProvider {
+  const raw = (env as IntegrationEnv).SDP_INTEGRATION_CUSTODY_PROVIDER;
+  if (!raw) {
+    return "privy";
+  }
+  if (raw === "local" || raw === "privy") {
+    return raw;
+  }
+
+  throw new Error(`Invalid SDP_INTEGRATION_CUSTODY_PROVIDER: ${raw}. Expected "local" or "privy".`);
 }
 
 function getKoraMinBalanceLamports(): number {
