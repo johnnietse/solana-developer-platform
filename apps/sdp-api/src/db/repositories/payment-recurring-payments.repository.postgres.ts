@@ -515,13 +515,11 @@ export function createPostgresPaymentRecurringPaymentsRepository(
       });
     },
 
-    async getLatestActivationAttempt(input: GetLatestPaymentRecurringPaymentActivationAttemptInput) {
+    async getLatestActivationAttempt(
+      input: GetLatestPaymentRecurringPaymentActivationAttemptInput
+    ) {
       const clauses = ["organization_id = ?", "project_id = ?", "recurring_payment_id = ?"];
-      const values: unknown[] = [
-        input.organizationId,
-        input.projectId,
-        input.recurringPaymentId,
-      ];
+      const values: unknown[] = [input.organizationId, input.projectId, input.recurringPaymentId];
       if (input.statuses?.length) {
         clauses.push(`status IN (${buildInClause(input.statuses.length)})`);
         values.push(...input.statuses);
