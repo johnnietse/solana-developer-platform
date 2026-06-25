@@ -1308,18 +1308,29 @@ async function createClaimedActivationAttempt(input: {
     });
 
     if (existing) {
-      const resumed = await input.recurringRepo.updateActivationAttempt({
-        attemptId: existing.id,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        planCreationSignature:
-          input.claimed.plan_creation_signature ?? existing.plan_creation_signature,
-        authorizationSignature:
-          input.claimed.authorization_signature ?? existing.authorization_signature,
-        error: null,
-        updatedAt: input.nowIso,
-      });
-      return resumed ?? existing;
+      try {
+        const resumed = await input.recurringRepo.updateActivationAttempt({
+          attemptId: existing.id,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          planCreationSignature:
+            input.claimed.plan_creation_signature ?? existing.plan_creation_signature,
+          authorizationSignature:
+            input.claimed.authorization_signature ?? existing.authorization_signature,
+          error: null,
+          updatedAt: input.nowIso,
+        });
+        return resumed ?? existing;
+      } catch (error) {
+        await resetRecurringPaymentActivationUnlessAlreadyActive({
+          recurringRepo: input.recurringRepo,
+          recurringPaymentId: input.claimed.id,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          updatedAt: new Date().toISOString(),
+        });
+        throw error;
+      }
     }
   }
 

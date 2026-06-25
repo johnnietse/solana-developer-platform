@@ -29,6 +29,10 @@ BEGIN
       ALTER COLUMN stage SET DEFAULT 'claim',
       ALTER COLUMN stage SET NOT NULL;
 
+    UPDATE payment_recurring_payment_activation_attempts
+       SET stage = 'claim'
+     WHERE stage NOT IN ('claim', 'create_plan', 'authorize_subscription', 'finalize');
+
     ALTER TABLE payment_recurring_payment_activation_attempts
       DROP CONSTRAINT IF EXISTS payment_recurring_payment_activation_attempts_stage_check;
 
