@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.34.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.33.0...v0.34.0) (2026-06-25)
+
+### Features
+
+* **api:** add recurring payment lifecycle routes ([#517](https://github.com/solana-foundation/solana-developer-platform/pull/517)) ([1241c12](https://github.com/solana-foundation/solana-developer-platform/commit/1241c1239a147c2ecf97ed426b0642e0c1a56b18))
+* **sdp-web:** HOO-475 - Show signer authority indicator for Freeze and Pause actions ([#450](https://github.com/solana-foundation/solana-developer-platform/pull/450)) ([d8a9660](https://github.com/solana-foundation/solana-developer-platform/commit/d8a9660f4b12660baa8773f1c990c97869f0f826))
+* HOO-709 Suport native fee payments using NativeAdapter ([#521](https://github.com/solana-foundation/solana-developer-platform/pull/521)) ([adf47b0](https://github.com/solana-foundation/solana-developer-platform/commit/adf47b097c8c1c5bfc1493c2310676a58f66fc03))
+* **payments:** settle payment requests on read via Solana Pay reference ([#522](https://github.com/solana-foundation/solana-developer-platform/pull/522)) ([849014f](https://github.com/solana-foundation/solana-developer-platform/commit/849014f841b6512fbbd35a1ee4b0475f90e2bb34))
+* **payments:** request-for-payment links with Solana Pay QR + reconciliation ([#515](https://github.com/solana-foundation/solana-developer-platform/pull/515)) ([9d322e0](https://github.com/solana-foundation/solana-developer-platform/commit/9d322e0503f723615b3196995b6069971a8c8275))
+
+### Refactors
+
+* centralize well-known token mints into a shared registry ([#520](https://github.com/solana-foundation/solana-developer-platform/pull/520)) ([fedd439](https://github.com/solana-foundation/solana-developer-platform/commit/fedd4393e78de8b52d600936418806b2192d98b3))
+
+### Maintenance
+
+* select surfpool remote rpc ([#516](https://github.com/solana-foundation/solana-developer-platform/pull/516)) ([8853909](https://github.com/solana-foundation/solana-developer-platform/commit/8853909f14194281d9629a3a92476efcaa31b186))
+
 ## [0.33.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.32.0...v0.33.0) (2026-06-24)
 
 ### Features
