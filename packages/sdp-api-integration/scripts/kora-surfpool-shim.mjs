@@ -112,14 +112,18 @@ async function handleRpc(method, params) {
     }
     case "signAndSendTransaction": {
       const signedTransaction = await signTransaction(params.transaction);
-      const signature = await solanaRpc("sendTransaction", [
-        signedTransaction,
-        {
-          encoding: "base64",
-          skipPreflight: true,
-          preflightCommitment: "confirmed",
-        },
-      ], { timeoutMs: sendTransactionTimeoutMs });
+      const signature = await solanaRpc(
+        "sendTransaction",
+        [
+          signedTransaction,
+          {
+            encoding: "base64",
+            skipPreflight: true,
+            preflightCommitment: "confirmed",
+          },
+        ],
+        { timeoutMs: sendTransactionTimeoutMs }
+      );
       return {
         signature,
         signed_transaction: signedTransaction,
@@ -144,9 +148,7 @@ async function signTransaction(base64Transaction) {
 async function solanaRpc(method, params = [], options = {}) {
   const timeoutMs = options.timeoutMs ?? solanaRpcTimeoutMs;
   const signal =
-    Number.isFinite(timeoutMs) && timeoutMs > 0
-      ? AbortSignal.timeout(timeoutMs)
-      : undefined;
+    Number.isFinite(timeoutMs) && timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;
   const response = await fetch(solanaRpcUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

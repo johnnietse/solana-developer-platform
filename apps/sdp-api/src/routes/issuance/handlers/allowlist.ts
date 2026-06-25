@@ -28,11 +28,15 @@ function getSurfpoolAblRemoveTimeoutMs(env: Env): number {
     : DEFAULT_SURFPOOL_ABL_REMOVE_TIMEOUT_MS;
 }
 
-function isTimeoutLikeError(error: unknown): boolean {
+function isTimeoutLikeError(error: unknown): error is Error {
   return error instanceof Error && /aborted|timed?\s*out|timeout/i.test(error.message);
 }
 
-async function withTimeout<T>(operation: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+async function withTimeout<T>(
+  operation: Promise<T>,
+  timeoutMs: number,
+  message: string
+): Promise<T> {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   void operation.catch(() => undefined);
 
@@ -280,7 +284,7 @@ export const removeAllowlistEntry = async (c: AppContext) => {
       await removeExistingAllowlistEntryOnChain({
         c,
         organizationId: auth.organizationId,
-        projectId: auth.projectId,
+        projectId,
         signingWalletId: token.signingWalletId,
         list: assertValidAddress(token.ablListAddress, "ablListAddress"),
         wallet: assertValidAddress(entry.address, "address"),

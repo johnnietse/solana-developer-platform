@@ -10,7 +10,9 @@ import {
 import { seedProjectCookie } from "../support/local-dashboard-bootstrap";
 import { bootstrapLocalIssuanceFixtures } from "../support/local-issuance-bootstrap";
 
+// biome-ignore lint/security/noSecrets: Solana associated token program ID, not a secret.
 const ASSOCIATED_TOKEN_PROGRAM_ID = address("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+// biome-ignore lint/security/noSecrets: Solana Token-2022 program ID, not a secret.
 const TOKEN_2022_PROGRAM_ID = address("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 
 function shortValue(value: string): string {

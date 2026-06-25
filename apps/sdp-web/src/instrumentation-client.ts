@@ -54,6 +54,4 @@ if (sentryDsn) {
   });
 }
 
-export const onRouterTransitionStart = sentryDsn
-  ? Sentry.captureRouterTransitionStart
-  : undefined;
+export const onRouterTransitionStart = sentryDsn ? Sentry.captureRouterTransitionStart : undefined;

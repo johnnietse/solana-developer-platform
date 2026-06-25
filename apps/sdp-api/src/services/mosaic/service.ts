@@ -15,8 +15,8 @@
 import {
   type Address,
   appendTransactionMessageInstructions,
-  compileTransaction,
   type Commitment,
+  compileTransaction,
   createNoopSigner,
   createTransactionMessage,
   fetchEncodedAccount,

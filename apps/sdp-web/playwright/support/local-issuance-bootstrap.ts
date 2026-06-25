@@ -211,11 +211,7 @@ export async function bootstrapLocalIssuanceFixtures({
     treasuryWallet.walletId
   );
   const openToken = await deployFixtureToken(api, openDraft.id, treasuryWallet.walletId);
-  const authorityToken = await deployFixtureToken(
-    api,
-    authorityDraft.id,
-    treasuryWallet.walletId
-  );
+  const authorityToken = await deployFixtureToken(api, authorityDraft.id, treasuryWallet.walletId);
 
   const fixtures: IssuanceFixtures = {
     organization: walletBootstrap.organization,
