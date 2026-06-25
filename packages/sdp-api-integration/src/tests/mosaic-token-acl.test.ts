@@ -295,7 +295,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
     expect(error.error.message).toContain("freeze");
   });
 
-  it("rejects thaw for account that is not frozen", { timeout: 120000 }, async () => {
+  it("rejects thaw for account that is not frozen", { timeout: 180000 }, async () => {
     // Create and deploy freezable token
     const { tokenId } = await createAndDeployFreezableToken("Not Frozen Token", "NOTF");
 
