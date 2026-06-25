@@ -1371,29 +1371,36 @@ async function settleActiveActivationAttempt(input: {
   projectId: string;
   nowIso: string;
 }): Promise<void> {
-  const attempt = await input.recurringRepo.getLatestActivationAttempt({
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    recurringPaymentId: input.recurringPayment.id,
-    statuses: ["processing"],
-  });
-  if (!attempt) {
-    return;
-  }
+  try {
+    const attempt = await input.recurringRepo.getLatestActivationAttempt({
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPaymentId: input.recurringPayment.id,
+      statuses: ["processing"],
+    });
+    if (!attempt) {
+      return;
+    }
 
-  await input.recurringRepo.updateActivationAttempt({
-    attemptId: attempt.id,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    status: "confirmed",
-    stage: "finalize",
-    planCreationSignature:
-      input.recurringPayment.plan_creation_signature ?? attempt.plan_creation_signature,
-    authorizationSignature:
-      input.recurringPayment.authorization_signature ?? attempt.authorization_signature,
-    error: null,
-    updatedAt: input.nowIso,
-  });
+    await input.recurringRepo.updateActivationAttempt({
+      attemptId: attempt.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      status: "confirmed",
+      stage: "finalize",
+      planCreationSignature:
+        input.recurringPayment.plan_creation_signature ?? attempt.plan_creation_signature,
+      authorizationSignature:
+        input.recurringPayment.authorization_signature ?? attempt.authorization_signature,
+      error: null,
+      updatedAt: input.nowIso,
+    });
+  } catch (error) {
+    console.error("Failed to settle recurring payment activation attempt on active replay", {
+      error: error instanceof Error ? error.message : String(error),
+      recurringPaymentId: input.recurringPayment.id,
+    });
+  }
 }
 
 async function fetchConfirmedActivationPlan(input: {

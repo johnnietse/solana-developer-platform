@@ -12,7 +12,8 @@ BEGIN
     IF EXISTS (
       SELECT 1
         FROM information_schema.columns
-       WHERE table_name = 'payment_recurring_payment_activation_attempts'
+       WHERE table_schema = current_schema()
+         AND table_name = 'payment_recurring_payment_activation_attempts'
          AND column_name = 'phase'
     ) THEN
       UPDATE payment_recurring_payment_activation_attempts
