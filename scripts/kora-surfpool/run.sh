@@ -10,7 +10,7 @@ if [ "${1:-}" = "--" ]; then
 fi
 
 if [ "$#" -eq 0 ]; then
-  echo "Usage: pnpm kora:surfpool:integration -- <test-files...>" >&2
+  echo "Usage: pnpm kora:surfpool:run -- <command> [args...]" >&2
   exit 1
 fi
 
@@ -30,14 +30,14 @@ fi
 export FEE_PAYMENT_PROVIDER="${FEE_PAYMENT_PROVIDER:-kora}"
 export RUN_INTEGRATION_TESTS="${RUN_INTEGRATION_TESTS:-true}"
 export KORA_SURFPOOL_SHIM="${KORA_SURFPOOL_SHIM:-true}"
-export SOLANA_RPC_DEFAULT_PROVIDER=default
 export SDP_INTEGRATION_CUSTODY_PROVIDER="${SDP_INTEGRATION_CUSTODY_PROVIDER:-local}"
 if [ "${SDP_INTEGRATION_CUSTODY_PROVIDER}" = "local" ]; then
   export SIGNING_PROVIDER=local
   export SIGNING_PROVIDERS=local
   export CUSTODY_PRIVATE_KEY="${KORA_SURFPOOL_CUSTODY_PRIVATE_KEY:-99eUso3aSbE9tqGSTXzo3TLfKb9RkMTURrHKQ1K7Zh3StnzFNUx8FKCPPPPpR479qsw5zv2WNBKmgiz7WqgAJfM}"
 fi
-export DATABASE_URL="${KORA_SURFPOOL_DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp}"
+export SOLANA_RPC_DEFAULT_PROVIDER=default
+export DATABASE_URL="${KORA_SURFPOOL_DATABASE_URL:-${DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp}}"
 export CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE="${DATABASE_URL}"
 
 "${ROOT_DIR}/scripts/kora-surfpool/up.sh"
@@ -48,6 +48,8 @@ if [ -f "${RUNTIME_ENV_FILE}" ]; then
   set +a
 fi
 
+export DATABASE_URL="${KORA_SURFPOOL_DATABASE_URL:-${DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp}}"
+export CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE="${DATABASE_URL}"
 export SDP_INTEGRATION_CUSTODY_PROVIDER="${SDP_INTEGRATION_CUSTODY_PROVIDER:-local}"
 if [ "${SDP_INTEGRATION_CUSTODY_PROVIDER}" = "local" ]; then
   export SIGNING_PROVIDER=local
@@ -55,8 +57,5 @@ if [ "${SDP_INTEGRATION_CUSTODY_PROVIDER}" = "local" ]; then
   export CUSTODY_PRIVATE_KEY="${KORA_SURFPOOL_CUSTODY_PRIVATE_KEY:-99eUso3aSbE9tqGSTXzo3TLfKb9RkMTURrHKQ1K7Zh3StnzFNUx8FKCPPPPpR479qsw5zv2WNBKmgiz7WqgAJfM}"
 fi
 export SOLANA_RPC_DEFAULT_PROVIDER=default
-export DATABASE_URL="${KORA_SURFPOOL_DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp}"
-export CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE="${DATABASE_URL}"
 
-pnpm --filter @sdp/api db:postgres:bootstrap
-pnpm --filter @sdp/api-integration exec vitest run "$@"
+"$@"

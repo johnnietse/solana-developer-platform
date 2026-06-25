@@ -6,12 +6,17 @@ import {
   type IssuanceFixtureToken,
   writeIssuanceFixtures,
 } from "./issuance-fixtures";
-import { createLocalApiClient, type LocalApiClient } from "./local-api-client";
+import {
+  type BearerTokenProvider,
+  createLocalApiClient,
+  type LocalApiClient,
+} from "./local-api-client";
 import {
   bootstrapLocalWalletFixtures,
   createExternalSolanaAddress,
   getBootstrapApiBaseUrl,
   getBootstrapClerkJwtTemplate,
+  getPlaywrightCustodyProvider,
   type PlaywrightWalletFixture,
   resolvePlaywrightProjectId,
   seedLocalClerkOrganizationMapping,
@@ -19,7 +24,7 @@ import {
 
 interface BootstrapOptions {
   identity: ClerkTestIdentity;
-  bearerToken: string;
+  bearerToken: BearerTokenProvider;
   tier?: OrganizationTier;
 }
 
@@ -138,11 +143,12 @@ export async function bootstrapLocalIssuanceFixtures({
   bearerToken,
   tier,
 }: BootstrapOptions): Promise<IssuanceFixtures> {
+  const custodyProvider = getPlaywrightCustodyProvider();
   const walletBootstrap = await bootstrapLocalWalletFixtures({
     identity,
     bearerToken,
-    provider: "privy",
-    walletCount: 2,
+    provider: custodyProvider,
+    walletCount: custodyProvider === "local" ? 1 : 2,
     tier,
     // sRFC-37 deploys (denylist tokens) bypass Kora and have custody pay
     // directly, so the treasury wallet needs SOL up front. 0.05 SOL covers
@@ -158,13 +164,17 @@ export async function bootstrapLocalIssuanceFixtures({
     walletBootstrap.wallets[0]?.walletId,
     0
   );
-  const delegatedWallet = requireWallet(
-    walletBootstrap.wallets,
-    walletBootstrap.wallets[1]?.walletId,
-    1
-  );
-
   const externalAddresses = await createExternalAddressSet();
+  const delegatedWallet =
+    walletBootstrap.wallets[1] ??
+    (custodyProvider === "local"
+      ? treasuryWallet
+      : ({
+          id: "external-delegated-authority",
+          walletId: externalAddresses.freezeWallet,
+          publicKey: externalAddresses.freezeWallet,
+          label: "External delegated authority",
+        } satisfies PlaywrightWalletFixture));
 
   const pendingToken = await createFixtureToken(api, {
     name: "E2E Pending Stable",
@@ -187,6 +197,13 @@ export async function bootstrapLocalIssuanceFixtures({
     requiresAllowlist: false,
     signingWalletId: treasuryWallet.walletId,
   });
+  const authorityDraft = await createFixtureToken(api, {
+    name: "E2E Authority Stable",
+    symbol: "E2EAUT",
+    uri: "https://example.com/metadata/e2e-authority-stable.json",
+    requiresAllowlist: false,
+    signingWalletId: treasuryWallet.walletId,
+  });
 
   const allowlistedToken = await deployFixtureToken(
     api,
@@ -194,6 +211,11 @@ export async function bootstrapLocalIssuanceFixtures({
     treasuryWallet.walletId
   );
   const openToken = await deployFixtureToken(api, openDraft.id, treasuryWallet.walletId);
+  const authorityToken = await deployFixtureToken(
+    api,
+    authorityDraft.id,
+    treasuryWallet.walletId
+  );
 
   const fixtures: IssuanceFixtures = {
     organization: walletBootstrap.organization,
@@ -205,6 +227,7 @@ export async function bootstrapLocalIssuanceFixtures({
     tokens: {
       pending: toFixtureToken(pendingToken),
       allowlisted: toFixtureToken(allowlistedToken),
+      authority: toFixtureToken(authorityToken),
       open: toFixtureToken(openToken),
     },
     addresses: externalAddresses,

@@ -179,7 +179,7 @@ test.describe
       await ensureLinkedOrg(session.identity);
       walletsProjectId = await resolvePlaywrightProjectId(
         getBootstrapApiBaseUrl(),
-        session.bearerToken
+        session.getBearerToken
       );
       await session.page.close();
     });
@@ -232,7 +232,7 @@ test.describe
       const session = await getPlaywrightAdminSession(browser);
       const fixtures = await bootstrapLocalWalletFixtures({
         identity: session.identity,
-        bearerToken: session.bearerToken,
+        bearerToken: session.getBearerToken,
         provider: "privy",
         walletCount: 1,
         fundSourceWallet: true,
@@ -241,10 +241,9 @@ test.describe
       });
       const projectId = await resolvePlaywrightProjectId(
         getBootstrapApiBaseUrl(),
-        session.bearerToken
+        session.getBearerToken
       );
-      const api = createLocalApiClient(getBootstrapApiBaseUrl(), session.bearerToken, projectId);
-      await session.page.close();
+      const api = createLocalApiClient(getBootstrapApiBaseUrl(), session.getBearerToken, projectId);
       await seedProjectCookie(page, projectId);
 
       const wallet = fixtures.wallets[0];
@@ -306,6 +305,7 @@ test.describe
         "have total supply 3"
       );
       await waitForWalletTokenBalance(api, wallet.walletId, mintAddress, 3);
+      await session.page.close();
 
       await page.goto(`/dashboard/wallets/${wallet.walletId}`);
 
@@ -365,14 +365,14 @@ test.describe
       const session = await getPlaywrightAdminSession(browser);
       const fixtures = await bootstrapLocalWalletFixtures({
         identity: session.identity,
-        bearerToken: session.bearerToken,
+        bearerToken: session.getBearerToken,
         provider: "privy",
         walletCount: 1,
         tier: "enterprise",
       });
       const projectId = await resolvePlaywrightProjectId(
         getBootstrapApiBaseUrl(),
-        session.bearerToken
+        session.getBearerToken
       );
       await session.page.close();
       await seedProjectCookie(page, projectId);

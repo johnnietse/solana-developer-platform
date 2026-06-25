@@ -26,12 +26,12 @@ test.describe
       const session = await getPlaywrightAdminSession(browser);
       const fixtures = await bootstrapLocalIssuanceFixtures({
         identity: session.identity,
-        bearerToken: session.bearerToken,
+        bearerToken: session.getBearerToken,
         tier: "enterprise",
       });
       const api = createLocalApiClient(
         getBootstrapApiBaseUrl(),
-        session.bearerToken,
+        session.getBearerToken,
         fixtures.projectId
       );
 
