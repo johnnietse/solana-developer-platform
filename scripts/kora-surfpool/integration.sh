@@ -14,6 +14,23 @@ if [ "$#" -eq 0 ]; then
   exit 1
 fi
 
+configure_local_custody() {
+  if [ "${SDP_INTEGRATION_CUSTODY_PROVIDER}" != "local" ]; then
+    return
+  fi
+
+  export SIGNING_PROVIDER=local
+  export SIGNING_PROVIDERS=local
+
+  if [ -n "${KORA_SURFPOOL_CUSTODY_PRIVATE_KEY:-}" ]; then
+    export CUSTODY_PRIVATE_KEY="${KORA_SURFPOOL_CUSTODY_PRIVATE_KEY}"
+  elif [ -z "${CUSTODY_PRIVATE_KEY:-}" ]; then
+    echo "Generating test-only local custody signer."
+    CUSTODY_PRIVATE_KEY="$(pnpm --silent --filter @sdp/api keygen:local --quiet)"
+    export CUSTODY_PRIVATE_KEY
+  fi
+}
+
 test_files=()
 vitest_args=()
 for arg in "$@"; do
@@ -57,11 +74,7 @@ export RUN_INTEGRATION_TESTS="${RUN_INTEGRATION_TESTS:-true}"
 export KORA_SURFPOOL_SHIM="${KORA_SURFPOOL_SHIM:-true}"
 export SOLANA_RPC_DEFAULT_PROVIDER=default
 export SDP_INTEGRATION_CUSTODY_PROVIDER="${SDP_INTEGRATION_CUSTODY_PROVIDER:-local}"
-if [ "${SDP_INTEGRATION_CUSTODY_PROVIDER}" = "local" ]; then
-  export SIGNING_PROVIDER=local
-  export SIGNING_PROVIDERS=local
-  export CUSTODY_PRIVATE_KEY="${KORA_SURFPOOL_CUSTODY_PRIVATE_KEY:-99eUso3aSbE9tqGSTXzo3TLfKb9RkMTURrHKQ1K7Zh3StnzFNUx8FKCPPPPpR479qsw5zv2WNBKmgiz7WqgAJfM}"
-fi
+configure_local_custody
 export DATABASE_URL="${KORA_SURFPOOL_DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp}"
 export CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE="${DATABASE_URL}"
 
