@@ -1,5 +1,6 @@
 import { KoraClient } from "@sdp/api/services/adapters";
 import { env } from "#env-impl";
+import { getIntegrationCustodyProvider } from "./custody-provider";
 
 type SolanaRpcResponse<T> =
   | { jsonrpc: "2.0"; id: number; result: T }
@@ -12,12 +13,6 @@ const REQUIRED_KORA_ALLOWED_PROGRAMS = [
   // biome-ignore lint/security/noSecrets: Public Solana program ID, not a secret.
   "GATEzzqxhJnsWF6vHRsgtixxSB8PaQdcqGEVTEHWiULz",
 ] as const;
-
-type IntegrationCustodyProvider = "local" | "privy";
-
-type IntegrationEnv = typeof env & {
-  SDP_INTEGRATION_CUSTODY_PROVIDER?: string;
-};
 
 type PreflightState = {
   promise: Promise<void>;
@@ -104,18 +99,6 @@ async function runPreflight(): Promise<void> {
       `Kora preflight failed: fee payer balance too low (${feePayerLamports} lamports, min ${minLamports}).`
     );
   }
-}
-
-function getIntegrationCustodyProvider(): IntegrationCustodyProvider {
-  const raw = (env as IntegrationEnv).SDP_INTEGRATION_CUSTODY_PROVIDER;
-  if (!raw) {
-    return "privy";
-  }
-  if (raw === "local" || raw === "privy") {
-    return raw;
-  }
-
-  throw new Error(`Invalid SDP_INTEGRATION_CUSTODY_PROVIDER: ${raw}. Expected "local" or "privy".`);
 }
 
 function getKoraMinBalanceLamports(): number {

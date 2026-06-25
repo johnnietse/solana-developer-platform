@@ -73,12 +73,8 @@ if [ -f "${RUNTIME_ENV_FILE}" ]; then
   set +a
 fi
 
-export SDP_INTEGRATION_CUSTODY_PROVIDER="${SDP_INTEGRATION_CUSTODY_PROVIDER:-local}"
-if [ "${SDP_INTEGRATION_CUSTODY_PROVIDER}" = "local" ]; then
-  export SIGNING_PROVIDER=local
-  export SIGNING_PROVIDERS=local
-  export CUSTODY_PRIVATE_KEY="${KORA_SURFPOOL_CUSTODY_PRIVATE_KEY:-99eUso3aSbE9tqGSTXzo3TLfKb9RkMTURrHKQ1K7Zh3StnzFNUx8FKCPPPPpR479qsw5zv2WNBKmgiz7WqgAJfM}"
-fi
+# Re-derive DB bindings after runtime.env is sourced; up.sh may write a
+# KORA_SURFPOOL_DATABASE_URL override for the active harness.
 export SOLANA_RPC_DEFAULT_PROVIDER=default
 export DATABASE_URL="${KORA_SURFPOOL_DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp}"
 export CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE="${DATABASE_URL}"

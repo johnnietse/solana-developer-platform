@@ -32,6 +32,7 @@ import {
 } from "@solana/kit";
 import { getTransferSolInstruction } from "@solana-program/system";
 import { env } from "#env-impl";
+import { getIntegrationCustodyProvider } from "./custody-provider";
 
 const PRIVY_CONFIGURED = !!env.PRIVY_APP_ID && !!env.PRIVY_APP_SECRET;
 const KORA_CONFIGURED = !!env.KORA_RPC_URL;
@@ -56,24 +57,6 @@ const KORA_MAX_TRANSFER_LAMPORTS = 10_000_000n;
 type SolanaRpcResponse<T> =
   | { jsonrpc: "2.0"; id: number; result: T }
   | { jsonrpc: "2.0"; id: number; error: { code: number; message: string; data?: unknown } };
-
-type IntegrationCustodyProvider = "local" | "privy";
-
-type IntegrationEnv = typeof env & {
-  SDP_INTEGRATION_CUSTODY_PROVIDER?: string;
-};
-
-function getIntegrationCustodyProvider(): IntegrationCustodyProvider {
-  const raw = (env as IntegrationEnv).SDP_INTEGRATION_CUSTODY_PROVIDER;
-  if (!raw) {
-    return "privy";
-  }
-  if (raw === "local" || raw === "privy") {
-    return raw;
-  }
-
-  throw new Error(`Invalid SDP_INTEGRATION_CUSTODY_PROVIDER: ${raw}. Expected "local" or "privy".`);
-}
 
 function getOrganizationSettingsForIntegration(): string | null {
   if (INTEGRATION_CUSTODY_PROVIDER !== "local") {
