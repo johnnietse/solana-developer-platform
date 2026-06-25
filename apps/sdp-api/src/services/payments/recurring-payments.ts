@@ -1300,12 +1300,24 @@ async function createClaimedActivationAttempt(input: {
   recoveringStaleActivation: boolean;
 }): Promise<PaymentRecurringPaymentActivationAttemptRow> {
   if (input.recoveringStaleActivation) {
-    const existing = await input.recurringRepo.getLatestActivationAttempt({
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      recurringPaymentId: input.claimed.id,
-      statuses: ["processing"],
-    });
+    let existing: PaymentRecurringPaymentActivationAttemptRow | null = null;
+    try {
+      existing = await input.recurringRepo.getLatestActivationAttempt({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        recurringPaymentId: input.claimed.id,
+        statuses: ["processing"],
+      });
+    } catch (error) {
+      await resetRecurringPaymentActivationUnlessAlreadyActive({
+        recurringRepo: input.recurringRepo,
+        recurringPaymentId: input.claimed.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        updatedAt: new Date().toISOString(),
+      });
+      throw error;
+    }
 
     if (existing) {
       try {
