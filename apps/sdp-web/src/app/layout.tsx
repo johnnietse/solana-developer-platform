@@ -1,8 +1,6 @@
-import { ClerkProvider } from "@clerk/nextjs";
 import type { Metadata } from "next";
-import { headers } from "next/headers";
 import { Toaster } from "sonner";
-import { shouldLoadClerkForPath } from "@/lib/auth-entry";
+import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
 
 const ALLOWED_SATELLITE_REDIRECT_ORIGINS = [
@@ -15,14 +13,12 @@ export const metadata: Metadata = {
   description: "SDP dashboard",
 };
 
-export default async function RootLayout({
+export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const pathname = (await headers()).get("x-sdp-pathname") ?? "/";
-  const shouldLoadClerk = await shouldLoadClerkForPath(pathname);
-  const content = shouldLoadClerk ? (
+  return (
     <ClerkProvider
       signInUrl="/sign-in"
       signUpUrl="/sign-up"
@@ -31,18 +27,12 @@ export default async function RootLayout({
       allowedRedirectOrigins={ALLOWED_SATELLITE_REDIRECT_ORIGINS}
       afterSignOutUrl="/sign-in"
     >
-      {children}
+      <html lang="en" suppressHydrationWarning>
+        <body>
+          {children}
+          <Toaster position="bottom-right" richColors closeButton />
+        </body>
+      </html>
     </ClerkProvider>
-  ) : (
-    children
-  );
-
-  return (
-    <html lang="en">
-      <body>
-        {content}
-        <Toaster position="bottom-right" richColors closeButton />
-      </body>
-    </html>
   );
 }
