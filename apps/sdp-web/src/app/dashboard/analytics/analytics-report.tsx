@@ -41,33 +41,48 @@ async function captureCard(el: HTMLElement): Promise<string | null> {
   }
 }
 
+function getSectionLabel(el: HTMLElement): string {
+  const aria = el.getAttribute("aria-label");
+  if (aria) return aria;
+  const heading = el.querySelector("h2, h3, .text-\\[19px\\], [class*='font-semibold']");
+  if (heading?.textContent?.trim()) return heading.textContent.trim();
+  const firstP = el.querySelector("p");
+  if (firstP?.textContent?.trim()) return firstP.textContent.trim();
+  return "Section";
+}
+
 export function ReportButton() {
   const [loading, setLoading] = useState(false);
 
   async function generateReport() {
     setLoading(true);
     try {
-      const cards = document.querySelectorAll<HTMLElement>('[data-analytics-root] [role="region"]');
-      const images: string[] = [];
+      const cards = document.querySelectorAll<HTMLElement>(
+        '[data-analytics-root] [data-report="section"], [data-analytics-root] [role="region"]'
+      );
+      const entries: { label: string; src: string | null }[] = [];
 
       for (const card of cards) {
         if (card.getBoundingClientRect().height < 50) continue;
-        const dataUrl = await captureCard(card);
-        if (dataUrl) images.push(dataUrl);
+        const label = getSectionLabel(card);
+        const src = await captureCard(card);
+        entries.push({ label, src });
       }
 
       const reportHtml = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Analytics Report</title>
 <style>
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 40px; color: #1c1c1d; background: #fff; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 40px; color: #1c1c1d; background: #fff; max-width: 900px; margin: 0 auto; }
   h1 { font-size: 28px; font-weight: 600; margin: 0 0 4px; }
   .meta { color: #6b6b6d; font-size: 13px; margin: 0 0 32px; }
-  img { display: block; max-width: 100%; margin-bottom: 28px; border: 1px solid #e5e5e5; border-radius: 10px; }
+  .section { margin-bottom: 32px; }
+  .section-label { font-size: 13px; font-weight: 500; color: #6b6b6d; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 8px; }
+  img { display: block; max-width: 100%; border: 1px solid #e5e5e5; border-radius: 10px; }
   .footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #eee; font-size: 11px; color: #999; }
 </style></head><body>
 <h1>Analytics Report</h1>
 <p class="meta">Generated ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
-${images.map((src) => `<img src="${src}" alt="" />`).join("\n")}
+${entries.map((e) => e.src ? `<div class="section"><p class="section-label">${e.label}</p><img src="${e.src}" alt="${e.label}" /></div>` : "").join("\n")}
 <div class="footer">Solana Developer Platform &mdash; Analytics Export</div>
 </body></html>`;
 

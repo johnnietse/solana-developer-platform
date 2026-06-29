@@ -251,6 +251,7 @@ export function AnalyticsWorkspace({
   return (
     <div className="flex flex-col gap-6" data-analytics-root>
       <motion.div
+        data-report="section"
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.2, ease: "easeOut" }}
@@ -280,25 +281,33 @@ export function AnalyticsWorkspace({
         </div>
       </motion.div>
 
-      <KpiCards
-        totalTvl={totalTvl}
-        totalHolders={totalHolders}
-        avgBalance={avgBalance}
-        prevTvl={prevTvl}
-        prevHolders={prevHolders}
-        prevBalance={prevBalance}
-        holderHistory={filteredHolderHistory.map((d) => d.value)}
-      />
+      <div data-report="section">
+        <KpiCards
+          totalTvl={totalTvl}
+          totalHolders={totalHolders}
+          avgBalance={avgBalance}
+          prevTvl={prevTvl}
+          prevHolders={prevHolders}
+          prevBalance={prevBalance}
+          holderHistory={filteredHolderHistory.map((d) => d.value)}
+        />
+      </div>
 
-      <ConcentrationMetrics stablecoins={data.stablecoins} />
+      <div data-report="section">
+        <ConcentrationMetrics stablecoins={data.stablecoins} />
+      </div>
 
-      <InsightBanners
-        stablecoins={data.stablecoins}
-        geography={data.holders.geography}
-        attribution={data.holders.attribution}
-      />
+      <div data-report="section">
+        <InsightBanners
+          stablecoins={data.stablecoins}
+          geography={data.holders.geography}
+          attribution={data.holders.attribution}
+        />
+      </div>
 
-      <StablecoinCards stablecoins={data.stablecoins} />
+      <div data-report="section">
+        <StablecoinCards stablecoins={data.stablecoins} />
+      </div>
 
       <motion.div
         initial={{ opacity: 0, y: 10 }}
@@ -431,11 +440,13 @@ export function AnalyticsWorkspace({
         />
       </motion.div>
 
-      <AnalyticsTable
-        stablecoins={data.stablecoins}
-        geography={data.holders.geography}
-        attribution={data.holders.attribution}
-      />
+      <div data-report="section">
+        <AnalyticsTable
+          stablecoins={data.stablecoins}
+          geography={data.holders.geography}
+          attribution={data.holders.attribution}
+        />
+      </div>
 
       {modalChartKey && chartMap[modalChartKey] && (
         <Suspense fallback={null}>
