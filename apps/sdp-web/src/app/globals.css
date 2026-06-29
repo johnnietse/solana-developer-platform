@@ -42,20 +42,34 @@ vercel-live-feedback {
 }
 
 @media print {
-  nav, header, footer, .sidebar, [data-sidebar], button, select, a[href] {
+  html, body {
+    background: #fff !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  nav, header, footer, .sidebar, [data-sidebar],
+  button:not(.print-keep), select:not(.print-keep),
+  .recharts-legend-item, .recharts-default-tooltip {
     display: none !important;
   }
   [data-analytics-root] {
     margin: 0 !important;
     padding: 0 !important;
     max-width: 100% !important;
+    display: block !important;
+  }
+  [data-analytics-root] > div {
+    gap: 0.75rem !important;
   }
   .recharts-wrapper {
     width: 100% !important;
-    height: auto !important;
-    min-height: 300px;
+    height: 350px !important;
+  }
+  .recharts-surface {
+    width: 100% !important;
+    height: 100% !important;
   }
   @page {
-    margin: 0.75in;
+    margin: 0.5in;
   }
 }
