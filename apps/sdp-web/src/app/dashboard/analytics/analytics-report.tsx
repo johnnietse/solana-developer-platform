@@ -1,38 +1,86 @@
 "use client";
 
 import { useState } from "react";
-import { PrinterIcon, LoaderIcon } from "lucide-react";
+import { FileTextIcon, LoaderIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { toPng } from "html-to-image";
+
+async function captureCard(el: HTMLElement): Promise<string | null> {
+  try {
+    return await toPng(el, {
+      quality: 0.92,
+      pixelRatio: 2,
+      backgroundColor: "#ffffff",
+      cacheBust: true,
+    });
+  } catch {
+    const svg = el.querySelector("svg");
+    if (!svg) return null;
+    try {
+      const xml = new XMLSerializer().serializeToString(svg);
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return null;
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const i = new Image();
+        i.onload = () => resolve(i);
+        i.onerror = reject;
+        i.src = URL.createObjectURL(new Blob([xml], { type: "image/svg+xml;charset=utf-8" }));
+      });
+      const scale = 2;
+      canvas.width = img.width * scale;
+      canvas.height = img.height * scale;
+      ctx.scale(scale, scale);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, img.width, img.height);
+      ctx.drawImage(img, 0, 0);
+      return canvas.toDataURL("image/png");
+    } catch {
+      return null;
+    }
+  }
+}
 
 export function ReportButton() {
   const [loading, setLoading] = useState(false);
 
-  async function printReport() {
+  async function generateReport() {
     setLoading(true);
-    const style = document.createElement("style");
-    style.id = "analytics-print-overrides";
-    style.textContent = `
-@media print {
-  body { background: #fff !important; }
-  [data-analytics-root] > div { break-inside: avoid; page-break-inside: avoid; }
-  .recharts-wrapper { height: 350px !important; }
-  .recharts-legend-item-text { font-size: 11px; }
-  .kpi-card { break-inside: avoid; page-break-inside: avoid; }
-  table { break-inside: avoid; page-break-inside: avoid; font-size: 10px; }
-  th { background: #f5f5f4 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  tr:nth-child(even) { background: #fafaf9 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  h1 { font-size: 20px; margin-bottom: 4px; }
-  p { font-size: 11px; }
-}
-`;
-    document.head.appendChild(style);
-    await document.fonts.ready;
-    setTimeout(() => {
-      window.print();
-      const el = document.getElementById("analytics-print-overrides");
-      if (el) el.remove();
+    try {
+      const cards = document.querySelectorAll<HTMLElement>('[data-analytics-root] [role="region"]');
+      const images: string[] = [];
+
+      for (const card of cards) {
+        if (card.getBoundingClientRect().height < 50) continue;
+        const dataUrl = await captureCard(card);
+        if (dataUrl) images.push(dataUrl);
+      }
+
+      const reportHtml = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Analytics Report</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 40px; color: #1c1c1d; background: #fff; }
+  h1 { font-size: 28px; font-weight: 600; margin: 0 0 4px; }
+  .meta { color: #6b6b6d; font-size: 13px; margin: 0 0 32px; }
+  img { display: block; max-width: 100%; margin-bottom: 28px; border: 1px solid #e5e5e5; border-radius: 10px; }
+  .footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #eee; font-size: 11px; color: #999; }
+</style></head><body>
+<h1>Analytics Report</h1>
+<p class="meta">Generated ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
+${images.map((src) => `<img src="${src}" alt="" />`).join("\n")}
+<div class="footer">Solana Developer Platform &mdash; Analytics Export</div>
+</body></html>`;
+
+      const blob = new Blob([reportHtml], { type: "text/html" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `analytics-report-${new Date().toISOString().slice(0, 10)}.html`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
       setLoading(false);
-    }, 500);
+    }
   }
 
   return (
@@ -40,16 +88,16 @@ export function ReportButton() {
       variant="outline"
       size="sm"
       type="button"
-      onClick={printReport}
+      onClick={generateReport}
       disabled={loading}
       className="gap-1.5"
     >
       {loading ? (
         <LoaderIcon className="h-4 w-4 animate-spin" />
       ) : (
-        <PrinterIcon className="h-4 w-4" />
+        <FileTextIcon className="h-4 w-4" />
       )}
-      {loading ? "Preparing..." : "Print"}
+      {loading ? "Generating..." : "Report"}
     </Button>
   );
 }
