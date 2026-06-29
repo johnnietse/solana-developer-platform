@@ -14,7 +14,7 @@ interface ChartCardProps {
 export function ChartCard({ title, description, children, className, headerAction, chartRef }: ChartCardProps) {
   return (
     <div
-      className={`rounded-2xl border border-[rgba(28,28,29,0.1)] bg-[#fcfcfa] shadow-[0_2px_10px_rgba(28,28,29,0.05)] ${className ?? ""}`}
+      className={`rounded-2xl border border-[rgba(28,28,29,0.1)] bg-[#fcfcfa] shadow-[0_2px_10px_rgba(28,28,29,0.05)] print:break-inside-avoid print:border print:border-gray-300 print:shadow-none print:mb-4 ${className ?? ""}`}
       role="region"
       aria-label={`${title}: ${description}`}
     >
