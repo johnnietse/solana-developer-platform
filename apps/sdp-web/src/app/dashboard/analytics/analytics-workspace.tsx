@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useCallback, useMemo, type ReactNode } from "react";
+import { useState, useCallback, useMemo, Suspense, type ReactNode } from "react";
+import dynamic from "next/dynamic";
 import { Maximize2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectItem } from "@/components/ui/select";
@@ -19,8 +20,8 @@ import { ReportButton } from "./analytics-report";
 import { relativeTime, downloadCsv, formatCurrency, formatNumber, SUPPLY_KEYS } from "./analytics-utils";
 import type { AnalyticsResponse } from "./analytics-types";
 
-const ChartModal = lazy(async () => ({ default: (await import("./chart-modal")).ChartModal }));
-const ChartDrillDown = lazy(async () => ({ default: (await import("./chart-drill-down")).ChartDrillDown }));
+const ChartModal = dynamic(() => import("./chart-modal").then((m) => m.ChartModal));
+const ChartDrillDown = dynamic(() => import("./chart-drill-down").then((m) => m.ChartDrillDown));
 
 function LiveDot({ lastUpdated }: { lastUpdated: string }) {
   const hoursSinceUpdate = useMemo(
