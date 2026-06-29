@@ -6,6 +6,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   ArrowLeftIcon,
   ArrowLeftRightIcon,
+  BarChart3Icon,
   CoinsIcon,
   KeyRoundIcon,
   LayoutDashboardIcon,
@@ -18,7 +19,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import IssuanceLoading from "@/app/dashboard/issuance/loading";
 import DashboardLoading from "@/app/dashboard/loading";
 import CounterpartyLoading from "@/app/dashboard/payments/counterparty/loading";
@@ -83,6 +84,7 @@ function getNavSections(): NavSection[] {
       title: "Manage",
       items: [
         { label: "Issuance", href: "/dashboard/issuance", icon: CoinsIcon },
+        { label: "Analytics", href: "/dashboard/analytics", icon: BarChart3Icon },
         {
           label: "Payments",
           href: "/dashboard/payments",
@@ -134,6 +136,7 @@ function HeaderBackAction({
   return (
     <Link
       href={href}
+      prefetch={true}
       className="inline-flex h-7 items-center gap-1.5 rounded-[var(--button-radius-md)] text-text-medium transition-colors hover:text-text-extra-high"
     >
       <ArrowLeftIcon className="h-4 w-4" />
@@ -335,6 +338,12 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
       backAction: getWalletBackAction(pathname),
     };
   }
+  if (pathname === "/dashboard/analytics") {
+    return {
+      title: "Analytics",
+      contentWidthClass: "max-w-none",
+    };
+  }
   if (pathname === "/dashboard/api-keys") {
     return {
       title: "API keys",
@@ -495,6 +504,7 @@ function SidebarGroup({
             <div key={item.label}>
               <Link
                 href={item.href}
+                prefetch={true}
                 onClick={onNavigate}
                 title={isCollapsed ? item.label : undefined}
                 aria-label={isCollapsed ? item.label : undefined}
@@ -531,6 +541,7 @@ function SidebarGroup({
                         ) : (
                           <Link
                             href={child.href}
+                            prefetch={true}
                             onClick={onNavigate}
                             className={cn(
                               "flex h-9 flex-1 items-center rounded-lg px-3 text-sm transition-colors",
@@ -611,6 +622,7 @@ function DashboardSidebarContent({
             <Link
               key={item.label}
               href={item.href}
+              prefetch={!item.external}
               target={item.external ? "_blank" : undefined}
               rel={item.external ? "noopener noreferrer" : undefined}
               onClick={onNavigate}
@@ -643,13 +655,16 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const sidebarExpandedWidth = 296;
   const sidebarCollapsedWidth = 64;
   const pageConfig = getDashboardPageConfig(pathname);
-  const navSections = getNavSections();
-  const bottomNavItems: NavItem[] = [
-    { label: "API Docs", href: docsHref, icon: LibraryIcon, external: true },
-    ...(dashboardAccess.capabilities.canManageOrgSettings
-      ? [{ label: "Settings", href: "/dashboard/settings", icon: Settings2Icon }]
-      : []),
-  ];
+  const navSections = useMemo(getNavSections, []);
+  const bottomNavItems: NavItem[] = useMemo(
+    () => [
+      { label: "API Docs", href: docsHref, icon: LibraryIcon, external: true },
+      ...(dashboardAccess.capabilities.canManageOrgSettings
+        ? [{ label: "Settings", href: "/dashboard/settings", icon: Settings2Icon }]
+        : []),
+    ],
+    [dashboardAccess.capabilities.canManageOrgSettings]
+  );
   const contentWidthClass = pageConfig.contentWidthClass ?? "max-w-5xl";
   const backAction = pageConfig.backAction ? (
     <HeaderBackAction href={pageConfig.backAction.href} label={pageConfig.backAction.label} />
