@@ -40,3 +40,22 @@ vercel-live-feedback {
     sans-serif;
   --geist-foreground: #1c1c1d;
 }
+
+@media print {
+  nav, header, footer, .sidebar, [data-sidebar], button, select, a[href] {
+    display: none !important;
+  }
+  [data-analytics-root] {
+    margin: 0 !important;
+    padding: 0 !important;
+    max-width: 100% !important;
+  }
+  .recharts-wrapper {
+    width: 100% !important;
+    height: auto !important;
+    min-height: 300px;
+  }
+  @page {
+    margin: 0.75in;
+  }
+}
