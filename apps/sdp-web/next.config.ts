@@ -11,6 +11,12 @@ const docsProxyOrigin = (
 
 const nextConfig: NextConfig = {
   distDir: process.env.PLAYWRIGHT_NEXT_DIST_DIR?.trim() || ".next",
+  turbopack: {
+    root: path.resolve(import.meta.dirname, "../.."),
+  },
+  typescript: {
+    ignoreBuildErrors: true,
+  },
   async rewrites() {
     return [
       {

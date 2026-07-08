@@ -75,6 +75,7 @@ export function AnalyticsWorkspace({
   const closeDrillDown = useCallback(() => setDrillDown(null), []);
   const onCoinClick = useCallback(
     (symbol: string) => {
+      if (!data) return;
       const coin = data.stablecoins.find((c) => c.symbol === symbol);
       if (!coin) return;
       setDrillDown({
@@ -91,10 +92,11 @@ export function AnalyticsWorkspace({
         ],
       });
     },
-    [data.stablecoins]
+    [data?.stablecoins]
   );
   const onRegionClick = useCallback(
     (region: string) => {
+      if (!data) return;
       const entry = data.holders.geography.find((g) => g.region === region);
       if (!entry) return;
       setDrillDown({
@@ -106,10 +108,11 @@ export function AnalyticsWorkspace({
         ],
       });
     },
-    [data.holders.geography]
+    [data?.holders.geography]
   );
   const onAttrClick = useCallback(
     (category: string) => {
+      if (!data) return;
       const entry = data.holders.attribution.find(
         (a) => a.category === category.toLowerCase()
       );
@@ -123,7 +126,7 @@ export function AnalyticsWorkspace({
         ],
       });
     },
-    [data.holders.attribution]
+    [data?.holders.attribution]
   );
 
   if (error) {
@@ -268,7 +271,7 @@ export function AnalyticsWorkspace({
           )}
         </div>
         <div className="flex items-center gap-3">
-          <Select value={period} onValueChange={setPeriod}>
+          <Select value={period} onValueChange={(v) => { if (v) setPeriod(v); }}>
             <SelectItem value="7d">Last 7 days</SelectItem>
             <SelectItem value="30d">Last 30 days</SelectItem>
             <SelectItem value="90d">Last 90 days</SelectItem>

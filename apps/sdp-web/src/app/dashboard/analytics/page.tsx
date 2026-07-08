@@ -20,8 +20,8 @@ function generateHolderHistory(length: number): Array<{ date: string; value: num
 function generateSupplyHistory(
   symbols: string[],
   supplies: number[]
-): Array<{ date: string; [symbol: string]: number }> {
-  const data: Array<{ date: string; [symbol: string]: number }> = [];
+): Array<{ date: string; [symbol: string]: string | number }> {
+  const data: Array<{ date: string; [symbol: string]: string | number }> = [];
   const current = [...supplies];
   for (let i = 29; i >= 0; i--) {
     const date = new Date();
@@ -31,7 +31,7 @@ function generateSupplyHistory(
       current[j] += Math.round((Math.random() - 0.48) * current[j] * 0.005);
       entry[symbols[j]] = current[j];
     }
-    data.push(entry as { date: string; [symbol: string]: number });
+    data.push(entry as { date: string; [symbol: string]: string | number });
   }
   return data;
 }

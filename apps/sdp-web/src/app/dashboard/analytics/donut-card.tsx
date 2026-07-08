@@ -6,8 +6,8 @@ import { ChartCard } from "./chart-card";
 import { DONUT_COLORS } from "./analytics-utils";
 
 interface CenterLabelProps {
-  cx: number;
-  cy: number;
+  cx: number | string;
+  cy: number | string;
   label: string;
   sublabel: string;
 }

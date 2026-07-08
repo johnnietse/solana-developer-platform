@@ -31,6 +31,6 @@ export interface AnalyticsResponse {
     attribution: AttributionEntry[];
   };
   holdersHistory?: Array<{ date: string; value: number }>;
-  supplyHistory?: Array<{ date: string; [symbol: string]: number }>;
+  supplyHistory?: Array<{ date: string; [symbol: string]: string | number }>;
   lastUpdated: string;
 }
