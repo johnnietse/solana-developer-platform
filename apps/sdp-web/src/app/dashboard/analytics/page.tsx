@@ -2,79 +2,9 @@ import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { AnalyticsWorkspace } from "./analytics-workspace";
+import type { AnalyticsResponse, UserAnalyticsResponse, ResponseMeta } from "./analytics-types";
 
 export const dynamic = "force-dynamic";
-
-function generateHolderHistory(length: number): Array<{ date: string; value: number }> {
-  const data: Array<{ date: string; value: number }> = [];
-  let holders = 420_000;
-  for (let i = length - 1; i >= 0; i--) {
-    const date = new Date();
-    date.setDate(date.getDate() - i);
-    holders += Math.round((Math.random() - 0.45) * 5000);
-    data.push({ date: date.toISOString().slice(0, 10), value: holders });
-  }
-  return data;
-}
-
-function generateSupplyHistory(
-  symbols: string[],
-  supplies: number[]
-): Array<{ date: string; [symbol: string]: string | number }> {
-  const data: Array<{ date: string; [symbol: string]: string | number }> = [];
-  const current = [...supplies];
-  for (let i = 29; i >= 0; i--) {
-    const date = new Date();
-    date.setDate(date.getDate() - i);
-    const entry: Record<string, number | string> = { date: date.toISOString().slice(0, 10) };
-    for (let j = 0; j < symbols.length; j++) {
-      current[j] += Math.round((Math.random() - 0.48) * current[j] * 0.005);
-      entry[symbols[j]] = current[j];
-    }
-    data.push(entry as { date: string; [symbol: string]: string | number });
-  }
-  return data;
-}
-
-const holdersHistory = generateHolderHistory(30);
-const supplyHistory = generateSupplyHistory(["USDC", "PYUSD"], [48_000_000_000, 9_500_000_000]);
-
-const mockData = {
-  stablecoins: [
-    {
-      mintAddress: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPXg4gQzNBP",
-      symbol: "USDC", name: "USD Coin",
-      totalSupply: 50_000_000_000, circulatingSupply: 48_000_000_000,
-      holderCount: 250_000, medianBalance: 750_000,
-      priceUsd: 1, marketCapUsd: 48_000_000_000, percentChange24h: 0.01,
-    },
-    {
-      mintAddress: "CXk2jShYcgGMqk7joPcbBykDzaqCwN92xe9WLPVUgZf1",
-      symbol: "PYUSD", name: "PayPal USD",
-      totalSupply: 10_000_000_000, circulatingSupply: 9_500_000_000,
-      holderCount: 50_000, medianBalance: 500_000,
-      priceUsd: 1, marketCapUsd: 9_500_000_000, percentChange24h: 0.02,
-    },
-  ],
-  holders: {
-    totalHolders: 450_000,
-    geography: [
-      { region: "North America", percentage: 45, holderCount: 202_500 },
-      { region: "Europe", percentage: 25, holderCount: 112_500 },
-      { region: "Asia", percentage: 20, holderCount: 90_000 },
-      { region: "Unknown", percentage: 10, holderCount: 45_000 },
-    ],
-    attribution: [
-      { category: "exchange", percentage: 46.67, holderCount: 210_000 },
-      { category: "protocol", percentage: 2.33, holderCount: 10_500 },
-      { category: "team", percentage: 5.33, holderCount: 24_000 },
-      { category: "retail", percentage: 45.67, holderCount: 205_500 },
-    ],
-  },
-  holdersHistory,
-  supplyHistory,
-  lastUpdated: new Date().toISOString(),
-};
 
 export default async function AnalyticsPage() {
   const { userId } = await auth();
@@ -82,5 +12,60 @@ export default async function AnalyticsPage() {
     redirect(await getAuthEntryPath());
   }
 
-  return <AnalyticsWorkspace data={mockData} error={null} lastUpdated={mockData.lastUpdated} />;
+  const apiBaseUrl =
+    process.env.SDP_API_BASE_URL ||
+    process.env.NEXT_PUBLIC_SDP_API_BASE_URL ||
+    process.env.NEXT_PUBLIC_API_BASE_URL;
+
+  let stablecoinData: AnalyticsResponse | null = null;
+  let userTokenData: UserAnalyticsResponse | null = null;
+  let error: string | null = null;
+  let lastUpdated: string | null = null;
+
+  if (apiBaseUrl) {
+    const baseUrl = apiBaseUrl.replace(/\/$/, "");
+
+    const [stablecoinRes, userTokenRes] = await Promise.all([
+      fetch(`${baseUrl}/v1/data-products/analytics`, {
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+      }),
+      fetch(`${baseUrl}/v1/data-products/user-analytics`, {
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+      }),
+    ]);
+
+    if (stablecoinRes.ok) {
+      const body = (await stablecoinRes.json()) as { data: AnalyticsResponse; meta: ResponseMeta };
+      stablecoinData = body.data;
+      lastUpdated = stablecoinData.lastUpdated;
+    } else {
+      const body = await stablecoinRes.json().catch(() => ({}));
+      error = (body as any)?.meta?.error ?? `Analytics returned ${stablecoinRes.status}`;
+    }
+
+    if (userTokenRes.ok) {
+      const body = (await userTokenRes.json()) as { data: UserAnalyticsResponse };
+      userTokenData = body.data;
+      const tokenUpdated = userTokenData.lastUpdated;
+      if (!lastUpdated || tokenUpdated > lastUpdated) {
+        lastUpdated = tokenUpdated;
+      }
+    } else {
+      const tokenError = `User analytics returned ${userTokenRes.status}`;
+      error = error ? `${error}; ${tokenError}` : tokenError;
+    }
+  } else {
+    error = "Analytics API not configured. Set SDP_API_BASE_URL environment variable.";
+  }
+
+  return (
+    <AnalyticsWorkspace
+      stablecoinData={stablecoinData}
+      userTokenData={userTokenData}
+      error={error}
+      lastUpdated={lastUpdated}
+    />
+  );
 }
