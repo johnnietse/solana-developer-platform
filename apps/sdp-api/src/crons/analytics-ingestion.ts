@@ -29,7 +29,7 @@ const KNOWN_MINTS: Record<string, MintMeta> = {
 };
 
 async function ingestMint(env: Env, mint: string): Promise<void> {
-  const rpcUrl = env.SOLANA_RPC_URL ?? "https://api.devnet.solana.com";
+  const rpcUrl = env.ANALYTICS_RPC_URL ?? env.SOLANA_RPC_URL ?? "https://api.devnet.solana.com";
   const now = new Date().toISOString();
   const meta = KNOWN_MINTS[mint] ?? { symbol: mint.slice(0, 8), name: `Token ${mint.slice(0, 8)}` };
 

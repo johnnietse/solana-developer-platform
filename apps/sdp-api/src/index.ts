@@ -11,6 +11,7 @@ import { createApp } from "@/app";
 import { runPendingTransfersReconciliation } from "@/cron/pending-transfers";
 import { runRecurringPaymentsCollection } from "@/cron/recurring-payments";
 import { handleAnalyticsIngestion } from "@/crons/analytics-ingestion";
+import { handleWalletEnrichment } from "@/crons/wallet-enrichment";
 import {
   isRecurringPaymentCollectionEnabled,
   isRecurringPaymentsEnabled,
@@ -28,7 +29,7 @@ const worker = {
     return app.fetch(request, withProcessEnvFallback(env), ctx);
   },
   async scheduled(
-    _controller: ScheduledController,
+    controller: ScheduledController,
     env: Env,
     ctx: ExecutionContext
   ): Promise<void> {
@@ -49,6 +50,11 @@ const worker = {
     }
     // Analytics ingestion (every 5 min via separate cron trigger)
     ctx.waitUntil(handleAnalyticsIngestion(runtimeEnv, ctx));
+
+    // Wallet label enrichment (daily via separate cron trigger)
+    if (controller.cron === "0 2 * * *") {
+      ctx.waitUntil(handleWalletEnrichment(runtimeEnv, ctx));
+    }
   },
   request(
     input: RequestInfo | URL,

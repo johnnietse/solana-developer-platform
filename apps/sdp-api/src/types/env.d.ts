@@ -225,6 +225,14 @@ export interface Env {
   // Analytics ingestion cron
   ANALYTICS_ENABLED?: string;
   ANALYTICS_MINTS?: string;
+  // Optional dedicated RPC for analytics ingestion (defaults to SOLANA_RPC_URL).
+  // Lets analytics ingest mainnet mints while the app's global RPC stays on
+  // another network. Required to be a mainnet endpoint when ANALYTICS_MINTS
+  // points at a mainnet mint.
+  ANALYTICS_RPC_URL?: string;
+  // Helius Wallet Identity API key — enables primary wallet-label enrichment.
+  // Without it, enrichment falls back to self-contained heuristics only.
+  HELIUS_API_KEY?: string;
 
   // Google address completion (Places API New + Maps Static API)
   GOOGLE_ADDRESS_COMPLETION_API_KEY?: string;

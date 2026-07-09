@@ -28,10 +28,11 @@ id = "local-sessions"
 
 [triggers]
 # Run every minute to reconcile pending/processing transfer statuses
-crons = [
-  "* * * * *",         # Transfer reconciliation (existing)
-  "*/5 * * * *",       # Analytics ingestion (every 5 min)
-]
+  crons = [
+    "* * * * *",         # Transfer reconciliation (existing)
+    "*/5 * * * *",       # Analytics ingestion (every 5 min)
+    "0 2 * * *",         # Wallet label enrichment (daily)
+  ]
 
 [vars]
 ENVIRONMENT = "development"
@@ -91,7 +92,10 @@ SOLANA_RPC_QUICKNODE_URL = "https://your-quicknode-endpoint.solana-devnet.quikno
 FEE_PAYMENT_PROVIDER = "kora"
 KORA_RPC_URL = "https://your-kora-devnet-instance.us-central1.run.app"
 ANALYTICS_ENABLED = "true"
-ANALYTICS_MINTS = "Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr"
+# Option B (free dev/demo): real mainnet holders flow in locally for $0.
+# Analytics uses ANALYTICS_RPC_URL (mainnet) while the rest of dev stays devnet.
+ANALYTICS_MINTS = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPXg4gQzNBP"  # PYUSD (mainnet, smaller than USDC)
+ANALYTICS_RPC_URL = "https://api.mainnet.solana.com"
 
 # Production environment
 [env.production]
@@ -136,4 +140,17 @@ SOLANA_RPC_QUICKNODE_URL = "https://your-quicknode-endpoint.solana-devnet.quikno
 FEE_PAYMENT_PROVIDER = "kora"
 KORA_RPC_URL = "https://your-kora-devnet-instance.us-central1.run.app"
 ANALYTICS_ENABLED = "true"
-ANALYTICS_MINTS = "Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr"
+
+# ── OPTION B (active): free dev/demo ───────────────────────────────────────
+# Free, keyless public mainnet RPC + a SMALLER mainnet token so getProgramAccounts
+# succeeds on the rate-limited public endpoint. Real holders flow in for $0.
+# Swap ANALYTICS_MINTS for any low-holder mainnet mint you prefer.
+ANALYTICS_MINTS = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPXg4gQzNBP"  # PYUSD (smaller than USDC)
+ANALYTICS_RPC_URL = "https://api.mainnet.solana.com"
+
+# ── OPTION C (production): commented, enable when deploying for real ────────
+# Requires a PAID dedicated RPC + Helius key for attribution. Real stablecoins
+# at scale. Uncomment and fill values to switch from Option B to Option C.
+# ANALYTICS_MINTS = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"  # USDC (real stablecoin)
+# ANALYTICS_RPC_URL = "https://your-dedicated-rpc.example.com"        # dedicated RPC (paid)
+# HELIUS_API_KEY = "your-helius-key"                                  # enables attribution (free tier may suffice)
