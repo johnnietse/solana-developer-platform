@@ -12,6 +12,8 @@ import { runPendingTransfersReconciliation } from "@/cron/pending-transfers";
 import { runRecurringPaymentsCollection } from "@/cron/recurring-payments";
 import { handleAnalyticsIngestion } from "@/crons/analytics-ingestion";
 import { handleWalletEnrichment } from "@/crons/wallet-enrichment";
+import { handleTokenDiscovery } from "@/crons/token-discovery";
+import { handleUserTokenSync } from "@/crons/sync-user-tokens";
 import {
   isRecurringPaymentCollectionEnabled,
   isRecurringPaymentsEnabled,
@@ -54,6 +56,16 @@ const worker = {
     // Wallet label enrichment (daily via separate cron trigger)
     if (controller.cron === "0 2 * * *") {
       ctx.waitUntil(handleWalletEnrichment(runtimeEnv, ctx));
+    }
+
+    // Token discovery (daily at 3am)
+    if (controller.cron === "0 3 * * *") {
+      ctx.waitUntil(handleTokenDiscovery(runtimeEnv, ctx));
+    }
+
+    // User token sync (hourly)
+    if (controller.cron === "0 * * * *") {
+      ctx.waitUntil(handleUserTokenSync(runtimeEnv, ctx));
     }
   },
   request(

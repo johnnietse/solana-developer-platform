@@ -32,6 +32,8 @@ id = "local-sessions"
     "* * * * *",         # Transfer reconciliation (existing)
     "*/5 * * * *",       # Analytics ingestion (every 5 min)
     "0 2 * * *",         # Wallet label enrichment (daily)
+    "0 3 * * *",         # Token discovery (daily at 3am)
+    "0 4 * * *",         # User token sync (daily at 4am)
   ]
 
 [vars]

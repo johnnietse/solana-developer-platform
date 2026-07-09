@@ -7,11 +7,13 @@
  *   2. Write snapshots to Databricks token_supply_snapshots + token_holders
  *   3. Upsert wallet addresses into wallet_labels
  *   4. Compute and cache analytics response in analytics_cache
+ *   5. Update token registry with ingestion metadata
  */
 
 import type { Env } from "@/types/env";
 import { queryDatabricks } from "@/lib/databricks-query";
 import { rpcCall } from "@/lib/rpc-utils";
+import { resolveAnalyticsMints, getTokenMetadata, updateTokenVerification } from "@/lib/token-registry";
 
 const TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 
@@ -21,17 +23,21 @@ interface MintMeta {
 }
 
 // Known mints for display metadata (lightweight — no RPC needed)
-const KNOWN_MINTS: Record<string, MintMeta> = {
+const KNOWN_MINTS: Record<string, { symbol: string; name: string }> = {
   "Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr": { symbol: "USDC", name: "USD Coin" },
   "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v": { symbol: "USDC", name: "USD Coin" },
   "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB": { symbol: "USDT", name: "Tether USD" },
   "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPXg4gQzNBP": { symbol: "PYUSD", name: "PayPal USD" },
+  "So11111111111111111111111111111111111111112": { symbol: "SOL", name: "Wrapped SOL" },
 };
 
 async function ingestMint(env: Env, mint: string): Promise<void> {
   const rpcUrl = env.ANALYTICS_RPC_URL ?? env.SOLANA_RPC_URL ?? "https://api.devnet.solana.com";
   const now = new Date().toISOString();
-  const meta = KNOWN_MINTS[mint] ?? { symbol: mint.slice(0, 8), name: `Token ${mint.slice(0, 8)}` };
+  
+  // Get metadata from token registry (falls back to KNOWN_MINTS)
+  const tokenMeta = await getTokenMetadata(env, mint);
+  const meta = tokenMeta ?? KNOWN_MINTS[mint] ?? { symbol: mint.slice(0, 8), name: `Token ${mint.slice(0, 8)}` };
 
   // 1. Get token supply (with retry)
   let supplyResult: any;
@@ -158,6 +164,17 @@ async function ingestMint(env: Env, mint: string): Promise<void> {
     [JSON.stringify(cachePayload), totalHolders, supplyAdjusted, now],
     "30s"
   );
+  
+  // Update token registry with ingestion results
+  await updateTokenVerification(env, mint, {
+    lastIngestedAt: new Date().toISOString(),
+    lastIngestionStatus: 'success',
+    lastIngestionError: null,
+    holderCount: totalHolders,
+    supply: supplyAdjusted,
+    decimals,
+    lastSlot: slot,
+  });
 }
 
 export async function handleAnalyticsIngestion(env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -165,20 +182,37 @@ export async function handleAnalyticsIngestion(env: Env, ctx: ExecutionContext):
     return new Response("Analytics ingestion disabled", { status: 200 });
   }
 
-  const mints = (env.ANALYTICS_MINTS ?? "Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr")
-    .split(",")
-    .map((m) => m.trim())
-    .filter((m) => m.length > 0);
+  // Use dynamic token registry (hybrid: env + DB + discovery)
+  const mints = await resolveAnalyticsMints(env);
 
   const results: Array<{ mint: string; success: boolean; error?: string }> = [];
 
-  for (const mint of mints) {
+  for (const mintEntry of mints) {
+    const mint = mintEntry.mintAddress;
     try {
       await ingestMint(env, mint);
+      
+      // Update token registry with successful ingestion
+      await updateTokenVerification(env, mintEntry.mintAddress, {
+        lastIngestedAt: new Date().toISOString(),
+        lastIngestionStatus: 'success',
+        lastIngestionError: null,
+        holderCount: 0, // Will be updated by ingestMint
+        supply: 0,
+      });
+      
       results.push({ mint, success: true });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(`Analytics ingestion failed for ${mint}:`, message);
+      
+      // Update token registry with failure
+      await updateTokenVerification(env, mintEntry.mintAddress, {
+        lastIngestedAt: new Date().toISOString(),
+        lastIngestionStatus: 'failed',
+        lastIngestionError: message,
+      });
+      
       results.push({ mint, success: false, error: message });
     }
   }
