@@ -217,6 +217,15 @@ export interface Env {
   CHAINALYSIS_API_KEY?: string;
   CHAINALYSIS_API_BASE_URL?: string;
 
+  // Databricks analytics enrichment
+  DATABRICKS_HOST?: string;
+  DATABRICKS_TOKEN?: string;
+  DATABRICKS_WAREHOUSE_ID?: string;
+
+  // Analytics ingestion cron
+  ANALYTICS_ENABLED?: string;
+  ANALYTICS_MINTS?: string;
+
   // Google address completion (Places API New + Maps Static API)
   GOOGLE_ADDRESS_COMPLETION_API_KEY?: string;
 

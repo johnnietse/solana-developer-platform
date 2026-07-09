@@ -10,6 +10,7 @@
 import { createApp } from "@/app";
 import { runPendingTransfersReconciliation } from "@/cron/pending-transfers";
 import { runRecurringPaymentsCollection } from "@/cron/recurring-payments";
+import { handleAnalyticsIngestion } from "@/crons/analytics-ingestion";
 import {
   isRecurringPaymentCollectionEnabled,
   isRecurringPaymentsEnabled,
@@ -46,6 +47,8 @@ const worker = {
         observability,
       });
     }
+    // Analytics ingestion (every 5 min via separate cron trigger)
+    ctx.waitUntil(handleAnalyticsIngestion(runtimeEnv, ctx));
   },
   request(
     input: RequestInfo | URL,
