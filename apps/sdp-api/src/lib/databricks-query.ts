@@ -8,6 +8,7 @@ import type { Env } from "@/types/env";
 export async function queryDatabricks(
   env: Pick<Env, "DATABRICKS_HOST" | "DATABRICKS_TOKEN" | "DATABRICKS_WAREHOUSE_ID">,
   sql: string,
+  params: unknown[] = [],
   timeout = "10s"
 ): Promise<string[][] | null> {
   const { DATABRICKS_HOST, DATABRICKS_TOKEN, DATABRICKS_WAREHOUSE_ID } = env;
@@ -32,6 +33,7 @@ export async function queryDatabricks(
         catalog: "workspace",
         schema: "default",
         statement: sql,
+        parameters: params.map((p) => ({ value: String(p) })),
         wait_timeout: timeout,
       }),
       signal: controller.signal,

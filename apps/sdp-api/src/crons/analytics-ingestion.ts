@@ -83,7 +83,8 @@ async function ingestMint(env: Env, mint: string): Promise<void> {
   await queryDatabricks(env,
     `INSERT INTO workspace.default.token_supply_snapshots
      (mint_address, supply, decimals, slot, snapshot_at)
-     VALUES ('${mint}', ${supplyAdjusted}, ${decimals}, ${slot}, '${now}')`,
+     VALUES (:1, :2, :3, :4, :5)`,
+    [mint, supplyAdjusted, decimals, slot, now],
     "30s"
   );
 
@@ -92,13 +93,16 @@ async function ingestMint(env: Env, mint: string): Promise<void> {
     const batchSize = 100;
     for (let i = 0; i < holders.length; i += batchSize) {
       const batch = holders.slice(i, i + batchSize);
-      const values = batch.map(h =>
-        `('${mint}', '${h.walletAddress}', ${h.balance}, ${slot}, '${now}')`
-      ).join(",\n");
+      const placeholders = batch.map((_, idx) => `(:${idx * 5 + 1}, :${idx * 5 + 2}, :${idx * 5 + 3}, :${idx * 5 + 4}, :${idx * 5 + 5})`).join(", ");
+      const params: unknown[] = [];
+      for (const h of batch) {
+        params.push(mint, h.walletAddress, h.balance, slot, now);
+      }
       await queryDatabricks(env,
         `INSERT INTO workspace.default.token_holders
          (mint_address, wallet_address, balance, slot, snapshot_at)
-         VALUES ${values}`,
+         VALUES ${placeholders}`,
+        params,
         "30s"
       );
     }
@@ -107,13 +111,16 @@ async function ingestMint(env: Env, mint: string): Promise<void> {
   // 5. Upsert wallet labels
   const uniqueWallets = [...new Set(holders.map(h => h.walletAddress))];
   if (uniqueWallets.length > 0) {
-    const labelValues = uniqueWallets.map(w =>
-      `('${w}', 'Unknown', 'unknown', 'sdp-analytics', '${now}')`
-    ).join(",\n");
+    const labelPlaceholders = uniqueWallets.map((_, idx) => `(:${idx * 5 + 1}, :${idx * 5 + 2}, :${idx * 5 + 3}, :${idx * 5 + 4}, :${idx * 5 + 5})`).join(", ");
+    const labelParams: unknown[] = [];
+    for (const w of uniqueWallets) {
+      labelParams.push(w, "Unknown", "unknown", "sdp-analytics", now);
+    }
     await queryDatabricks(env,
       `INSERT INTO workspace.default.wallet_labels
        (wallet_address, geography, attribution_category, source, updated_at)
-       VALUES ${labelValues}`,
+       VALUES ${labelPlaceholders}`,
+      labelParams,
       "30s"
     );
   }
@@ -147,7 +154,8 @@ async function ingestMint(env: Env, mint: string): Promise<void> {
   await queryDatabricks(env,
     `INSERT INTO workspace.default.analytics_cache
      (response_json, holder_count, total_supply, snapshot_at)
-     VALUES ('${JSON.stringify(cachePayload).replace(/'/g, "''")}', ${totalHolders}, ${supplyAdjusted}, '${now}')`,
+     VALUES (:1, :2, :3, :4)`,
+    [JSON.stringify(cachePayload), totalHolders, supplyAdjusted, now],
     "30s"
   );
 }

@@ -89,10 +89,10 @@ const KNOWN_MINTS: Record<string, { symbol: string; name: string }> = {
 async function queryHoldersHistory(env: Env, days = 30): Promise<TimeSeriesEntry[]> {
   const rows = await queryDatabricks(
     env,
-    `SELECT snapshot_date, COUNT(DISTINCT wallet_address) AS holders
+    `SELECT DATE(snapshot_at) as snapshot_date, COUNT(DISTINCT wallet_address) AS holders
      FROM workspace.default.token_holders
-     WHERE snapshot_date >= DATE_SUB(CURRENT_DATE(), INTERVAL ${days} DAY)
-     GROUP BY snapshot_date
+     WHERE snapshot_at >= DATE_SUB(CURRENT_DATE(), INTERVAL ${days} DAY)
+     GROUP BY DATE(snapshot_at)
      ORDER BY snapshot_date ASC`
   );
   if (!rows) return [];
@@ -113,16 +113,18 @@ async function querySupplyHistory(
 ): Promise<Array<{ date: string; [symbol: string]: string | number }>> {
   const rows = await queryDatabricks(
     env,
-    `SELECT snapshot_date, symbol, total_supply
+    `SELECT DATE(snapshot_at) as snapshot_date, mint_address, SUM(supply) as total_supply
      FROM workspace.default.token_supply_snapshots
-     WHERE snapshot_date >= DATE_SUB(CURRENT_DATE(), INTERVAL ${days} DAY)
-     ORDER BY snapshot_date ASC, symbol ASC`
+     WHERE snapshot_at >= DATE_SUB(CURRENT_DATE(), INTERVAL ${days} DAY)
+     GROUP BY DATE(snapshot_at), mint_address
+     ORDER BY snapshot_date ASC, mint_address ASC`
   );
   if (!rows) return [];
 
   const byDate = new Map<string, { date: string; [symbol: string]: string | number }>();
-  for (const [date, symbol, supply] of rows) {
+  for (const [date, mint, supply] of rows) {
     const entry = byDate.get(date) ?? { date };
+    const symbol = KNOWN_MINTS[mint]?.symbol ?? mint.slice(0, 8);
     entry[symbol] = Number.parseFloat(supply) || 0;
     byDate.set(date, entry);
   }
@@ -191,7 +193,7 @@ analytics.get("/", async (c) => {
   const { DATABRICKS_HOST, DATABRICKS_TOKEN, DATABRICKS_WAREHOUSE_ID } = c.env;
   if (!DATABRICKS_HOST || !DATABRICKS_TOKEN || !DATABRICKS_WAREHOUSE_ID) {
     return c.json(
-      { error: "Databricks credentials not configured", meta: { requestId: c.get("requestId"), timestamp: new Date().toISOString() } },
+      { data: null, meta: { requestId: c.get("requestId"), timestamp: new Date().toISOString(), error: "Databricks credentials not configured" } },
       503
     );
   }
@@ -203,7 +205,7 @@ analytics.get("/", async (c) => {
   );
   if (!cacheData || cacheData.length === 0) {
     return c.json(
-      { error: "No analytics cache available", meta: { requestId: c.get("requestId"), timestamp: new Date().toISOString() } },
+      { data: null, meta: { requestId: c.get("requestId"), timestamp: new Date().toISOString(), error: "No analytics cache available. Data is being seeded — check back in a few minutes." } },
       503
     );
   }
@@ -229,7 +231,7 @@ analytics.get("/", async (c) => {
   const snapshotMs = new Date(snapshotAt).getTime();
   const nowMs = Date.now();
   const cacheAgeSeconds = Math.max(0, Math.round((nowMs - snapshotMs) / 1000));
-  const nextRefreshSeconds = Math.max(0, 3600 - cacheAgeSeconds);
+  const nextRefreshSeconds = Math.max(0, 300 - cacheAgeSeconds);
 
   return c.json({
     data: parsed,
