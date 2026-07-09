@@ -11,9 +11,15 @@ export async function queryDatabricks(
   timeout = "10s"
 ): Promise<string[][] | null> {
   const { DATABRICKS_HOST, DATABRICKS_TOKEN, DATABRICKS_WAREHOUSE_ID } = env;
-  if (!DATABRICKS_HOST || !DATABRICKS_TOKEN || !DATABRICKS_WAREHOUSE_ID) return null;
+  if (!DATABRICKS_HOST || !DATABRICKS_TOKEN || !DATABRICKS_WAREHOUSE_ID) {
+    console.error("[databricks-query] Missing credentials");
+    return null;
+  }
 
   const url = `https://${DATABRICKS_HOST}/api/2.0/sql/statements`;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30_000);
+
   try {
     const res = await fetch(url, {
       method: "POST",
@@ -28,15 +34,25 @@ export async function queryDatabricks(
         statement: sql,
         wait_timeout: timeout,
       }),
+      signal: controller.signal,
     });
-    if (!res.ok) return null;
+    clearTimeout(timeoutId);
+    if (!res.ok) {
+      console.error(`[databricks-query] HTTP ${res.status} from ${url}`);
+      return null;
+    }
     const body = await res.json() as {
       result?: { data_array?: string[][] };
       status?: { state: string };
     };
-    if (body.status?.state !== "SUCCEEDED") return null;
+    if (body.status?.state?.toLowerCase() !== "succeeded") {
+      console.error(`[databricks-query] Non-SUCCEEDED status: ${body.status?.state}`);
+      return null;
+    }
     return body.result?.data_array ?? null;
-  } catch {
+  } catch (err) {
+    console.error("[databricks-query] Fetch failed:", err);
+    clearTimeout(timeoutId);
     return null;
   }
 }
