@@ -1,0 +1,30 @@
+{
+  "id": "analytics-expansion-01",
+  "seq": "01",
+  "title": "Create shared RPC utility module",
+  "status": "pending",
+  "depends_on": [],
+  "parallel": false,
+  "suggested_agent": "CoderAgent",
+  "context_files": [
+    "solana-developer-platform/AGENTS.md",
+    "solana-developer-platform/biome.json"
+  ],
+  "reference_files": [
+    "apps/sdp-api/src/routes/data-products/analytics.ts"
+  ],
+  "agent_id": null,
+  "started_at": null,
+  "completed_at": null,
+  "completion_summary": null,
+  "acceptance_criteria": [
+    "apps/sdp-api/src/lib/rpc-utils.ts created with getTokenSupply(rpcUrl, mint) function",
+    "apps/sdp-api/src/lib/rpc-utils.ts created with getHolderCount(rpcUrl, mint) function",
+    "Both functions extracted from the inline implementations in analytics.ts (lines 106-139)",
+    "Functions use the shared rpcCall helper or define their own RPC fetch",
+    "rpc-utils.ts is a standalone module with no import side effects"
+  ],
+  "deliverables": [
+    "apps/sdp-api/src/lib/rpc-utils.ts"
+  ]
+}

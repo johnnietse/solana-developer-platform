@@ -17,8 +17,10 @@ import { InsightBanners } from "./insight-banners";
 import { GeoTooltip, AttrTooltip } from "./chart-tooltips";
 import { ConcentrationMetrics } from "./concentration-metrics";
 import { ReportButton } from "./analytics-report";
-import { relativeTime, downloadCsv, formatCurrency, formatNumber, SUPPLY_KEYS } from "./analytics-utils";
-import type { AnalyticsResponse } from "./analytics-types";
+import { relativeTime, downloadCsv, formatCurrency, formatNumber, buildSupplyKeys, buildStackColors } from "./analytics-utils";
+import { cn } from "@/lib/utils";
+import type { AnalyticsResponse, UserAnalyticsResponse, ViewMode } from "./analytics-types";
+import { MyTokensView } from "./my-tokens-view";
 
 const ChartModal = dynamic(() => import("./chart-modal").then((m) => m.ChartModal));
 const ChartDrillDown = dynamic(() => import("./chart-drill-down").then((m) => m.ChartDrillDown));
@@ -56,14 +58,17 @@ function LiveDot({ lastUpdated }: { lastUpdated: string }) {
 
 
 export function AnalyticsWorkspace({
-  data,
+  stablecoinData,
+  userTokenData,
   error,
   lastUpdated,
 }: {
-  data: AnalyticsResponse | null;
+  stablecoinData: AnalyticsResponse | null;
+  userTokenData: UserAnalyticsResponse | null;
   error: string | null;
   lastUpdated: string | null;
 }) {
+  const [view, setView] = useState<ViewMode>("stablecoins");
   const [period, setPeriod] = useState("30d");
   const [modalChartKey, setModalChartKey] = useState<string | null>(null);
   const closeModal = useCallback(() => setModalChartKey(null), []);
@@ -75,8 +80,8 @@ export function AnalyticsWorkspace({
   const closeDrillDown = useCallback(() => setDrillDown(null), []);
   const onCoinClick = useCallback(
     (symbol: string) => {
-      if (!data) return;
-      const coin = data.stablecoins.find((c) => c.symbol === symbol);
+      if (!stablecoinData) return;
+      const coin = stablecoinData.stablecoins.find((c) => c.symbol === symbol);
       if (!coin) return;
       setDrillDown({
         title: coin.symbol,
@@ -92,12 +97,12 @@ export function AnalyticsWorkspace({
         ],
       });
     },
-    [data?.stablecoins]
+    [stablecoinData?.stablecoins]
   );
   const onRegionClick = useCallback(
     (region: string) => {
-      if (!data) return;
-      const entry = data.holders.geography.find((g) => g.region === region);
+      if (!stablecoinData) return;
+      const entry = stablecoinData.holders.geography.find((g) => g.region === region);
       if (!entry) return;
       setDrillDown({
         title: region,
@@ -108,12 +113,12 @@ export function AnalyticsWorkspace({
         ],
       });
     },
-    [data?.holders.geography]
+    [stablecoinData?.holders.geography]
   );
   const onAttrClick = useCallback(
     (category: string) => {
-      if (!data) return;
-      const entry = data.holders.attribution.find(
+      if (!stablecoinData) return;
+      const entry = stablecoinData.holders.attribution.find(
         (a) => a.category === category.toLowerCase()
       );
       if (!entry) return;
@@ -126,7 +131,7 @@ export function AnalyticsWorkspace({
         ],
       });
     },
-    [data?.holders.attribution]
+    [stablecoinData?.holders.attribution]
   );
 
   if (error) {
@@ -145,7 +150,7 @@ export function AnalyticsWorkspace({
     );
   }
 
-  if (!data) {
+  if (!stablecoinData) {
     return (
       <div className="flex min-h-[400px] items-center justify-center">
         <p className="text-sm text-[rgba(28,28,29,0.56)]">Loading analytics...</p>
@@ -154,21 +159,21 @@ export function AnalyticsWorkspace({
   }
 
   const totalTvl = useMemo(
-    () => data.stablecoins.reduce((s, c) => s + (c.marketCapUsd ?? 0), 0),
-    [data.stablecoins]
+    () => stablecoinData.stablecoins.reduce((s, c) => s + (c.marketCapUsd ?? 0), 0),
+    [stablecoinData.stablecoins]
   );
-  const totalHolders = data.holders.totalHolders;
+  const totalHolders = stablecoinData.holders.totalHolders;
   const avgBalance = useMemo(
     () =>
-      data.stablecoins.length
-        ? data.stablecoins.reduce((s, c) => s + c.medianBalance, 0) / data.stablecoins.length
+      stablecoinData.stablecoins.length
+        ? stablecoinData.stablecoins.reduce((s, c) => s + c.medianBalance, 0) / stablecoinData.stablecoins.length
         : 0,
-    [data.stablecoins]
+    [stablecoinData.stablecoins]
   );
 
   const prevTvl = useMemo(
-    () => (data.holdersHistory?.[0]?.value ? (totalTvl / data.holdersHistory[0].value) * totalTvl : totalTvl * 0.97),
-    [totalTvl, data.holdersHistory]
+    () => (stablecoinData.holdersHistory?.[0]?.value ? (totalTvl / stablecoinData.holdersHistory[0].value) * totalTvl : totalTvl * 0.97),
+    [totalTvl, stablecoinData.holdersHistory]
   );
   const prevHolders = useMemo(
     () => totalHolders * 0.985,
@@ -180,44 +185,52 @@ export function AnalyticsWorkspace({
   );
 
   const supplyData = useMemo(
-    () => data.stablecoins.map((c) => ({ name: c.symbol, value: c.circulatingSupply })),
-    [data.stablecoins]
+    () => stablecoinData.stablecoins.map((c) => ({ name: c.symbol, value: c.circulatingSupply })),
+    [stablecoinData.stablecoins]
   );
   const balanceData = useMemo(
-    () => data.stablecoins.map((c) => ({ name: c.symbol, value: c.medianBalance })),
-    [data.stablecoins]
+    () => stablecoinData.stablecoins.map((c) => ({ name: c.symbol, value: c.medianBalance })),
+    [stablecoinData.stablecoins]
   );
   const holderRegionData = useMemo(
-    () => data.holders.geography.map((g) => ({ name: g.region, value: g.holderCount })),
-    [data.holders.geography]
+    () => stablecoinData.holders.geography.map((g) => ({ name: g.region, value: g.holderCount })),
+    [stablecoinData.holders.geography]
   );
   const geoData = useMemo(
     () =>
-      data.holders.geography.map((g) => ({
+      stablecoinData.holders.geography.map((g) => ({
         name: g.region,
         value: g.percentage,
         holderCount: g.holderCount,
       })),
-    [data.holders.geography]
+    [stablecoinData.holders.geography]
   );
   const attrData = useMemo(
     () =>
-      data.holders.attribution.map((a) => ({
+      stablecoinData.holders.attribution.map((a) => ({
         name: a.category.charAt(0).toUpperCase() + a.category.slice(1),
         value: a.percentage,
         holderCount: a.holderCount,
       })),
-    [data.holders.attribution]
+    [stablecoinData.holders.attribution]
   );
 
   const periodDays = period === "7d" ? 7 : period === "30d" ? 30 : period === "90d" ? 90 : Infinity;
   const filteredHolderHistory = useMemo(
-    () => (data.holdersHistory ?? []).slice(-periodDays),
-    [data.holdersHistory, periodDays]
+    () => (stablecoinData.holdersHistory ?? []).slice(-periodDays),
+    [stablecoinData.holdersHistory, periodDays]
   );
   const filteredSupplyHistory = useMemo(
-    () => (data.supplyHistory ?? []).slice(-periodDays),
-    [data.supplyHistory, periodDays]
+    () => (stablecoinData.supplyHistory ?? []).slice(-periodDays),
+    [stablecoinData.supplyHistory, periodDays]
+  );
+  const supplyKeys = useMemo(
+    () => buildSupplyKeys(filteredSupplyHistory),
+    [filteredSupplyHistory]
+  );
+  const stackColors = useMemo(
+    () => buildStackColors(supplyKeys),
+    [supplyKeys]
   );
 
   const chartMap: Record<string, { title: string; chart: ReactNode }> = useMemo(() => ({
@@ -243,7 +256,7 @@ export function AnalyticsWorkspace({
     },
     "supply-composition": {
       title: "Supply Composition",
-      chart: <StackedChartCard title="Supply Composition" description={`Circulating supply over time by stablecoin`} data={filteredSupplyHistory} keys={SUPPLY_KEYS} />,
+      chart: <StackedChartCard title="Supply Composition" description={`Circulating supply over time by stablecoin`} data={filteredSupplyHistory} keys={supplyKeys} colors={stackColors} />,
     },
     "holders-by-region": {
       title: "Holders by Region",
@@ -253,226 +266,255 @@ export function AnalyticsWorkspace({
 
   return (
     <div className="flex flex-col gap-6" data-analytics-root>
-      <motion.div
-        data-report="section"
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.2, ease: "easeOut" }}
-        className="flex items-center justify-between"
-      >
-        <div className="flex items-center gap-3">
-          {lastUpdated && (
-            <div className="flex items-center gap-2 rounded-md border border-[rgba(28,28,29,0.1)] bg-white px-2.5 py-1 shadow-[0_2px_10px_rgba(28,28,29,0.04)]">
-              <LiveDot lastUpdated={lastUpdated ?? new Date().toISOString()} />
-              <span className="text-xs text-[rgba(28,28,29,0.72)]">
-                Updated {relativeTime(lastUpdated)}
-              </span>
-            </div>
+      {/* Tab bar */}
+      <div className="flex gap-4 border-b border-[rgba(28,28,29,0.1)]">
+        <button
+          type="button"
+          onClick={() => setView("stablecoins")}
+          className={cn(
+            "pb-2 px-1 text-sm text-[rgba(28,28,29,0.56)] transition-colors hover:text-[#1c1c1d]",
+            view === "stablecoins" && "border-b-2 border-blue-500 font-semibold text-[#1c1c1d]"
           )}
-        </div>
-        <div className="flex items-center gap-3">
-          <Select value={period} onValueChange={(v) => { if (v) setPeriod(v); }}>
-            <SelectItem value="7d">Last 7 days</SelectItem>
-            <SelectItem value="30d">Last 30 days</SelectItem>
-            <SelectItem value="90d">Last 90 days</SelectItem>
-            <SelectItem value="all">All time</SelectItem>
-          </Select>
-          <ReportButton />
-          <Button variant="outline" type="button" onClick={() => downloadCsv(data.stablecoins)}>
-            Export CSV
-          </Button>
-        </div>
-      </motion.div>
-
-      <div data-report="section">
-        <KpiCards
-          totalTvl={totalTvl}
-          totalHolders={totalHolders}
-          avgBalance={avgBalance}
-          prevTvl={prevTvl}
-          prevHolders={prevHolders}
-          prevBalance={prevBalance}
-          holderHistory={filteredHolderHistory.map((d) => d.value)}
-        />
-      </div>
-
-      <div data-report="section">
-        <ConcentrationMetrics stablecoins={data.stablecoins} />
-      </div>
-
-      <div data-report="section">
-        <InsightBanners
-          stablecoins={data.stablecoins}
-          geography={data.holders.geography}
-          attribution={data.holders.attribution}
-        />
-      </div>
-
-      <div data-report="section">
-        <StablecoinCards stablecoins={data.stablecoins} />
-      </div>
-
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.2, ease: "easeOut", delay: 0.08 }}
-        className="grid grid-cols-1 gap-6 lg:grid-cols-2"
-      >
-        <BarChartCard
-          title="Circulating Supply"
-          description="By stablecoin"
-          data={supplyData}
-          configs={[{ dataKey: "value", label: "Supply", formatter: (v) => `$${(v / 1_000_000_000).toFixed(1)}B`, isCurrency: true }]}
-          barSize={52}
-          onItemClick={onCoinClick}
-          headerAction={
-            <Button variant="ghost" size="sm" type="button" onClick={() => setModalChartKey("circulating-supply")} className="h-7 w-7 p-0 text-[rgba(28,28,29,0.72)] hover:text-[#1c1c1d]">
-              <Maximize2Icon className="h-3.5 w-3.5" />
-            </Button>
-          }
-        />
-        <BarChartCard
-          title="Median Holder Balance"
-          description="By stablecoin"
-          data={balanceData}
-          configs={[{ dataKey: "value", label: "Balance", formatter: (v) => `$${(v / 1_000).toFixed(0)}K`, isCurrency: true }]}
-          barSize={52}
-          onItemClick={onCoinClick}
-          headerAction={
-            <Button variant="ghost" size="sm" type="button" onClick={() => setModalChartKey("median-balance")} className="h-7 w-7 p-0 text-[rgba(28,28,29,0.72)] hover:text-[#1c1c1d]">
-              <Maximize2Icon className="h-3.5 w-3.5" />
-            </Button>
-          }
-        />
-      </motion.div>
-
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.2, ease: "easeOut", delay: 0.12 }}
-        className="grid grid-cols-1 gap-6 lg:grid-cols-2"
-      >
-        <DonutCard
-          title="Holder Geography"
-          description="Regional distribution"
-          data={geoData}
-          centerLabel={`${Math.max(...geoData.map((g) => g.value), 0).toFixed(0)}%`}
-          centerSublabel="top region"
-          tooltip={<GeoTooltip />}
-          onItemClick={onRegionClick}
-          headerAction={
-            <Button variant="ghost" size="sm" type="button" onClick={() => setModalChartKey("holder-geography")} className="h-7 w-7 p-0 text-[rgba(28,28,29,0.72)] hover:text-[#1c1c1d]">
-              <Maximize2Icon className="h-3.5 w-3.5" />
-            </Button>
-          }
-        />
-        <DonutCard
-          title="Holder Attribution"
-          description="By category"
-          data={attrData}
-          centerLabel={`${Math.max(...attrData.map((a) => a.value), 0).toFixed(0)}%`}
-          centerSublabel="top category"
-          tooltip={<AttrTooltip />}
-          onItemClick={onAttrClick}
-          headerAction={
-            <Button variant="ghost" size="sm" type="button" onClick={() => setModalChartKey("holder-attribution")} className="h-7 w-7 p-0 text-[rgba(28,28,29,0.72)] hover:text-[#1c1c1d]">
-              <Maximize2Icon className="h-3.5 w-3.5" />
-            </Button>
-          }
-        />
-      </motion.div>
-
-      {(filteredHolderHistory.length > 0 || filteredSupplyHistory.length > 0) && (
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.2, ease: "easeOut", delay: 0.16 }}
-          className="grid grid-cols-1 gap-6 lg:grid-cols-2"
         >
-          {filteredHolderHistory.length > 0 && (
-            <AreaChartCard
-              title="Holder Growth"
-              description={`Total unique holders over the last ${periodDays === Infinity ? "all available" : periodDays} days`}
-              data={filteredHolderHistory}
-              color="#2163b6"
-              gradientColor="#2163b6"
-              formatValue={(v) => `${(v / 1_000).toFixed(0)}K`}
-              headerAction={
-                <Button variant="ghost" size="sm" type="button" onClick={() => setModalChartKey("holder-growth")} className="h-7 w-7 p-0 text-[rgba(28,28,29,0.72)] hover:text-[#1c1c1d]">
-                  <Maximize2Icon className="h-3.5 w-3.5" />
-                </Button>
-              }
-            />
+          Stablecoin Analytics
+        </button>
+        <button
+          type="button"
+          onClick={() => setView("my-tokens")}
+          className={cn(
+            "pb-2 px-1 text-sm text-[rgba(28,28,29,0.56)] transition-colors hover:text-[#1c1c1d]",
+            view === "my-tokens" && "border-b-2 border-blue-500 font-semibold text-[#1c1c1d]"
           )}
-          {filteredSupplyHistory.length > 0 && (
-            <StackedChartCard
-              title="Supply Composition"
-              description="Circulating supply over time by stablecoin"
-              data={filteredSupplyHistory}
-              keys={SUPPLY_KEYS.filter((k) =>
-                filteredSupplyHistory.some((d) => k in d)
-              )}
-              headerAction={
-                <Button variant="ghost" size="sm" type="button" onClick={() => setModalChartKey("supply-composition")} className="h-7 w-7 p-0 text-[rgba(28,28,29,0.72)] hover:text-[#1c1c1d]">
-                  <Maximize2Icon className="h-3.5 w-3.5" />
-                </Button>
-              }
-            />
-          )}
-        </motion.div>
-      )}
-
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.2, ease: "easeOut", delay: 0.2 }}
-      >
-        <BarChartCard
-          title="Holders by Region"
-          description="Absolute holder counts across regions"
-          data={holderRegionData}
-          configs={[{ dataKey: "value", label: "Holders", formatter: (v) => `${(v / 1_000).toFixed(0)}K` }]}
-          barSize={28}
-          layout="vertical"
-          onItemClick={onRegionClick}
-          headerAction={
-            <Button variant="ghost" size="sm" type="button" onClick={() => setModalChartKey("holders-by-region")} className="h-7 w-7 p-0 text-[rgba(28,28,29,0.72)] hover:text-[#1c1c1d]">
-              <Maximize2Icon className="h-3.5 w-3.5" />
-            </Button>
-          }
-        />
-      </motion.div>
-
-      <div data-report="section">
-        <AnalyticsTable
-          stablecoins={data.stablecoins}
-          geography={data.holders.geography}
-          attribution={data.holders.attribution}
-        />
+        >
+          My Tokens
+        </button>
       </div>
 
-      {modalChartKey && chartMap[modalChartKey] && (
-        <Suspense fallback={null}>
-          <ChartModal
-            open
-            onClose={closeModal}
-            title={chartMap[modalChartKey].title}
+      {view === "my-tokens" ? (
+        <MyTokensView data={userTokenData} />
+      ) : (
+        <>
+          <motion.div
+            data-report="section"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
+            className="flex items-center justify-between"
           >
-            {chartMap[modalChartKey].chart}
-          </ChartModal>
-        </Suspense>
-      )}
+            <div className="flex items-center gap-3">
+              {lastUpdated && (
+                <div className="flex items-center gap-2 rounded-md border border-[rgba(28,28,29,0.1)] bg-white px-2.5 py-1 shadow-[0_2px_10px_rgba(28,28,29,0.04)]">
+                  <LiveDot lastUpdated={lastUpdated ?? new Date().toISOString()} />
+                  <span className="text-xs text-[rgba(28,28,29,0.72)]">
+                    Updated {relativeTime(lastUpdated)}
+                  </span>
+                </div>
+              )}
+            </div>
+            <div className="flex items-center gap-3">
+              <Select value={period} onValueChange={(v) => { if (v) setPeriod(v); }}>
+                <SelectItem value="7d">Last 7 days</SelectItem>
+                <SelectItem value="30d">Last 30 days</SelectItem>
+                <SelectItem value="90d">Last 90 days</SelectItem>
+                <SelectItem value="all">All time</SelectItem>
+              </Select>
+              <ReportButton />
+              <Button variant="outline" type="button" onClick={() => downloadCsv(stablecoinData.stablecoins)}>
+                Export CSV
+              </Button>
+            </div>
+          </motion.div>
 
-      {drillDown && (
-        <Suspense fallback={null}>
-          <ChartDrillDown
-            open
-            onClose={closeDrillDown}
-            title={drillDown.title}
-            subtitle={drillDown.subtitle}
-            items={drillDown.items}
-          />
-        </Suspense>
+          <div data-report="section">
+            <KpiCards
+              totalTvl={totalTvl}
+              totalHolders={totalHolders}
+              avgBalance={avgBalance}
+              prevTvl={prevTvl}
+              prevHolders={prevHolders}
+              prevBalance={prevBalance}
+              holderHistory={filteredHolderHistory.map((d) => d.value)}
+            />
+          </div>
+
+          <div data-report="section">
+            <ConcentrationMetrics stablecoins={stablecoinData.stablecoins} />
+          </div>
+
+          <div data-report="section">
+            <InsightBanners
+              stablecoins={stablecoinData.stablecoins}
+              geography={stablecoinData.holders.geography}
+              attribution={stablecoinData.holders.attribution}
+            />
+          </div>
+
+          <div data-report="section">
+            <StablecoinCards stablecoins={stablecoinData.stablecoins} />
+          </div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.2, ease: "easeOut", delay: 0.08 }}
+            className="grid grid-cols-1 gap-6 lg:grid-cols-2"
+          >
+            <BarChartCard
+              title="Circulating Supply"
+              description="By stablecoin"
+              data={supplyData}
+              configs={[{ dataKey: "value", label: "Supply", formatter: (v) => `$${(v / 1_000_000_000).toFixed(1)}B`, isCurrency: true }]}
+              barSize={52}
+              onItemClick={onCoinClick}
+              headerAction={
+                <Button variant="ghost" size="sm" type="button" onClick={() => setModalChartKey("circulating-supply")} className="h-7 w-7 p-0 text-[rgba(28,28,29,0.72)] hover:text-[#1c1c1d]">
+                  <Maximize2Icon className="h-3.5 w-3.5" />
+                </Button>
+              }
+            />
+            <BarChartCard
+              title="Median Holder Balance"
+              description="By stablecoin"
+              data={balanceData}
+              configs={[{ dataKey: "value", label: "Balance", formatter: (v) => `$${(v / 1_000).toFixed(0)}K`, isCurrency: true }]}
+              barSize={52}
+              onItemClick={onCoinClick}
+              headerAction={
+                <Button variant="ghost" size="sm" type="button" onClick={() => setModalChartKey("median-balance")} className="h-7 w-7 p-0 text-[rgba(28,28,29,0.72)] hover:text-[#1c1c1d]">
+                  <Maximize2Icon className="h-3.5 w-3.5" />
+                </Button>
+              }
+            />
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.2, ease: "easeOut", delay: 0.12 }}
+            className="grid grid-cols-1 gap-6 lg:grid-cols-2"
+          >
+            <DonutCard
+              title="Holder Geography"
+              description="Regional distribution"
+              data={geoData}
+              centerLabel={`${Math.max(...geoData.map((g) => g.value), 0).toFixed(0)}%`}
+              centerSublabel="top region"
+              tooltip={<GeoTooltip />}
+              onItemClick={onRegionClick}
+              headerAction={
+                <Button variant="ghost" size="sm" type="button" onClick={() => setModalChartKey("holder-geography")} className="h-7 w-7 p-0 text-[rgba(28,28,29,0.72)] hover:text-[#1c1c1d]">
+                  <Maximize2Icon className="h-3.5 w-3.5" />
+                </Button>
+              }
+            />
+            <DonutCard
+              title="Holder Attribution"
+              description="By category"
+              data={attrData}
+              centerLabel={`${Math.max(...attrData.map((a) => a.value), 0).toFixed(0)}%`}
+              centerSublabel="top category"
+              tooltip={<AttrTooltip />}
+              onItemClick={onAttrClick}
+              headerAction={
+                <Button variant="ghost" size="sm" type="button" onClick={() => setModalChartKey("holder-attribution")} className="h-7 w-7 p-0 text-[rgba(28,28,29,0.72)] hover:text-[#1c1c1d]">
+                  <Maximize2Icon className="h-3.5 w-3.5" />
+                </Button>
+              }
+            />
+          </motion.div>
+
+          {(filteredHolderHistory.length > 0 || filteredSupplyHistory.length > 0) && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.2, ease: "easeOut", delay: 0.16 }}
+              className="grid grid-cols-1 gap-6 lg:grid-cols-2"
+            >
+              {filteredHolderHistory.length > 0 && (
+                <AreaChartCard
+                  title="Holder Growth"
+                  description={`Total unique holders over the last ${periodDays === Infinity ? "all available" : periodDays} days`}
+                  data={filteredHolderHistory}
+                  color="#2163b6"
+                  gradientColor="#2163b6"
+                  formatValue={(v) => `${(v / 1_000).toFixed(0)}K`}
+                  headerAction={
+                    <Button variant="ghost" size="sm" type="button" onClick={() => setModalChartKey("holder-growth")} className="h-7 w-7 p-0 text-[rgba(28,28,29,0.72)] hover:text-[#1c1c1d]">
+                      <Maximize2Icon className="h-3.5 w-3.5" />
+                    </Button>
+                  }
+                />
+              )}
+              {filteredSupplyHistory.length > 0 && (
+                <StackedChartCard
+                  title="Supply Composition"
+                  description="Circulating supply over time by stablecoin"
+                  data={filteredSupplyHistory}
+                  keys={supplyKeys}
+                  colors={stackColors}
+                  headerAction={
+                    <Button variant="ghost" size="sm" type="button" onClick={() => setModalChartKey("supply-composition")} className="h-7 w-7 p-0 text-[rgba(28,28,29,0.72)] hover:text-[#1c1c1d]">
+                      <Maximize2Icon className="h-3.5 w-3.5" />
+                    </Button>
+                  }
+                />
+              )}
+            </motion.div>
+          )}
+
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.2, ease: "easeOut", delay: 0.2 }}
+          >
+            <BarChartCard
+              title="Holders by Region"
+              description="Absolute holder counts across regions"
+              data={holderRegionData}
+              configs={[{ dataKey: "value", label: "Holders", formatter: (v) => `${(v / 1_000).toFixed(0)}K` }]}
+              barSize={28}
+              layout="vertical"
+              onItemClick={onRegionClick}
+              headerAction={
+                <Button variant="ghost" size="sm" type="button" onClick={() => setModalChartKey("holders-by-region")} className="h-7 w-7 p-0 text-[rgba(28,28,29,0.72)] hover:text-[#1c1c1d]">
+                  <Maximize2Icon className="h-3.5 w-3.5" />
+                </Button>
+              }
+            />
+          </motion.div>
+
+          <div data-report="section">
+            <AnalyticsTable
+              stablecoins={stablecoinData.stablecoins}
+              geography={stablecoinData.holders.geography}
+              attribution={stablecoinData.holders.attribution}
+            />
+          </div>
+
+          {modalChartKey && chartMap[modalChartKey] && (
+            <Suspense fallback={null}>
+              <ChartModal
+                open
+                onClose={closeModal}
+                title={chartMap[modalChartKey].title}
+              >
+                {chartMap[modalChartKey].chart}
+              </ChartModal>
+            </Suspense>
+          )}
+
+          {drillDown && (
+            <Suspense fallback={null}>
+              <ChartDrillDown
+                open
+                onClose={closeDrillDown}
+                title={drillDown.title}
+                subtitle={drillDown.subtitle}
+                items={drillDown.items}
+              />
+            </Suspense>
+          )}
+        </>
       )}
     </div>
   );

@@ -1,0 +1,35 @@
+{
+  "id": "analytics-expansion-05",
+  "seq": "05",
+  "title": "Wire dashboard with both views",
+  "status": "pending",
+  "depends_on": ["02", "04"],
+  "parallel": false,
+  "suggested_agent": "OpenFrontendSpecialist",
+  "context_files": [
+    "solana-developer-platform/AGENTS.md",
+    "solana-developer-platform/biome.json"
+  ],
+  "reference_files": [
+    "apps/sdp-web/src/app/dashboard/analytics/page.tsx",
+    "apps/sdp-web/src/app/dashboard/analytics/analytics-types.ts",
+    "apps/sdp-web/src/app/dashboard/analytics/analytics-workspace.tsx"
+  ],
+  "agent_id": null,
+  "started_at": null,
+  "completed_at": null,
+  "completion_summary": null,
+  "acceptance_criteria": [
+    "Dashboard page has tabs/view toggle: 'Stablecoin Analytics' vs 'My Tokens'",
+    "Stablecoin Analytics view: fetches from GET /v1/data-products/analytics and renders existing chart workspace",
+    "My Tokens view: fetches from GET /v1/data-products/user-analytics and shows per-token table with metrics",
+    "analytics-types.ts updated with user token response types if needed",
+    "Follows 4-stage design workflow",
+    "Responsive at all breakpoints"
+  ],
+  "deliverables": [
+    "apps/sdp-web/src/app/dashboard/analytics/page.tsx (modified)",
+    "apps/sdp-web/src/app/dashboard/analytics/analytics-types.ts (modified if needed)",
+    "apps/sdp-web/src/app/dashboard/analytics/analytics-workspace.tsx (modified if needed)"
+  ]
+}

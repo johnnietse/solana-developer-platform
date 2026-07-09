@@ -1,0 +1,27 @@
+{
+  "id": "analytics-expansion-06",
+  "seq": "06",
+  "title": "TypeScript validation & testing",
+  "status": "pending",
+  "depends_on": ["05"],
+  "parallel": false,
+  "suggested_agent": "CoderAgent",
+  "context_files": [
+    "solana-developer-platform/AGENTS.md"
+  ],
+  "reference_files": [],
+  "agent_id": null,
+  "started_at": null,
+  "completed_at": null,
+  "completion_summary": null,
+  "acceptance_criteria": [
+    "pnpm --filter @sdp/api typecheck passes with zero errors",
+    "pnpm typecheck (full workspace) passes with zero errors",
+    "All TypeScript strict-mode violations fixed (if any)",
+    "No explicit any types introduced",
+    "If existing tests exist, pnpm --filter @sdp/api test passes"
+  ],
+  "deliverables": [
+    "Type errors fixed across sdp-api and sdp-web"
+  ]
+}

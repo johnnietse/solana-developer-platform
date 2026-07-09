@@ -1,0 +1,33 @@
+{
+  "id": "analytics-expansion-02",
+  "seq": "02",
+  "title": "Expand stablecoin analytics to multi-token",
+  "status": "pending",
+  "depends_on": ["01"],
+  "parallel": false,
+  "suggested_agent": "CoderAgent",
+  "context_files": [
+    "solana-developer-platform/AGENTS.md",
+    "solana-developer-platform/CONTEXT.md",
+    "solana-developer-platform/biome.json",
+    "solana-developer-platform/docs/superpowers/specs/2026-07-08-analytics-databricks-enrichment-design.md"
+  ],
+  "reference_files": [
+    "apps/sdp-api/src/routes/data-products/analytics.ts"
+  ],
+  "agent_id": null,
+  "started_at": null,
+  "completed_at": null,
+  "completion_summary": null,
+  "acceptance_criteria": [
+    "analytics.ts imports getTokenSupply and getHolderCount from shared rpc-utils instead of inline implementations",
+    "GET /v1/data-products/analytics accepts optional ?mints= query param (comma-separated mint addresses)",
+    "Defaults to USDC devnet mint (Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr) when no mints specified",
+    "Returns array of StablecoinEntry objects (one per mint)",
+    "Databricks cache layer preserved (analytics_cache query still works)",
+    "Mock data fallback preserved and returns array of entries matching requested mints"
+  ],
+  "deliverables": [
+    "apps/sdp-api/src/routes/data-products/analytics.ts (modified)"
+  ]
+}

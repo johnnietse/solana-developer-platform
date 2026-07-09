@@ -1,0 +1,40 @@
+{
+  "id": "analytics-expansion-04",
+  "seq": "04",
+  "title": "Build user token analytics endpoint",
+  "status": "pending",
+  "depends_on": ["01"],
+  "parallel": false,
+  "suggested_agent": "CoderAgent",
+  "context_files": [
+    "solana-developer-platform/AGENTS.md",
+    "solana-developer-platform/CONTEXT.md",
+    "solana-developer-platform/biome.json",
+    "solana-developer-platform/docs/superpowers/specs/2026-07-08-analytics-databricks-enrichment-design.md"
+  ],
+  "reference_files": [
+    "apps/sdp-api/src/routes/data-products/analytics.ts",
+    "apps/sdp-api/src/app.ts",
+    "apps/sdp-api/src/db/client.ts",
+    "apps/sdp-api/src/db/index.ts",
+    "apps/sdp-api/src/db/repositories/token.repository.ts",
+    "apps/sdp-api/src/db/repositories/token.repository.postgres.ts",
+    "scripts/ingest-analytics.mjs"
+  ],
+  "agent_id": null,
+  "started_at": null,
+  "completed_at": null,
+  "completion_summary": null,
+  "acceptance_criteria": [
+    "apps/sdp-api/src/routes/data-products/user-analytics.ts created with GET endpoint",
+    "Endpoint scoped to organization/project from auth context",
+    "Queries SDP Postgres for user's issued_tokens via getDb(c.env) + TokenRepository.listByProject",
+    "For each token's mint_address: calls RPC for holders (getHolderCount) and supply (getTokenSupply) from rpc-utils",
+    "Returns per-token stats + aggregate metrics (total holders, total supply across all user tokens)",
+    "Route registered in apps/sdp-api/src/app.ts as v1.route('/data-products/user-analytics', userAnalytics)"
+  ],
+  "deliverables": [
+    "apps/sdp-api/src/routes/data-products/user-analytics.ts",
+    "apps/sdp-api/src/app.ts (modified — route registration)"
+  ]
+}

@@ -16,21 +16,37 @@ export function formatPercent(value: number): string {
   return `${sign}${(value * 100).toFixed(2)}%`;
 }
 
-export const PALLETE = ["#2163b6", "#0c804c", "#d97706", "#9e2b38", "#7c3aed", "#0d9488"];
+export const PALLETE = ["#2163b6", "#0c804c", "#d97706", "#9e2b38", "#7c3aed", "#0d9488", "#0891b2", "#4f46e5"];
 
-export const DONUT_COLORS = ["#2163b6", "#0c804c", "#d97706", "#9e2b38", "#7c3aed"];
-
-export const STACK_COLORS: Record<string, string> = {
-  USDC: "#2163b6",
-  USDT: "#d97706",
-  PYUSD: "#0c804c",
-};
+export const DONUT_COLORS = ["#2163b6", "#0c804c", "#d97706", "#9e2b38", "#7c3aed", "#0891b2"];
 
 export function getColorForSymbol(symbol: string): string {
-  return STACK_COLORS[symbol] ?? PALLETE[symbol.length % PALLETE.length];
+  return PALLETE[symbol.length % PALLETE.length];
 }
 
-export const SUPPLY_KEYS = ["USDC", "PYUSD"];
+/**
+ * Build supply keys and color map dynamically from the actual data.
+ * Extracts all symbol keys (excluding 'date') from supply history entries.
+ */
+export function buildSupplyKeys(
+  supplyHistory: Array<{ date: string; [symbol: string]: string | number }>
+): string[] {
+  const keys = new Set<string>();
+  for (const entry of supplyHistory) {
+    for (const key of Object.keys(entry)) {
+      if (key !== "date") keys.add(key);
+    }
+  }
+  return Array.from(keys);
+}
+
+export function buildStackColors(keys: string[]): Record<string, string> {
+  const colors: Record<string, string> = {};
+  keys.forEach((key, i) => {
+    colors[key] = PALLETE[i % PALLETE.length];
+  });
+  return colors;
+}
 
 export function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -44,27 +60,27 @@ export function relativeTime(iso: string): string {
 }
 
 export function downloadCsv(
-  stablecoins: Array<{
+  tokens: Array<{
     symbol: string;
     name: string;
     totalSupply: number;
-    circulatingSupply: number;
-    marketCapUsd: number | null;
+    circulatingSupply?: number;
+    marketCapUsd?: number | null;
     holderCount: number;
     medianBalance: number;
-    priceUsd: number | null;
-    percentChange24h: number | null;
+    priceUsd?: number | null;
+    percentChange24h?: number | null;
   }>
 ) {
   const headers = [
     "Symbol", "Name", "Total Supply", "Circulating Supply",
     "Market Cap", "Holders", "Median Balance", "Price", "24h Change",
   ];
-  const rows = stablecoins.map((c) => [
+  const rows = tokens.map((c) => [
     c.symbol,
     c.name,
     c.totalSupply.toString(),
-    c.circulatingSupply.toString(),
+    (c.circulatingSupply ?? c.totalSupply).toString(),
     (c.marketCapUsd ?? 0).toString(),
     c.holderCount.toString(),
     c.medianBalance.toString(),
@@ -82,12 +98,12 @@ export function downloadCsv(
 }
 
 export function computeHhi(
-  stablecoins: Array<{ marketCapUsd: number | null }>
+  tokens: Array<{ marketCapUsd?: number | null }>
 ): number {
-  const total = stablecoins.reduce((s, c) => s + (c.marketCapUsd ?? 0), 0);
+  const total = tokens.reduce((s, c) => s + (c.marketCapUsd ?? 0), 0);
   if (total === 0) return 0;
   return Math.round(
-    stablecoins.reduce((s, c) => {
+    tokens.reduce((s, c) => {
       const share = ((c.marketCapUsd ?? 0) / total) * 100;
       return s + share * share;
     }, 0)
@@ -103,18 +119,18 @@ export function concentrationLabel(
 }
 
 export function computeInsights(
-  stablecoins: Array<{
+  tokens: Array<{
     symbol: string;
-    marketCapUsd: number | null;
+    marketCapUsd?: number | null;
   }>,
   geography: Array<{ region: string; percentage: number }>,
   attribution: Array<{ category: string; percentage: number }>
 ): Array<{ label: string; message: string; variant: "info" | "success" | "warning" }> {
   const insights: Array<{ label: string; message: string; variant: "info" | "success" | "warning" }> = [];
 
-  const totalMc = stablecoins.reduce((s, c) => s + (c.marketCapUsd ?? 0), 0);
-  if (totalMc > 0 && stablecoins.length > 0) {
-    const top = [...stablecoins].sort((a, b) => (b.marketCapUsd ?? 0) - (a.marketCapUsd ?? 0))[0];
+  const totalMc = tokens.reduce((s, c) => s + (c.marketCapUsd ?? 0), 0);
+  if (totalMc > 0 && tokens.length > 0) {
+    const top = [...tokens].sort((a, b) => (b.marketCapUsd ?? 0) - (a.marketCapUsd ?? 0))[0];
     const share = ((top.marketCapUsd ?? 0) / totalMc) * 100;
     insights.push({
       label: "Dominance",

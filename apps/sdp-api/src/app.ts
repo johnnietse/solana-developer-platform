@@ -23,6 +23,8 @@ import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { skipRateLimitPaths } from "@/middleware/rate-limit";
 import { requestIdMiddleware } from "@/middleware/request-id";
 import { requestTracingMiddleware } from "@/middleware/request-tracing";
+import analytics from "@/routes/data-products/analytics";
+import userAnalytics from "@/routes/data-products/user-analytics";
 import allowlist from "@/routes/allowlist";
 import apiKeys from "@/routes/api-keys";
 import assetProfiles from "@/routes/asset-profiles";
@@ -341,6 +343,8 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   v1.route("/payments", payments);
   v1.route("/places", places);
   v1.route("/compliance", compliance);
+  v1.route("/data-products/analytics", analytics);
+  v1.route("/data-products/user-analytics", userAnalytics);
 
   const registeredPluginNames = new Set<string>();
   for (const plugin of deps.plugins ?? []) {

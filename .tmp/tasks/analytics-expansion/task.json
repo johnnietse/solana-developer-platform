@@ -1,0 +1,39 @@
+{
+  "id": "analytics-expansion",
+  "name": "Analytics Expansion — Multi-Token + User Token Analytics",
+  "status": "active",
+  "objective": "Expand analytics pipeline: multi-stablecoin support, user-scoped token analytics, Databricks wallet_labels table, and dashboard view toggle",
+  "context_files": [
+    "solana-developer-platform/AGENTS.md",
+    "solana-developer-platform/CONTEXT.md",
+    "solana-developer-platform/biome.json",
+    "solana-developer-platform/tsconfig.json",
+    "solana-developer-platform/.superpowers/sdd/progress.md",
+    "solana-developer-platform/docs/superpowers/specs/2026-07-08-analytics-databricks-enrichment-design.md"
+  ],
+  "reference_files": [
+    "apps/sdp-api/src/routes/data-products/analytics.ts",
+    "apps/sdp-api/src/app.ts",
+    "apps/sdp-api/src/db/client.ts",
+    "apps/sdp-api/src/db/index.ts",
+    "apps/sdp-api/src/db/repositories/token.repository.ts",
+    "apps/sdp-api/src/db/repositories/token.repository.postgres.ts",
+    "apps/sdp-api/src/db/migrations/postgres/0001_initial_schema.sql",
+    "apps/sdp-web/src/app/dashboard/analytics/page.tsx",
+    "apps/sdp-web/src/app/dashboard/analytics/analytics-types.ts",
+    "apps/sdp-web/src/app/dashboard/analytics/analytics-workspace.tsx",
+    "scripts/ingest-analytics.mjs"
+  ],
+  "exit_criteria": [
+    "Stablecoin analytics handler supports multiple mints (not hardcoded to USDC)",
+    "wallet_labels table exists in Databricks with geography + attribution columns",
+    "User token analytics endpoint exists — queries SDP DB + RPC for user-scoped data",
+    "Dashboard shows both views with toggle",
+    "All TypeScript checks pass (pnpm typecheck)",
+    "End-to-end verification: RPC returns real holder data for queried tokens"
+  ],
+  "subtask_count": 6,
+  "completed_count": 0,
+  "completed_at": null,
+  "created_at": "2026-07-09T00:45:00Z"
+}

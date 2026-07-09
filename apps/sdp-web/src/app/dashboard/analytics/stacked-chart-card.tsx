@@ -12,7 +12,7 @@ import {
   Legend,
 } from "recharts";
 import { ChartCard } from "./chart-card";
-import { STACK_COLORS, formatCurrency } from "./analytics-utils";
+import { formatCurrency } from "./analytics-utils";
 
 interface StackTooltipProps {
   active?: boolean;
@@ -39,10 +39,11 @@ interface StackedChartCardProps {
   description: string;
   data: Array<{ date: string; [symbol: string]: number | string }>;
   keys: string[];
+  colors?: Record<string, string>;
   headerAction?: ReactNode;
 }
 
-export function StackedChartCard({ title, description, data, keys, headerAction }: StackedChartCardProps) {
+export function StackedChartCard({ title, description, data, keys, colors, headerAction }: StackedChartCardProps) {
   const chartRef = useRef<HTMLDivElement>(null);
   return (
     <ChartCard title={title} description={description} headerAction={headerAction} chartRef={chartRef}>
@@ -62,7 +63,7 @@ export function StackedChartCard({ title, description, data, keys, headerAction 
               key={key}
               dataKey={key}
               stackId="a"
-              fill={STACK_COLORS[key as keyof typeof STACK_COLORS] ?? "#888"}
+              fill={colors?.[key] ?? "#888"}
               radius={[2, 2, 0, 0]}
               maxBarSize={24}
             />

@@ -1,0 +1,30 @@
+{
+  "id": "analytics-expansion-03",
+  "seq": "03",
+  "title": "Create wallet_labels table in Databricks",
+  "status": "pending",
+  "depends_on": [],
+  "parallel": true,
+  "suggested_agent": "CoderAgent",
+  "context_files": [
+    "solana-developer-platform/AGENTS.md",
+    "solana-developer-platform/biome.json",
+    "solana-developer-platform/docs/superpowers/specs/2026-07-08-analytics-databricks-enrichment-design.md"
+  ],
+  "reference_files": [],
+  "agent_id": null,
+  "started_at": null,
+  "completed_at": null,
+  "completion_summary": null,
+  "acceptance_criteria": [
+    "Table workspace.default.wallet_labels created in Databricks via REST API",
+    "Table has columns: wallet_address STRING NOT NULL, geography STRING DEFAULT 'Unknown', attribution_category STRING DEFAULT 'unknown', source STRING DEFAULT 'sdp-analytics', updated_at TIMESTAMP",
+    "Metastore ID: 126b15ed-3cde-4299-809e-78ce5a5e2c9b, workspace: 7474654380456508",
+    "Table is joinable with existing token_holders table",
+    "Creation script or API call is idempotent (CREATE TABLE IF NOT EXISTS or equivalent)"
+  ],
+  "deliverables": [
+    "workspace.default.wallet_labels table in Databricks",
+    "Script or documented API call for creation"
+  ]
+}
