@@ -28,7 +28,10 @@ id = "local-sessions"
 
 [triggers]
 # Run every minute to reconcile pending/processing transfer statuses
-crons = ["* * * * *"]
+crons = [
+  "* * * * *",         # Transfer reconciliation (existing)
+  "*/5 * * * *",       # Analytics ingestion (every 5 min)
+]
 
 [vars]
 ENVIRONMENT = "development"
@@ -42,6 +45,8 @@ SOLANA_RPC_TRITON_URL = "https://your-triton-endpoint.devnet.rpcpool.com/{API_KE
 # Local dev defaults. Can be overridden by apps/sdp-api/.dev.vars.
 FEE_PAYMENT_PROVIDER = "kora"
 KORA_RPC_URL = "https://your-kora-devnet-instance.us-central1.run.app"
+ANALYTICS_ENABLED = "true"
+ANALYTICS_MINTS = "Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr"
 
 # Dev environment
 [env.dev]
@@ -85,6 +90,8 @@ SOLANA_RPC_HELIUS_URL = "https://devnet.helius-rpc.com/?api-key={API_KEY}"
 SOLANA_RPC_QUICKNODE_URL = "https://your-quicknode-endpoint.solana-devnet.quiknode.pro/{API_KEY}"
 FEE_PAYMENT_PROVIDER = "kora"
 KORA_RPC_URL = "https://your-kora-devnet-instance.us-central1.run.app"
+ANALYTICS_ENABLED = "true"
+ANALYTICS_MINTS = "Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr"
 
 # Production environment
 [env.production]
@@ -128,3 +135,5 @@ SOLANA_RPC_HELIUS_URL = "https://devnet.helius-rpc.com/?api-key={API_KEY}"
 SOLANA_RPC_QUICKNODE_URL = "https://your-quicknode-endpoint.solana-devnet.quiknode.pro/{API_KEY}"
 FEE_PAYMENT_PROVIDER = "kora"
 KORA_RPC_URL = "https://your-kora-devnet-instance.us-central1.run.app"
+ANALYTICS_ENABLED = "true"
+ANALYTICS_MINTS = "Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr"
