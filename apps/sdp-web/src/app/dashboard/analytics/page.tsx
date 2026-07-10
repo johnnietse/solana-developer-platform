@@ -7,7 +7,7 @@ import type { AnalyticsResponse, UserAnalyticsResponse, ResponseMeta } from "./a
 export const dynamic = "force-dynamic";
 
 export default async function AnalyticsPage() {
-  const { userId } = await auth();
+  const { userId, getToken } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
   }
@@ -25,14 +25,21 @@ export default async function AnalyticsPage() {
   if (apiBaseUrl) {
     const baseUrl = apiBaseUrl.replace(/\/$/, "");
 
+    // Mint a Clerk JWT (sdp-api template carries the org_id claim the API
+    // needs to scope user analytics to the active organization).
+    const clerkToken = await getToken({ template: "sdp-api" }).catch(() => null);
+    const authHeaders = clerkToken
+      ? { "Content-Type": "application/json", Authorization: `Bearer ${clerkToken}` }
+      : { "Content-Type": "application/json" };
+
     const [stablecoinRes, userTokenRes] = await Promise.all([
       fetch(`${baseUrl}/v1/data-products/analytics`, {
         cache: "no-store",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders,
       }),
       fetch(`${baseUrl}/v1/data-products/user-analytics`, {
         cache: "no-store",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders,
       }),
     ]);
 

@@ -12,8 +12,14 @@ import { Hono } from "hono";
 import type { Env } from "@/types/env";
 import { getDb } from "@/db";
 import { getTokenSupply, getHolderCount } from "@/lib/rpc-utils";
+import { unifiedAuthMiddleware } from "@/middleware/auth";
 
 const userAnalytics = new Hono<{ Bindings: Env }>();
+
+// Resolve auth context (API key / session / Clerk) so the handler can scope
+// results to the caller's organization. The web dashboard forwards a Clerk
+// JWT (sdp-api template) as a Bearer token.
+userAnalytics.use(unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types

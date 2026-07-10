@@ -32,8 +32,12 @@ export async function queryDatabricks(
         warehouse_id: DATABRICKS_WAREHOUSE_ID,
         catalog: "workspace",
         schema: "default",
-        statement: sql,
-        parameters: params.map((p) => ({ value: String(p) })),
+        // Databricks SQL only supports named parameters (`:name` syntax), not
+        // `:1` positional or `?`. Rewrite the caller's `:1`/`:2`/… placeholders
+        // to `:p1`/`:p2`/… and bind each by its 1-based index. `::` casts are
+        // left untouched because they are followed by a letter, not a digit.
+        statement: sql.replace(/:(\d+)/g, (_m, n) => `:p${n}`),
+        parameters: params.map((p, i) => ({ name: `p${i + 1}`, value: String(p) })),
         wait_timeout: timeout,
       }),
       signal: controller.signal,

@@ -136,6 +136,14 @@ const PROCESS_ENV_FALLBACK_KEYS = [
   "BVNK_SANDBOX_WALLET_ID",
   "BVNK_SANDBOX_WEBHOOK_SECRET",
   "DISABLE_CRON",
+  // Databricks analytics
+  "DATABRICKS_HOST",
+  "DATABRICKS_TOKEN",
+  "DATABRICKS_WAREHOUSE_ID",
+  // Analytics ingestion cron
+  "ANALYTICS_ENABLED",
+  "ANALYTICS_MINTS",
+  "ANALYTICS_RPC_URL",
 ] as const satisfies readonly (keyof Env)[];
 
 const fallbackKeys = new Set<string>(PROCESS_ENV_FALLBACK_KEYS);
