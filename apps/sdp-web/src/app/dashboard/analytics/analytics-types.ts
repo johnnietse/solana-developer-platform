@@ -76,7 +76,7 @@ export interface UserAnalyticsResponse {
   lastUpdated: string;
 }
 
-export type ViewMode = "stablecoins" | "my-tokens";
+export type ViewMode = "stablecoins" | "databricks" | "my-tokens";
 
 export interface FreshnessInfo {
   cacheAgeSeconds: number;

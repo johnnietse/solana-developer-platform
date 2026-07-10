@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useMemo, Suspense, type ReactNode } from "react";
 import dynamic from "next/dynamic";
-import { Maximize2Icon } from "lucide-react";
+import { Maximize2Icon, BarChart2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectItem } from "@/components/ui/select";
 import { motion } from "motion/react";
@@ -21,6 +21,7 @@ import { relativeTime, downloadCsv, formatCurrency, formatNumber, buildSupplyKey
 import { cn } from "@/lib/utils";
 import type { AnalyticsResponse, UserAnalyticsResponse, ViewMode } from "./analytics-types";
 import { MyTokensView } from "./my-tokens-view";
+import { DatabricksDashboard } from "./databricks-dashboard";
 
 const ChartModal = dynamic(() => import("./chart-modal").then((m) => m.ChartModal));
 const ChartDrillDown = dynamic(() => import("./chart-drill-down").then((m) => m.ChartDrillDown));
@@ -280,6 +281,17 @@ export function AnalyticsWorkspace({
         </button>
         <button
           type="button"
+          onClick={() => setView("databricks")}
+          className={cn(
+            "pb-2 px-1 text-sm text-[rgba(28,28,29,0.56)] transition-colors hover:text-[#1c1c1d]",
+            view === "databricks" && "border-b-2 border-blue-500 font-semibold text-[#1c1c1d]"
+          )}
+        >
+          <BarChart2Icon className="inline h-4 w-4 mr-1.5" />
+          Databricks Dashboard
+        </button>
+        <button
+          type="button"
           onClick={() => setView("my-tokens")}
           className={cn(
             "pb-2 px-1 text-sm text-[rgba(28,28,29,0.56)] transition-colors hover:text-[#1c1c1d]",
@@ -292,6 +304,8 @@ export function AnalyticsWorkspace({
 
       {view === "my-tokens" ? (
         <MyTokensView data={userTokenData} />
+      ) : view === "databricks" ? (
+        <DatabricksDashboard />
       ) : (
         <>
           <motion.div

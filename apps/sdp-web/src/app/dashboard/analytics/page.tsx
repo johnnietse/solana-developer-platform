@@ -28,9 +28,12 @@ export default async function AnalyticsPage() {
     // Mint a Clerk JWT (sdp-api template carries the org_id claim the API
     // needs to scope user analytics to the active organization).
     const clerkToken = await getToken({ template: "sdp-api" }).catch(() => null);
-    const authHeaders = clerkToken
-      ? { "Content-Type": "application/json", Authorization: `Bearer ${clerkToken}` }
-      : { "Content-Type": "application/json" };
+    const authHeaders: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (clerkToken) {
+      authHeaders.Authorization = `Bearer ${clerkToken}`;
+    }
 
     const [stablecoinRes, userTokenRes] = await Promise.all([
       fetch(`${baseUrl}/v1/data-products/analytics`, {
