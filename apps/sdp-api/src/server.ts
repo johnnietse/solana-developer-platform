@@ -9,7 +9,9 @@
  * The shutdown sequence lives in `runtime/shutdown-node.ts`.
  */
 
-import { pathToFileURL } from "node:url";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { type ServerType, serve } from "@hono/node-server";
 
 import { createApp } from "@/app";
@@ -100,7 +102,53 @@ function assertRequiredEnv(env: Env): void {
   }
 }
 
+/**
+ * Read a `.dev.vars` file (Cloudflare-style K=V format) and populate
+ * `process.env` with any values that aren't already set.  This lets the
+ * Node.js dev server (`dev:node`) pick up the same local config that
+ * `wrangler dev` (`dev:local`) gets from `.dev.vars`, so team members
+ * don't need to duplicate env vars across files or shell exports.
+ *
+ * Format: `KEY=VALUE` lines, `#` comments, empty lines ignored.
+ * Values containing `=` are handled correctly (split on first `=` only).
+ */
+function loadDevVarsFile(filePath: string): void {
+  if (!existsSync(filePath)) {
+    return;
+  }
+
+  const content = readFileSync(filePath, "utf8");
+  for (const line of content.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) {
+      continue;
+    }
+
+    const eqIndex = trimmed.indexOf("=");
+    if (eqIndex === -1) {
+      continue;
+    }
+
+    const key = trimmed.slice(0, eqIndex).trim();
+    const value = trimmed.slice(eqIndex + 1).trim();
+    if (!key) {
+      continue;
+    }
+
+    if (process.env[key] === undefined) {
+      process.env[key] = value;
+    }
+  }
+}
+
 async function main(): Promise<void> {
+  // Bootstrap: load .dev.vars into process.env so withProcessEnvFallback
+  // picks up Clerk, DB, and other local-only configuration without manual
+  // $env: exports. Non-destructive — existing process.env values win.
+  loadDevVarsFile(
+    path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", ".dev.vars")
+  );
+
   // The Node entrypoint IS the Node runtime — don't let a stray process.env
   // value flip the KV factory back to Cloudflare mode. Set this before
   // assertRequiredEnv so downstream code (e.g. getRuntime) sees the override.

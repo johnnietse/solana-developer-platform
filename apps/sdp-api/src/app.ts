@@ -25,6 +25,7 @@ import { requestIdMiddleware } from "@/middleware/request-id";
 import { requestTracingMiddleware } from "@/middleware/request-tracing";
 import analytics from "@/routes/data-products/analytics";
 import userAnalytics from "@/routes/data-products/user-analytics";
+import tokenRegistry from "@/routes/data-products/token-registry";
 import allowlist from "@/routes/allowlist";
 import apiKeys from "@/routes/api-keys";
 import assetProfiles from "@/routes/asset-profiles";
@@ -34,6 +35,7 @@ import counterparties from "@/routes/counterparties";
 import wallets from "@/routes/custody";
 import docs from "@/routes/docs";
 import health from "@/routes/health";
+import healthCheck from "@/routes/health-check";
 import issuance from "@/routes/issuance";
 import llms from "@/routes/llms";
 import members from "@/routes/members";
@@ -318,6 +320,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
 
   // Health check (no auth)
   app.route("/health", health);
+  app.route("/health-check", healthCheck);
   app.route("/openapi.json", openapi);
   app.route("/docs", docs);
   app.route("/llms.txt", llms);
@@ -345,6 +348,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   v1.route("/compliance", compliance);
   v1.route("/data-products/analytics", analytics);
   v1.route("/data-products/user-analytics", userAnalytics);
+  v1.route("/data-products/tokens", tokenRegistry);
 
   const registeredPluginNames = new Set<string>();
   for (const plugin of deps.plugins ?? []) {

@@ -14,6 +14,7 @@ import { handleAnalyticsIngestion } from "@/crons/analytics-ingestion";
 import { handleWalletEnrichment } from "@/crons/wallet-enrichment";
 import { handleTokenDiscovery } from "@/crons/token-discovery";
 import { handleUserTokenSync } from "@/crons/sync-user-tokens";
+import { handleTokenRetirement } from "@/crons/retire-tokens";
 import {
   isRecurringPaymentCollectionEnabled,
   isRecurringPaymentsEnabled,
@@ -63,9 +64,14 @@ const worker = {
       ctx.waitUntil(handleTokenDiscovery(runtimeEnv, ctx));
     }
 
-    // User token sync (hourly)
-    if (controller.cron === "0 * * * *") {
+    // User token sync (daily at 4am)
+    if (controller.cron === "0 4 * * *") {
       ctx.waitUntil(handleUserTokenSync(runtimeEnv, ctx));
+    }
+
+    // Token retirement (daily at 5am)
+    if (controller.cron === "0 5 * * *") {
+      ctx.waitUntil(handleTokenRetirement(runtimeEnv));
     }
   },
   request(

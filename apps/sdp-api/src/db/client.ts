@@ -58,6 +58,7 @@ class ConnectionCoordinator implements Queryable {
     return this.runExclusive(async () => {
       const client = new Client({
         connectionString: this.connectionString,
+        connectionTimeoutMillis: 5000,
       });
 
       try {
@@ -288,6 +289,7 @@ class PostgresClient extends PostgresExecutor implements DatabaseClient {
     return this.coordinator.runExclusive(async () => {
       const client = new Client({
         connectionString: this.connectionString,
+        connectionTimeoutMillis: 5000,
       });
 
       try {
