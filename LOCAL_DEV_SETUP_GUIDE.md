@@ -197,7 +197,7 @@ CLERK_JWT_TEMPLATE=sdp-api             # exact template name
 # ─── Self-hosted signing / custody ─────────────────────────
 SIGNING_PROVIDER=local
 CUSTODY_PRIVATE_KEY=<your-base58-encoded-keypair-here>
-CUSTODY_ENCRYPTION_KEY=<your-base64-encoded-encryption-key-here>=
+CUSTODY_ENCRYPTION_KEY=CUSTODY_ENCRYPTION_KEY=<your-base64-encoded-encryption-key-here>
 FEE_PAYMENT_PROVIDER=native
 FEE_PAYER_PRIVATE_KEY=<your-base58-encoded-keypair-here>
 
