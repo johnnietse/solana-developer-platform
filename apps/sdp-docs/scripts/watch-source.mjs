@@ -7,7 +7,7 @@ const run = (command, args) =>
   new Promise((resolvePromise, rejectPromise) => {
     const child = spawn(command, args, {
       stdio: "inherit",
-      shell: false,
+      shell: true,
     });
 
     child.on("error", rejectPromise);

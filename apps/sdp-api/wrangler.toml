@@ -7,7 +7,7 @@ compatibility_flags = ["nodejs_compat"]
 [[hyperdrive]]
 binding = "HYPERDRIVE"
 id = "00000000000000000000000000000000"
-localConnectionString = "postgresql://sdp:sdp@127.0.0.1:5432/sdp"
+localConnectionString = "postgresql://postgres:sdp@127.0.0.1:5433/sdp"
 
 # KV Namespaces
 [[kv_namespaces]]
@@ -49,7 +49,10 @@ SOLANA_RPC_TRITON_URL = "https://your-triton-endpoint.devnet.rpcpool.com/{API_KE
 FEE_PAYMENT_PROVIDER = "kora"
 KORA_RPC_URL = "https://your-kora-devnet-instance.us-central1.run.app"
 ANALYTICS_ENABLED = "true"
-ANALYTICS_MINTS = "Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr"
+# Option B (free dev/demo): real mainnet holders flow in locally for $0.
+# Analytics uses ANALYTICS_RPC_URL (mainnet) while the rest of dev stays devnet.
+ANALYTICS_MINTS = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPXg4gQzNBP"  # PYUSD (mainnet, smaller than USDC)
+ANALYTICS_RPC_URL = "https://api.mainnet.solana.com"
 
 # Dev environment
 [env.dev]
@@ -143,16 +146,8 @@ FEE_PAYMENT_PROVIDER = "kora"
 KORA_RPC_URL = "https://your-kora-devnet-instance.us-central1.run.app"
 ANALYTICS_ENABLED = "true"
 
-# ── OPTION B (active): free dev/demo ───────────────────────────────────────
-# Free, keyless public mainnet RPC + a SMALLER mainnet token so getProgramAccounts
-# succeeds on the rate-limited public endpoint. Real holders flow in for $0.
-# Swap ANALYTICS_MINTS for any low-holder mainnet mint you prefer.
-ANALYTICS_MINTS = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPXg4gQzNBP"  # PYUSD (smaller than USDC)
-ANALYTICS_RPC_URL = "https://api.mainnet.solana.com"
-
-# ── OPTION C (production): commented, enable when deploying for real ────────
-# Requires a PAID dedicated RPC + Helius key for attribution. Real stablecoins
-# at scale. Uncomment and fill values to switch from Option B to Option C.
-# ANALYTICS_MINTS = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"  # USDC (real stablecoin)
-# ANALYTICS_RPC_URL = "https://your-dedicated-rpc.example.com"        # dedicated RPC (paid)
-# HELIUS_API_KEY = "your-helius-key"                                  # enables attribution (free tier may suffice)
+# Production analytics use mints and RPC set via Cloudflare secrets.
+# Set ANALYTICS_MINTS (comma-separated) and ANALYTICS_RPC_URL before deploy:
+#   wrangler secret put ANALYTICS_MINTS
+#   wrangler secret put ANALYTICS_RPC_URL
+# Recommended: USDC (EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v) + dedicated paid RPC.

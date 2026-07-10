@@ -11,19 +11,26 @@
 
 ## Docs
 
-### Solana Developer Platform Docs
+### home
 Source: https://platform.solana.com/docs/home
 
-> A dashboard and REST API for real-world asset issuance, payments, and markets on Solana — with built-in compliance controls.
+---
+title: Solana Developer Platform Docs
+description: A dashboard and REST API for real-world asset issuance, payments, and markets on Solana — with built-in compliance controls.
+hideTitle: true
+---
 
 <DocsHome />
 
 ---
 
-### Introduction
+### introduction
 Source: https://platform.solana.com/docs/introduction
 
-> What SDP is, what it provides, and how it works.
+---
+title: Introduction
+description: What SDP is, what it provides, and how it works.
+---
 
 Solana Developer Platform (SDP) is a dashboard and REST API for real-world asset (RWA) issuance, payments, and markets on Solana. It handles wallet custody, onchain transaction construction, and compliance operations so your team can bring regulated assets onchain without managing keys or setting up Solana infrastructure.
 
@@ -66,10 +73,13 @@ Both environments expose identical APIs. Develop and test against sandbox, then 
 
 ## Getting Started
 
-### Set Up Your Organization
+### setup organization
 Source: https://platform.solana.com/docs/guides/setup-organization
 
-> Create and configure your SDP organization through the dashboard.
+---
+title: Set Up Your Organization
+description: Create and configure your SDP organization through the dashboard.
+---
 
 An organization is the top-level container for all your SDP resources — projects, wallets, API keys, and tokens. Every API request is scoped to an organization.
 
@@ -102,10 +112,13 @@ If you already have an organization, the **Organization Switcher** in the top-le
 
 ---
 
-### Set Up Wallets
+### setup wallets
 Source: https://platform.solana.com/docs/guides/setup-wallets
 
-> Initialize a custody provider and create wallets for signing transactions.
+---
+title: Set Up Wallets
+description: Initialize a custody provider and create wallets for signing transactions.
+---
 
 Wallets are Solana keypairs managed by a custody provider. SDP uses them to sign transactions for token deployment, minting, transfers, and other onchain operations. You must initialize a signing provider before creating tokens or executing transactions.
 
@@ -328,10 +341,13 @@ HttpRequest request = HttpRequest.newBuilder()
 
 ---
 
-### Manage API Keys
+### manage api keys
 Source: https://platform.solana.com/docs/guides/manage-api-keys
 
-> Create, rotate, and revoke API keys with role-based access and environment scoping.
+---
+title: Manage API Keys
+description: Create, rotate, and revoke API keys with role-based access and environment scoping.
+---
 
 API keys authenticate every request to the SDP API. Each key is scoped to an environment (sandbox or production) and assigned a role that determines what operations it can perform.
 
@@ -556,10 +572,13 @@ The `confirmation` field must match the key's **name**. The key stops working im
 
 ## Tokens
 
-### Tokenize an Asset
+### tokenize an asset
 Source: https://platform.solana.com/docs/tokens/tokenize-an-asset
 
-> Map a real-world asset to the right SDP token model, authorities, and implementation flow.
+---
+title: Tokenize an Asset
+description: Map a real-world asset to the right SDP token model, authorities, and implementation flow.
+---
 
 Use this page when you want to issue a stablecoin, tokenized security, loyalty token, or any other asset through Solana Developer Platform. It walks you from business decision to the first API call.
 
@@ -619,10 +638,18 @@ If you are driving SDP through an agent workflow, start from [AI Consumption](/d
 
 ---
 
-### Create a Token
+### create a token
 Source: https://platform.solana.com/docs/tokens/create-a-token
 
-> Define a new token using a template or custom configuration.
+---
+title: Create a Token
+description: Define a new token using a template or custom configuration.
+steps:
+  - Choose a template
+  - Configure token identity
+  - Set operational settings
+  - Confirm creation
+---
 
 Token creation defines your token's metadata, extensions, and operational rules. The token is saved in SDP but **not yet deployed** onchain — see [Deploy a Token](/docs/tokens/deploy-a-token) for the next step.
 
@@ -833,10 +860,17 @@ The token is not yet onchain. Pass `data.token.id` to [Deploy a Token](/docs/tok
 
 ---
 
-### Deploy a Token
+### deploy a token
 Source: https://platform.solana.com/docs/tokens/deploy-a-token
 
-> Deploy a created token to the Solana blockchain.
+---
+title: Deploy a Token
+description: Deploy a created token to the Solana blockchain.
+steps:
+  - Open the deploy action
+  - Deploy the token
+  - Confirm deployment
+---
 
 After [creating a token](/docs/tokens/create-a-token), deploy it onchain. Deployment creates the mint account on Solana and assigns authorities to your configured wallets.
 
@@ -981,10 +1015,18 @@ curl https://api.solana.com/v1/issuance/tokens/tok_abc123 \
 
 ---
 
-### Mint and Burn
+### mint and burn
 Source: https://platform.solana.com/docs/tokens/mint-and-burn
 
-> Increase or decrease token supply by minting to an address or burning from an account you control.
+---
+title: Mint and Burn
+description: Increase or decrease token supply by minting to an address or burning from an account you control.
+steps:
+  - Select the token and action
+  - Mint tokens
+  - Burn tokens
+  - Refresh supply
+---
 
 After [deploying a token](/docs/tokens/deploy-a-token), you can mint new tokens to any address and burn tokens from accounts you control. Force-burn lets admins burn from any account without the holder's signature.
 
@@ -1211,10 +1253,18 @@ Safe to include in automated post-mint workflows.
 
 ---
 
-### Allowlists
+### allowlists
 Source: https://platform.solana.com/docs/tokens/allowlists
 
-> Control which addresses can receive your token by maintaining an approved list.
+---
+title: Allowlists
+description: Control which addresses can receive your token by maintaining an approved list.
+steps:
+  - Enable the allowlist
+  - Add an address
+  - Review the list
+  - Remove an address
+---
 
 Tokens created with `requiresAllowlist: true` enforce a list of approved destination addresses on allowlist-aware issuance flows such as minting and administrative transfers. Required for `tokenized-security` tokens. Payment transfers use wallet-level destination allowlists instead.
 
@@ -1393,10 +1443,18 @@ Use the `entry.id` returned when the address was added.
 
 ---
 
-### Freeze and Compliance
+### freeze and compliance
 Source: https://platform.solana.com/docs/tokens/freeze-and-compliance
 
-> Screen addresses, freeze accounts, pause transfers, and seize tokens for compliance workflows.
+---
+title: Freeze and Compliance
+description: Screen addresses, freeze accounts, pause transfers, and seize tokens for compliance workflows.
+steps:
+  - Screen an address
+  - Freeze and unfreeze an account
+  - Pause and unpause the token
+  - Seize tokens
+---
 
 SDP provides two categories of compliance tooling:
 
@@ -1613,10 +1671,17 @@ Seize also supports `/prepare` for client-side signing.
 
 ---
 
-### Manage Token Settings
+### manage token settings
 Source: https://platform.solana.com/docs/tokens/manage-token-settings
 
-> Update token authorities and operational settings after deployment.
+---
+title: Manage Token Settings
+description: Update token authorities and operational settings after deployment.
+steps:
+  - View current settings
+  - Rotate an authority
+  - Revoke an authority
+---
 
 After a token is deployed, you can rotate its authorities and adjust operational settings. Authority management is separate from compliance actions — for freeze, pause, and seize flows see [Freeze and Compliance](/docs/tokens/freeze-and-compliance).
 
@@ -1762,10 +1827,13 @@ After revoking the mint authority, no new tokens can ever be minted. Revocation 
 
 ---
 
-### Prepare vs Execute
+### prepare vs execute
 Source: https://platform.solana.com/docs/tokens/prepare-vs-execute
 
-> Understand SDP's two signing modes for onchain transactions.
+---
+title: Prepare vs Execute
+description: Understand SDP's two signing modes for onchain transactions.
+---
 
 Every SDP endpoint that produces a Solana transaction supports two signing modes. The mode you choose determines who signs and submits the transaction.
 
@@ -1877,10 +1945,13 @@ Both modes support the `Idempotency-Key` header. For execute mode, the key preve
 
 ## Payments
 
-### Payments
+### index
 Source: https://platform.solana.com/docs/payments
 
-> Build payments on Solana with SDP — concepts, send, accept, ramps, and wallet operations.
+---
+title: Payments
+description: Build payments on Solana with SDP — concepts, send, accept, ramps, and wallet operations.
+---
 
 SDP provides a Solana-native payments stack: stablecoin transfers, fiat on-ramps and off-ramps, wallet policies, and reconciliation primitives. This section mirrors the structure of the [public Solana payments documentation](https://solana.com/docs/payments) and maps each workflow to the SDP APIs you call to ship it.
 
@@ -1915,10 +1986,13 @@ Every page in this section links to specific endpoints in the auto-generated [Pa
 
 ---
 
-### How payments work on SDP
+### concepts
 Source: https://platform.solana.com/docs/payments/concepts
 
-> Wallets, tokens, server-side signing, fees, and the data model that backs SDP payments.
+---
+title: How payments work on SDP
+description: Wallets, tokens, server-side signing, fees, and the data model that backs SDP payments.
+---
 
 SDP payments move value between Solana accounts: a custody wallet sends tokens to a destination address, SDP records the transfer, and the rest of the section describes how to send those, accept incoming ones, ramp into and out of fiat, and reconcile activity against your product database.
 
@@ -1978,10 +2052,17 @@ SDP exposes everything you need to **send**, **track**, and **reconcile** paymen
 
 ## Payments — Send Payments
 
-### Basic payment
+### send basic payment
 Source: https://platform.solana.com/docs/payments/send-basic-payment
 
-> Send a single token transfer with SDP.
+---
+title: Basic payment
+description: Send a single token transfer with SDP.
+steps:
+  - Set up the transfer
+  - Execute the transfer
+  - Verify the transfer
+---
 
 SDP handles token transfers through its payments API. A basic payment moves tokens **from a custody wallet you control to any Solana wallet address**. The `source` field on the request is an SDP custody wallet ID (`wal_…`), resolved server-side from the caller's wallet list; `destination` is the recipient's on-chain **wallet (owner) address** — for SPL transfers, SDP derives the associated token account (ATA) from this address and creates it if needed, so pass the wallet pubkey, **not** a token-account address.
 
@@ -2184,10 +2265,13 @@ See [Payouts and disbursements](/docs/payments/send-payouts#dedup-and-retries) f
 
 ---
 
-### Payment with memo
+### send payment with memo
 Source: https://platform.solana.com/docs/payments/send-payment-with-memo
 
-> Attach an order ID, invoice number, or customer reference to an SDP transfer.
+---
+title: Payment with memo
+description: Attach an order ID, invoice number, or customer reference to an SDP transfer.
+---
 
 The `memo` field on `POST /v1/payments/transfers` carries an arbitrary UTF-8 string (up to 256 characters) alongside the on-chain transfer. Memos are persisted on the SDP `Transfer` record and surface in list and read responses, so your indexer can map each transfer back to a row in your product database.
 
@@ -2293,10 +2377,13 @@ Memos are returned by `GET /v1/payments/transfers` and `GET /v1/payments/transfe
 
 ---
 
-### Payouts and disbursements
+### send payouts
 Source: https://platform.solana.com/docs/payments/send-payouts
 
-> Run batched outbound transfers, deduplicate retries, and reconcile a payout batch with SDP.
+---
+title: Payouts and disbursements
+description: Run batched outbound transfers, deduplicate retries, and reconcile a payout batch with SDP.
+---
 
 A payout run is a batch of outbound transfers — marketplace seller payouts, payroll, affiliate disbursements, royalty distributions. SDP does not expose a "batch" object; you call `POST /v1/payments/transfers` once per recipient, tag each transfer with a shared batch identifier, and use `GET /v1/payments/transfers?direction=outbound` to reconcile the run.
 
@@ -2445,10 +2532,13 @@ Per-transfer outcomes you should expect to handle:
 
 ## Payments — Accept Payments
 
-### Accept payments
+### accept overview
 Source: https://platform.solana.com/docs/payments/accept-overview
 
-> Receiving-address convention, integration options, and how to track inbound payments with SDP.
+---
+title: Accept payments
+description: Receiving-address convention, integration options, and how to track inbound payments with SDP.
+---
 
 SDP does not ship a hosted checkout primitive. To accept payments today, you publish a Solana address you control and detect inbound transfers via the SDP transfer list. This page explains the pattern; the two pages that follow cover [verification](/docs/payments/accept-verification) and [indexing](/docs/payments/accept-indexing) in detail.
 
@@ -2502,10 +2592,13 @@ This is intentionally low-level — there is no SDP-provided session object. Tre
 
 ---
 
-### Verifying a payment
+### accept verification
 Source: https://platform.solana.com/docs/payments/accept-verification
 
-> Transfer-status semantics, finality on Solana, and recommended polling cadence for SDP transfers.
+---
+title: Verifying a payment
+description: Transfer-status semantics, finality on Solana, and recommended polling cadence for SDP transfers.
+---
 
 When a payment lands on a wallet you control, the inbound transfer moves through a handful of status states. This page describes those states, what each one means about on-chain finality, and how to decide when it is safe to ship goods or release funds.
 
@@ -2577,10 +2670,13 @@ When `status` settles to `failed`:
 
 ---
 
-### Indexing and reconciliation
+### accept indexing
 Source: https://platform.solana.com/docs/payments/accept-indexing
 
-> List inbound transfers, paginate, dedupe, and reconcile against your product ledger.
+---
+title: Indexing and reconciliation
+description: List inbound transfers, paginate, dedupe, and reconcile against your product ledger.
+---
 
 `GET /v1/payments/transfers` is the workhorse for reconciliation. It returns transfers across your organization's custody wallets with filters for direction, status, token, wallet, and date range, paginated. Use it to maintain a local mirror of SDP transfers, to match inbound payments to orders, and to drive your delta-polling worker.
 
@@ -2720,10 +2816,13 @@ Notes:
 
 ## Payments — Ramps
 
-### Ramps
+### ramps
 Source: https://platform.solana.com/docs/payments/ramps
 
-> Fiat on-ramps and off-ramps — let users buy crypto with fiat or cash out from a wallet through SDP.
+---
+title: Ramps
+description: Fiat on-ramps and off-ramps — let users buy crypto with fiat or cash out from a wallet through SDP.
+---
 
 SDP wraps several ramp providers behind two endpoints: `POST /v1/payments/ramps/onramp/execute` (fiat → crypto) and `POST /v1/payments/ramps/offramp/execute` (crypto → fiat). Each call returns a provider-hosted redirect URL that you hand the end-user; the provider handles KYC, payment-method capture, and settlement. SDP does not persist a ramp record or expose a status read endpoint — log the returned `ramp.id` for your own records and observe settlement either provider-side (webhook / their dashboard) or via the resulting on-chain transfer.
 
@@ -2888,10 +2987,13 @@ SDP currently accepts `USD` only on the `fiatCurrency` field. Multi-currency sup
 
 ---
 
-### Ramp providers
+### ramps providers
 Source: https://platform.solana.com/docs/payments/ramps-providers
 
-> MoonPay, Lightspark, and BVNK — capability matrix, configuration, and per-provider notes.
+---
+title: Ramp providers
+description: MoonPay, Lightspark, and BVNK — capability matrix, configuration, and per-provider notes.
+---
 
 SDP currently integrates three ramp providers. They are configured at the organization level via environment variables on the SDP API deployment; the same `provider` string on `POST /v1/payments/ramps/onramp/execute` and `POST /v1/payments/ramps/offramp/execute` selects between them.
 
@@ -2990,10 +3092,13 @@ For self-hosted deployments where only a subset of providers will ever be config
 
 ## Payments — Wallet Operations
 
-### Wallet policies
+### wallet policies
 Source: https://platform.solana.com/docs/payments/wallet-policies
 
-> Wallet controls, default-allow rollout, and policy audit visibility.
+---
+title: Wallet policies
+description: Wallet controls, default-allow rollout, and policy audit visibility.
+---
 
 Wallet policies constrain how a custody wallet can move funds. SDP starts from default allow, then applies the active wallet control profile and any payment policy fields you configure. Policies are managed via `GET` and `PUT` on `/v1/payments/wallets/{walletId}/policies` and enforced before wallet operations execute.
 
@@ -3185,10 +3290,13 @@ See the [Compliance API reference](/docs/reference/api/compliance) for address-s
 
 ---
 
-### Wallet balances
+### wallet balances
 Source: https://platform.solana.com/docs/payments/wallet-balances
 
-> Per-wallet token balances with optional USD valuation via SDP.
+---
+title: Wallet balances
+description: Per-wallet token balances with optional USD valuation via SDP.
+---
 
 `GET /v1/payments/wallets/{walletId}/balances` returns the wallet's native **SOL** balance plus every **SPL token** balance held by a custody wallet — raw amount, human-readable amount, decimals, and optional USD valuation when a price source is configured. SOL is always prepended as the first entry and is represented with `token: "SOL"` and `mint: "So11111111111111111111111111111111111111112"`.
 
@@ -3305,10 +3413,14 @@ Reasons to skip SDP and go to RPC directly:
 
 ## Tutorials
 
-### Issue a Regulated Stablecoin
+### issue a regulated stablecoin
 Source: https://platform.solana.com/docs/tutorials/issue-a-regulated-stablecoin
 
-> Build a GENIUS-compliant digital dollar on Solana with institutional custody, integrated compliance, and operational reversibility from day one.
+---
+title: Issue a Regulated Stablecoin
+description: Build a GENIUS-compliant digital dollar on Solana with institutional custody, integrated compliance, and operational reversibility from day one.
+---
+
 
 This tutorial walks you through issuing a regulated stablecoin on Solana. The product you ship at the end is one that a Federal Reserve examiner could read and a bank's compliance committee could sign against. Issuing one is not the same as deploying a token. It requires institutional custody, integrated compliance, and operational reversibility from day one. The [GENIUS Act](https://www.gibsondunn.com/the-genius-act-a-new-era-of-stablecoin-regulation/) treats those capabilities as preconditions, not features.
 
@@ -3654,6 +3766,7 @@ The `mintAuthority`, `freezeAuthority`, and `metadataAuthority` all resolve to t
 <Callout type="warn">
 Deploy can return a bare `500 INTERNAL_ERROR` with no `details` field. The most common cause on devnet is an unfunded custody wallet (Section 2 covered the airdrop fix), but any downstream Solana RPC failure surfaces this way. The SDP team is closing this gap so deploy will return the underlying Solana error directly; until that ships, the diagnostic move is to call the `/prepare` variant of the same endpoint.
 </Callout>
+
 
 ```javascript
 const prepared = await sdp.post(
@@ -4004,6 +4117,7 @@ The outer error code is `SOLANA_RPC_ERROR`, but it is upstream-call diagnostic, 
 The institutional pattern is to write your error handler against the wrapped on-chain code rather than the outer SDP code. The outer code tells you something went wrong upstream; the wrapped code tells you what.
 </Callout>
 
+
 ```javascript
 function isOnChainCompliance(error) {
   return error.message?.includes("custom program error: 0x11");
@@ -4090,10 +4204,13 @@ For deeper API surface beyond what this tutorial covers:
 
 ---
 
-### End-to-end Payment Flow
+### end to end payment flow
 Source: https://platform.solana.com/docs/tutorials/end-to-end-payment-flow
 
-> A high-level payment flow from quote to settlement.
+---
+title: End-to-end Payment Flow
+description: A high-level payment flow from quote to settlement.
+---
 
 This walkthrough covers a typical payment integration lifecycle:
 
@@ -4112,10 +4229,13 @@ Use the [Payments API reference](/docs/reference/api/payments), [Wallets API ref
 
 ## Self-Hosting
 
-### Self-Hosting
+### index
 Source: https://platform.solana.com/docs/self-hosting
 
-> Run the Solana Developer Platform on your own infrastructure with Docker Compose.
+---
+title: Self-Hosting
+description: Run the Solana Developer Platform on your own infrastructure with Docker Compose.
+---
 
 Self-hosting runs the full Solana Developer Platform — API, web dashboard, docs,
 database, and cache — on infrastructure you control, from prebuilt container
@@ -4170,10 +4290,13 @@ keeping it running.
 
 ---
 
-### Quickstart
+### quickstart
 Source: https://platform.solana.com/docs/self-hosting/quickstart
 
-> Install the self-hosted stack, generate a .env, and bring it up with Docker Compose.
+---
+title: Quickstart
+description: Install the self-hosted stack, generate a .env, and bring it up with Docker Compose.
+---
 
 This guide takes you from an empty host to a running Solana Developer Platform.
 It assumes **Docker Engine** and **Docker Compose v2** are installed and the
@@ -4256,10 +4379,14 @@ If a service fails to start or a required variable is missing, see
 
 ---
 
-### First Devnet Deployment
+### first devnet deployment
 Source: https://platform.solana.com/docs/self-hosting/first-devnet-deployment
 
-> Run self-hosted SDP on devnet, log into the dashboard, initialize a local wallet, and verify API access.
+---
+title: First Devnet Deployment
+description: Run self-hosted SDP on devnet, log into the dashboard, initialize a local wallet, and verify API access.
+---
+
 
 This tutorial takes a fresh self-hosted install from healthy containers to the
 first useful devnet workflow: dashboard login, local wallet initialization,
@@ -4431,10 +4558,13 @@ key bound to the wallet it is allowed to use.
 
 ---
 
-### Configurator
+### configurator
 Source: https://platform.solana.com/docs/self-hosting/configurator
 
-> Generate a complete .env for a self-hosted Solana Developer Platform, entirely in your browser.
+---
+title: Configurator
+description: Generate a complete .env for a self-hosted Solana Developer Platform, entirely in your browser.
+---
 
 Use the guided steps below to generate a ready-to-use `.env` for the default
 devnet self-hosting path. Everything runs in your browser — nothing is sent
@@ -4447,10 +4577,13 @@ For the full operator walkthrough after download, continue with
 
 ---
 
-### Environment Reference
+### env reference
 Source: https://platform.solana.com/docs/self-hosting/env-reference
 
-> The configuration variables a self-hosted Solana Developer Platform reads from .env.
+---
+title: Environment Reference
+description: The configuration variables a self-hosted Solana Developer Platform reads from .env.
+---
 
 The self-hosted stack reads its configuration from a single `.env` file next to
 `compose.yml`. The [configurator](/docs/self-hosting/configurator) is the
@@ -4550,10 +4683,13 @@ need changing when you put the services behind your own domains or ingress.
 
 ---
 
-### Upgrade & Backup
+### upgrade and backup
 Source: https://platform.solana.com/docs/self-hosting/upgrade-and-backup
 
-> Move a self-hosted Solana Developer Platform to a new release and protect its data.
+---
+title: Upgrade & Backup
+description: Move a self-hosted Solana Developer Platform to a new release and protect its data.
+---
 
 This page covers upgrading to a new release and backing up the data that matters
 on a self-hosted stack.
@@ -4655,10 +4791,13 @@ Restore the matching `.env` alongside it so secrets such as
 
 ---
 
-### Troubleshooting
+### troubleshooting
 Source: https://platform.solana.com/docs/self-hosting/troubleshooting
 
-> Diagnose common startup and configuration failures on a self-hosted stack.
+---
+title: Troubleshooting
+description: Diagnose common startup and configuration failures on a self-hosted stack.
+---
 
 Most self-hosting problems surface at startup. Start by looking at the service
 state and logs:
@@ -4736,10 +4875,13 @@ then open an issue on the
 
 ---
 
-### External Co-Signers
+### external co signers
 Source: https://platform.solana.com/docs/self-hosting/external-co-signers
 
-> Host provider-specific signing automation outside the default self-hosted SDP stack.
+---
+title: External Co-Signers
+description: Host provider-specific signing automation outside the default self-hosted SDP stack.
+---
 
 Some signing providers need an operator-managed co-signer or automation process
 in addition to the SDP API. Run those processes outside the default self-hosted
@@ -4791,19 +4933,25 @@ and pass the resulting service URL and token into a custom SDP Utila integration
 
 ## Reference
 
-### Reference
+### index
 Source: https://platform.solana.com/docs/reference
 
-> API reference, token types, provider onboarding, and integration resources.
+---
+title: Reference
+description: API reference, token types, provider onboarding, and integration resources.
+---
 
 Resources for integrating with SDP: API endpoints, supported token templates, provider onboarding, AI consumption, and the Postman collection.
 
 ---
 
-### Issuance Token Types
+### issuance token types
 Source: https://platform.solana.com/docs/reference/issuance-token-types
 
-> Supported issuance templates and default controls.
+---
+title: Issuance Token Types
+description: Supported issuance templates and default controls.
+---
 
 The public issuance surface currently exposes three token templates:
 
@@ -4821,10 +4969,13 @@ Mint, burn, seize, and force-burn request bodies accept `amount` as a **decimal 
 
 ---
 
-### Infrastructure Provider Onboarding
+### provider onboarding
 Source: https://platform.solana.com/docs/reference/provider-onboarding
 
-> Add an infrastructure provider integration to SDP through the self-service contribution process.
+---
+title: Infrastructure Provider Onboarding
+description: Add an infrastructure provider integration to SDP through the self-service contribution process.
+---
 
 SDP currently supports infrastructure provider integrations across custody, RPC, compliance, and ramps. We will add future integration categories as SDP expands.
 
@@ -4892,10 +5043,13 @@ Open the pull request after intake is complete, or after the SDP team has create
 
 ---
 
-### AI Consumption
+### ai consumption
 Source: https://platform.solana.com/docs/reference/ai-consumption
 
-> Public machine-readable entry points and guidance for agents and AI systems consuming SDP docs and APIs.
+---
+title: AI Consumption
+description: Public machine-readable entry points and guidance for agents and AI systems consuming SDP docs and APIs.
+---
 
 Use this page when you need the public AI-facing entry points for Solana Developer Platform.
 
@@ -4932,10 +5086,13 @@ Use this page when you need the public AI-facing entry points for Solana Develop
 
 ---
 
-### Postman Collection
+### postman collection
 Source: https://platform.solana.com/docs/reference/postman-collection
 
-> Download the public SDP API Postman collection generated from the OpenAPI contract.
+---
+title: Postman Collection
+description: Download the public SDP API Postman collection generated from the OpenAPI contract.
+---
 
 The Postman collection is generated from the same public OpenAPI contract that powers the API reference. It includes only end-user-facing API families:
 
@@ -5166,12 +5323,13 @@ Source: https://platform.solana.com/docs/reference/api/asset-profiles
 
 | Method | Endpoint | Summary |
 | --- | --- | --- |
-| `GET` | `/v1/asset-profiles` | List asset profiles |
-| `POST` | `/v1/asset-profiles` | Create asset profile |
-| `DELETE` | `/v1/asset-profiles/{profileId}` | Archive asset profile |
-| `GET` | `/v1/asset-profiles/{profileId}` | Get asset profile |
-| `PATCH` | `/v1/asset-profiles/{profileId}` | Update asset profile |
-| `GET` | `/v1/asset-profiles/metadata` | Get asset profile field options |
+| `GET` | `/v1/issuance/asset-profiles` | List asset profiles |
+| `POST` | `/v1/issuance/asset-profiles` | Create token with asset profile |
+| `DELETE` | `/v1/issuance/asset-profiles/{profileId}` | Archive asset profile |
+| `GET` | `/v1/issuance/asset-profiles/{profileId}` | Get asset profile |
+| `PATCH` | `/v1/issuance/asset-profiles/{profileId}` | Update asset profile |
+| `GET` | `/v1/issuance/asset-profiles/by-token/{tokenId}` | Get asset profile by token |
+| `GET` | `/v1/issuance/asset-profiles/field-options` | Get asset profile field options |
 
 ## Notes
 - Generated from docs source. Hidden or internal-only APIs are intentionally excluded.

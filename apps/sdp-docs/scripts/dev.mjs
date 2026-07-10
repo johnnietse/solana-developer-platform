@@ -6,7 +6,7 @@ const run = (command, args) =>
   new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       stdio: "inherit",
-      shell: false,
+      shell: true,
     });
 
     child.on("error", reject);
@@ -32,7 +32,7 @@ const runDev = async () => {
 
   const next = spawn("pnpm", ["exec", "next", "dev", "--port", "3001"], {
     stdio: "inherit",
-    shell: false,
+    shell: true,
   });
 
   const shutdown = () => {

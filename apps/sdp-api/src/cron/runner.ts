@@ -24,6 +24,7 @@ import {
   RECURRING_PAYMENTS_COLLECTION_CRON,
   runRecurringPaymentsCollection,
 } from "./recurring-payments";
+import { handleAnalyticsIngestion } from "../crons/analytics-ingestion";
 
 export interface CronDeps {
   env: Env;
@@ -37,6 +38,9 @@ export interface CronHandle {
 
 const TRUTHY_DISABLE_CRON: ReadonlySet<string> = new Set(["true", "1"]);
 const FALSY_DISABLE_CRON: ReadonlySet<string> = new Set(["false", "0"]);
+
+// Analytics ingestion runs every 5 minutes
+const ANALYTICS_INGESTION_CRON = "*/5 * * * *";
 
 // Strict whitelist so a typo (`DISABLE_CRON=treu`) fails loudly instead of
 // silently enabling cron and double-firing across replicas.
@@ -97,6 +101,20 @@ export function startCron(deps: CronDeps): CronHandle | null {
       })
     );
   }
+
+  // Analytics ingestion (every 5 minutes)
+  tasks.push(
+    schedule(ANALYTICS_INGESTION_CRON, () => {
+      if (stopping) {
+        return;
+      }
+      handleAnalyticsIngestion(deps.env, {
+        waitUntil: (promise: Promise<unknown>) => {
+          deps.bg.run(promise);
+        },
+      } as any);
+    })
+  );
 
   return {
     stop() {
