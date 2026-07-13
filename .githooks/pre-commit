@@ -1,0 +1,15 @@
+#!/usr/bin/env node
+// Git pre-commit hook: scan staged files for secrets before committing.
+// Installed by: node scripts/install-secret-scan.mjs
+
+const { execSync } = require("child_process");
+const path = require("path");
+
+const root = path.resolve(__dirname, "..");
+const scanner = path.join(root, "scripts", "scan-secrets.mjs");
+
+try {
+  execSync(`node "${scanner}"`, { cwd: root, stdio: "inherit", timeout: 30000 });
+} catch {
+  process.exit(1);
+}

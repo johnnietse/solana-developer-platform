@@ -49,6 +49,7 @@ Public docs and AI artifacts should mirror the supported public surface only.
 
 - `skills/sdp-tokenization/SKILL.md`: consumer-facing skill for explaining how to tokenize assets with SDP using the supported public docs and API surface.
 - `skills/sdp-dashboard-setup/SKILL.md`: provisions a fresh local SDP development stack from scratch — Docker services, env vars, database migrations, Clerk org/user seeding, project creation, API/web startup, and optional Clerk webhook tunnel. Has a companion `setup.ps1` script that automates the mechanical parts.
+- `.opencode/skills/secret-scan/SKILL.md`: secret scanning and prevention. Pre-commit hook scans for Clerk keys, API tokens, private keys, and other secrets. Run `node scripts/scan-secrets.mjs --all` to verify the working tree, or `--history` to scan git history.
 
 When updating repo-local skills:
 

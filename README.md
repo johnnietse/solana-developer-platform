@@ -93,3 +93,11 @@ This project is licensed under the [MIT License](LICENSE).
 ## Security
 
 Report security issues using the process in [`SECURITY.md`](SECURITY.md). Do not open public issues for vulnerabilities or suspected secrets.
+
+This repo includes a **pre-commit secret scanner** to prevent accidentally committing Clerk keys, API tokens, private keys, or other secrets. After cloning, install it:
+
+```bash
+node scripts/install-secret-scan.mjs
+```
+
+The hook runs automatically on every `git commit`. Run `node scripts/scan-secrets.mjs --all` to manually scan the working tree.

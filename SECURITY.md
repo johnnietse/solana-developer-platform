@@ -13,3 +13,18 @@ Provide a helpful title and detailed description of the problem.
 Expect a response as fast as possible in the advisory, typically within 72 hours.
 
 If you do not receive a response in the advisory, send an email to disclosures@solana.org with the full URL of the advisory you have created. DO NOT include attachments or provide detail sufficient for exploitation regarding the security issue in this email. Only provide such details in the advisory.
+
+## Local Development
+
+This repo has a **pre-commit secret scanner** to prevent accidentally committing Clerk keys, API tokens, private keys, or other secrets.
+
+After cloning, run once:
+```bash
+node scripts/install-secret-scan.mjs
+```
+
+The hook runs automatically on every `git commit`. Manual scans:
+- `node scripts/scan-secrets.mjs` — scan staged files
+- `node scripts/scan-secrets.mjs --all` — scan working tree
+- `node scripts/scan-secrets.mjs --history` — scan git history
+- `node scripts/scan-secrets.mjs --github` — check GitHub alerts

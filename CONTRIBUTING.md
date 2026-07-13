@@ -33,6 +33,21 @@ After intake is submitted, the SDP maintainers target a three to five business d
 
 For security vulnerabilities related to code on `main`, please do NOT open an issue — follow [SECURITY.md](./SECURITY.md).
 
+### Secret Scanning
+
+This repo has a **pre-commit hook** that scans staged files for accidentally committed secrets (Clerk keys, API tokens, private keys). After cloning, run:
+
+```bash
+node scripts/install-secret-scan.mjs
+```
+
+This sets `.githooks` as the hooks path and verifies the scanner works. The hook then runs automatically on every `git commit`. If the hook blocks your commit, remove the secret, replace with a placeholder, and re-stage.
+
+Manual scans:
+- `node scripts/scan-secrets.mjs --all` — scan all tracked files
+- `node scripts/scan-secrets.mjs --history` — scan git history
+- `node scripts/scan-secrets.mjs --github` — check GitHub secret scanning alerts
+
 ## Reviewers
 
 Reviews are routed via [`.github/CODEOWNERS`](./.github/CODEOWNERS).

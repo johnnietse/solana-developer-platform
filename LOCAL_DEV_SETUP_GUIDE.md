@@ -40,6 +40,16 @@ pnpm install
 
 > **Note:** `pnpm` uses a global store; first run downloads ~1.5 GB.
 
+### 1.1 Install Secret Scanning Pre-Commit Hook
+
+```powershell
+node scripts/install-secret-scan.mjs
+```
+
+This sets up a pre-commit hook that automatically scans staged files for accidentally committed secrets (Clerk keys, API tokens, private keys, etc.). The hook runs on every `git commit`.
+
+> **Why this matters:** Real secrets have been committed to this repo before. The hook prevents future leaks.
+
 ---
 
 ## 2. Start Infrastructure (Postgres + Redis)
@@ -277,7 +287,29 @@ svix listen -t c_rbkLhZ7YRc http://127.0.0.1:8787/webhooks/clerk/link-orgs
 
 ---
 
-## 10. Start Everything (3 Terminals)
+## 10. Start Everything
+
+### Option A — One-Command Startup (Recommended)
+
+```powershell
+node scripts/start-local-dev
+```
+
+This single command starts:
+1. Docker Postgres + Redis (if not running)
+2. The API (`pnpm dev:node` on :8787)
+3. The Web Dashboard (`pnpm dev` on :3000)
+4. ngrok tunnel (public HTTPS URL for Clerk webhooks)
+
+To stop:
+```powershell
+node scripts/stop-local-dev        # stops API + web + ngrok
+node scripts/stop-local-dev --all  # also stops Docker containers
+```
+
+> **Tip:** After starting, wait ~30 seconds for compilation. Run `curl http://127.0.0.1:8787/health` to check.
+
+### Option B — 3 Terminals (Manual)
 
 ### Terminal 1 — API (Node mode)
 ```powershell
@@ -344,12 +376,22 @@ pnpm dev
 | `getProgramAccounts` returns 0 holders | Devnet RPC doesn't index new token yet | Expected for fresh tokens; wait or use Helius/QuickNode |
 | `Svix relay` disconnects | Network / firewall | Restart `svix listen ...`; ensure port 8787 reachable |
 | `pnpm install` fails | Node version mismatch | `nvm use 22.12.0` (exact version) |
+| `start-local-dev` says "PID file found" but no process | Stale `dev-pids.json` | Delete `dev-pids.json` and re-run |
+| Pre-commit hook blocks with "FOUND POTENTIAL SECRET" | Accidentally committed a real secret | `git restore --staged <file>`, replace with placeholder, re-add |
+| `scan-secrets` reports false positive (e.g., PEM utility) | Scanner pattern too aggressive | Add exclusion pattern in `scripts/scan-secrets.mjs` or skip file |
 
 ---
 
 ## 14. Useful Commands Cheat Sheet
 
 ```powershell
+# Start everything (Postgres + Redis + API + Web + ngrok)
+node scripts/start-local-dev
+
+# Stop everything (API + Web + ngrok; add --all to stop Docker)
+node scripts/stop-local-dev
+node scripts/stop-local-dev --all
+
 # Restart API only
 cd apps\sdp-api; pnpm dev:node
 
@@ -371,6 +413,12 @@ pnpm test:integration
 
 # View API logs (if running via docker compose)
 docker logs -f sdp-api
+
+# Secret scanning
+node scripts/install-secret-scan.mjs    # Install pre-commit hook (run once)
+node scripts/scan-secrets.mjs           # Scan staged files (same as hook)
+node scripts/scan-secrets.mjs --all     # Scan all tracked files
+node scripts/scan-secrets.mjs --history # Scan git history
 ```
 
 ---
@@ -432,7 +480,8 @@ solana-developer-platform/
 ├── infra/
 │   ├── self-hosted/             # install.sh, compose.yml, .env.example
 │   └── postgres/                # local postgres compose
-├── scripts/                     # migrate, seed, ramp-rails, secret-keys, etc.
+├── .githooks/                    # pre-commit hook (secret scanning)
+├── scripts/                     # migrate, seed, ramp-rails, secret-keys, start/stop scripts, scan-secrets.mjs, etc.
 ├── docker-compose.yml           # local infra (postgres, redis, api, web, docs)
 ├── pnpm-workspace.yaml
 ├── turbo.json

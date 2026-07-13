@@ -60,6 +60,34 @@ pnpm --filter @sdp/api db:postgres:bootstrap
 pnpm dev
 ```
 
+Or use the one-command launcher (starts Postgres + Redis + API + Web + ngrok):
+
+```bash
+node scripts/start-local-dev
+```
+
+To stop:
+```bash
+node scripts/stop-local-dev         # stops API + web + ngrok
+node scripts/stop-local-dev --all   # also stops Docker containers
+```
+
+### Secret Scanning
+
+This repo has a pre-commit hook that scans for accidentally committed secrets. Install it once after cloning:
+
+```bash
+node scripts/install-secret-scan.mjs
+```
+
+The hook runs automatically on every `git commit`. Manual scan commands:
+
+```bash
+node scripts/scan-secrets.mjs           # staged files (same as hook)
+node scripts/scan-secrets.mjs --all     # all tracked files
+node scripts/scan-secrets.mjs --history # git history
+```
+
 Useful local URLs:
 
 | Service | URL |
