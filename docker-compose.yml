@@ -7,7 +7,7 @@ services:
       POSTGRES_USER: sdp
       POSTGRES_PASSWORD: sdp
     ports:
-      - "${SDP_POSTGRES_PORT:-5432}:5432"
+      - "${SDP_POSTGRES_PORT:-5433}:5432"
     volumes:
       - sdp-postgres-data:/var/lib/postgresql/data
     healthcheck:

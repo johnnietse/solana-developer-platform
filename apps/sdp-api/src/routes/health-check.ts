@@ -8,7 +8,6 @@
 import { Hono } from "hono";
 import type { Env } from "@/types/env";
 import { getDb } from "@/db";
-import { resolveAnalyticsMints } from "@/lib/token-registry";
 import { queryDatabricks } from "@/lib/databricks-query";
 
 const healthCheck = new Hono<{ Bindings: Env }>();
@@ -59,7 +58,21 @@ const VERSION = "1.0.0";
 healthCheck.get("/", async (c) => {
     const startTime = Date.now();
     const checks = await runAllChecks(c.env);
-    const metrics = await gatherMetrics(c.env);
+    let metrics: HealthStatus["metrics"];
+    try {
+        metrics = await gatherMetrics(c.env);
+    } catch (error) {
+        console.error("Health-check metrics gathering failed:", error);
+        metrics = {
+            activeTokens: 0,
+            lastIngestion: null,
+            failedIngestions24h: 0,
+            retiredTokens30d: 0,
+            flaggedRug: 0,
+            flaggedStale: 0,
+            avgIngestionLatencyMs: 0,
+        };
+    }
     const alerts = generateAlerts(checks, metrics);
 
     const overallStatus = determineOverallStatus(checks);
@@ -246,42 +259,55 @@ async function checkRetirement(env: Env): Promise<CheckResult> {
 }
 
 async function gatherMetrics(env: Env) {
-    const db = getDb(env);
-    
-    const [tokenStats, ingestionStats, retirementStats] = await Promise.all([
-        db.queryOne<{ active: number }>(
-            `SELECT COUNT(*) as active FROM analytics_tokens WHERE is_active = true AND verification_status = 'verified'`
-        ),
-        db.queryOne<{ last: string; verified: number }>(
-            `SELECT MAX(last_ingested_at) as last, COUNT(*) FILTER (WHERE verification_status = 'verified') as verified 
-             FROM analytics_tokens WHERE is_active = true`
-        ),
-        db.queryOne<{ retired: number; rug: number; stale: number }>(
-            `SELECT 
-                COUNT(*) FILTER (WHERE verification_status = 'retired' AND updated_at > NOW() - INTERVAL '30 days') as retired,
-                COUNT(*) FILTER (WHERE verification_status = 'rug_flagged') as rug,
-                COUNT(*) FILTER (WHERE verification_status = 'stale') as stale
-             FROM analytics_tokens`
-        ),
-    ]);
+    try {
+        const db = getDb(env);
+        
+        const [tokenStats, ingestionStats, retirementStats] = await Promise.all([
+            db.queryOne<{ active: number }>(
+                `SELECT COUNT(*) as active FROM analytics_tokens WHERE is_active = true AND verification_status = 'verified'`
+            ),
+            db.queryOne<{ last: string; verified: number }>(
+                `SELECT MAX(last_ingested_at) as last, COUNT(*) FILTER (WHERE verification_status = 'verified') as verified 
+                 FROM analytics_tokens WHERE is_active = true`
+            ),
+            db.queryOne<{ retired: number; rug: number; stale: number }>(
+                `SELECT 
+                    COUNT(*) FILTER (WHERE verification_status = 'retired' AND updated_at > NOW() - INTERVAL '30 days') as retired,
+                    COUNT(*) FILTER (WHERE verification_status = 'rug_flagged') as rug,
+                    COUNT(*) FILTER (WHERE verification_status = 'stale') as stale
+                 FROM analytics_tokens`
+            ),
+        ]);
 
-    // DEV: avg_latency query uses column names that match the existing schema
-    const latencyStats = await db.queryOne<{ avg_latency: number }>(
-        `SELECT AVG(EXTRACT(EPOCH FROM (updated_at - last_ingested_at)) * 1000) as avg_latency
-         FROM analytics_tokens 
-         WHERE last_ingested_at IS NOT NULL AND verification_status = 'verified' 
-         AND updated_at > NOW() - INTERVAL '24 hours'`
-    ).catch(() => ({ avg_latency: 0 }));
+        // DEV: avg_latency query uses column names that match the existing schema
+        const latencyStats = await db.queryOne<{ avg_latency: number }>(
+            `SELECT AVG(EXTRACT(EPOCH FROM (updated_at - last_ingested_at)) * 1000) as avg_latency
+             FROM analytics_tokens 
+             WHERE last_ingested_at IS NOT NULL AND verification_status = 'verified' 
+             AND updated_at > NOW() - INTERVAL '24 hours'`
+        ).catch(() => ({ avg_latency: 0 }));
 
-    return {
-        activeTokens: tokenStats?.active ?? 0,
-        lastIngestion: ingestionStats?.last ?? null,
-        failedIngestions24h: 0,
-        retiredTokens30d: retirementStats?.retired ?? 0,
-        flaggedRug: retirementStats?.rug ?? 0,
-        flaggedStale: retirementStats?.stale ?? 0,
-        avgIngestionLatencyMs: Math.round(latencyStats?.avg_latency ?? 0),
-    };
+        return {
+            activeTokens: tokenStats?.active ?? 0,
+            lastIngestion: ingestionStats?.last ?? null,
+            failedIngestions24h: 0,
+            retiredTokens30d: retirementStats?.retired ?? 0,
+            flaggedRug: retirementStats?.rug ?? 0,
+            flaggedStale: retirementStats?.stale ?? 0,
+            avgIngestionLatencyMs: Math.round(latencyStats?.avg_latency ?? 0),
+        };
+    } catch (error) {
+        console.error("gatherMetrics failed:", error);
+        return {
+            activeTokens: 0,
+            lastIngestion: null,
+            failedIngestions24h: 0,
+            retiredTokens30d: 0,
+            flaggedRug: 0,
+            flaggedStale: 0,
+            avgIngestionLatencyMs: 0,
+        };
+    }
 }
 
 function generateAlerts(checks: any, metrics: any): Alert[] {

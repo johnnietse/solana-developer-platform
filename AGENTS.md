@@ -48,6 +48,7 @@ Public docs and AI artifacts should mirror the supported public surface only.
 ## Repo-local skills
 
 - `skills/sdp-tokenization/SKILL.md`: consumer-facing skill for explaining how to tokenize assets with SDP using the supported public docs and API surface.
+- `skills/sdp-dashboard-setup/SKILL.md`: provisions a fresh local SDP development stack from scratch — Docker services, env vars, database migrations, Clerk org/user seeding, project creation, API/web startup, and optional Clerk webhook tunnel. Has a companion `setup.ps1` script that automates the mechanical parts.
 
 When updating repo-local skills:
 
