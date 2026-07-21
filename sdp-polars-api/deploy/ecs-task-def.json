@@ -1,0 +1,45 @@
+{
+  "family": "sdp-polars-api",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::017605949106:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::017605949106:role/sdp-polars-api-task-role",
+  "containerDefinitions": [
+    {
+      "name": "polars-api",
+      "image": "017605949106.dkr.ecr.us-east-1.amazonaws.com/sdp-polars-api:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        { "name": "S3_BUCKET", "value": "tmp-sdp-data" },
+        { "name": "S3_REGION", "value": "us-east-1" },
+        { "name": "SOLANA_RPC_URL", "value": "https://api.devnet.solana.com" },
+        { "name": "HOST", "value": "0.0.0.0" },
+        { "name": "PORT", "value": "8080" },
+        { "name": "DEBUG", "value": "false" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/sdp-polars-api",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 15
+      }
+    }
+  ]
+}

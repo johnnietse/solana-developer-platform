@@ -1,0 +1,40 @@
+# Sensitive / secrets
+.env
+*.key
+credentials
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# Virtual environments
+venv/
+.venv/
+
+# Docker
+.docker/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Superpowers / agent tools
+.superpowers/
+
+# Testing artifacts
+test_output/
+*.parquet
+!src/**/*.py
+
+# Session / temp files
+.tmp/
