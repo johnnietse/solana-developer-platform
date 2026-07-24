@@ -1,61 +1,52 @@
 -- ============================================================================
--- SDP Polars API — Databricks SQL Queries
+-- SDP Polars API — Databricks External Tables
 -- ============================================================================
--- These queries read the Parquet data written to s3://tmp-sdp-data/ by the
--- Polars API ingestion pipeline. Run them directly in your Databricks
--- workspace using the "delta" format reader.
+-- Run these in your Databricks workspace to create External Tables over the
+-- Delta Lake data written to S3 by the Polars API ingestion pipeline.
 --
--- Usage:
---   CREATE EXTERNAL TABLE IF NOT EXISTS sdp.stablecoins
---     USING delta
---     LOCATION 's3://tmp-sdp-data/stablecoins/';
+-- After creating these tables, you can query them with standard SQL:
+--   SELECT * FROM sdp.stablecoins ORDER BY scraped_at DESC;
 --
---   Or query directly:
---     SELECT * FROM delta.`s3://tmp-sdp-data/stablecoins/`;
+-- Delta paths follow the convention:
+--   s3://tmp-sdp-data/dev/mlh/sdp_data/{table_name}/
 -- ============================================================================
 
--- ── 1. Create external schemas ────────────────────────────────────────────
+-- ── 1. Create schema ────────────────────────────────────────────────────
 
 CREATE SCHEMA IF NOT EXISTS sdp;
 USE sdp;
 
--- ── 2. Create external tables over S3 Parquet data ────────────────────────
+-- ── 2. Create external tables over Delta Lake paths ────────────────────
 
--- Stablecoin supply snapshots
+-- Stablecoin supply snapshots (USDC, PYUSD on devnet)
 CREATE OR REPLACE TABLE sdp.stablecoins
 USING delta
-LOCATION 's3://tmp-sdp-data/stablecoins/'
-AS SELECT * FROM delta.`s3://tmp-sdp-data/stablecoins/`;
+LOCATION 's3://tmp-sdp-data/dev/mlh/sdp_data/stablecoins/';
 
--- Network metrics snapshots
+-- Network metrics (TPS, SOL supply, epoch, slot, etc.)
 CREATE OR REPLACE TABLE sdp.network
 USING delta
-LOCATION 's3://tmp-sdp-data/network/'
-AS SELECT * FROM delta.`s3://tmp-sdp-data/network/`;
+LOCATION 's3://tmp-sdp-data/dev/mlh/sdp_data/network/';
 
--- Token registry (UUID mappings)
-CREATE OR REPLACE TABLE sdp.token_registry
-USING delta
-LOCATION 's3://tmp-sdp-data/token-registry/'
-AS SELECT * FROM delta.`s3://tmp-sdp-data/token-registry/`;
-
--- Token holder snapshots
+-- Token holder snapshots (top holders per mint)
 CREATE OR REPLACE TABLE sdp.holders
 USING delta
-LOCATION 's3://tmp-sdp-data/holders/'
-AS SELECT * FROM delta.`s3://tmp-sdp-data/holders/`;
+LOCATION 's3://tmp-sdp-data/dev/mlh/sdp_data/holders/';
 
--- RPC cached transfers
-CREATE OR REPLACE TABLE sdp.rpc_cache
+-- SOL whales (largest accounts, via validators proxy on devnet)
+CREATE OR REPLACE TABLE sdp.whales
 USING delta
-LOCATION 's3://tmp-sdp-data/rpc-cache/'
-AS SELECT * FROM delta.`s3://tmp-sdp-data/rpc-cache/`;
+LOCATION 's3://tmp-sdp-data/dev/mlh/sdp_data/whales/';
 
--- Inserted data
-CREATE OR REPLACE TABLE sdp.insert_data
+-- Validator set (current + delinquent with stake, commission, votes)
+CREATE OR REPLACE TABLE sdp.validators
 USING delta
-LOCATION 's3://tmp-sdp-data/insert/'
-AS SELECT * FROM delta.`s3://tmp-sdp-data/insert/`;
+LOCATION 's3://tmp-sdp-data/dev/mlh/sdp_data/validators/';
+
+-- WebSocket real-time events (token transfers, account changes)
+CREATE OR REPLACE TABLE sdp.events
+USING delta
+LOCATION 's3://tmp-sdp-data/dev/mlh/sdp_data/events/';
 
 
 -- ── 3. Analytics Queries ──────────────────────────────────────────────────
@@ -103,22 +94,24 @@ ORDER BY date DESC;
 
 
 -- 3e. Token holder concentration
-SELECT h.mint, t.symbol, t.name,
-  MAX(CASE WHEN h.rank = 1 THEN h.percentage END) AS top1_pct,
-  SUM(CASE WHEN h.rank <= 10 THEN h.percentage END) AS top10_pct,
+SELECT mint,
+  MAX(CASE WHEN rank = 1 THEN ui_amount END) AS top1_balance,
+  SUM(CASE WHEN rank <= 10 THEN ui_amount END) AS top10_total,
   COUNT(*) AS holder_count
-FROM sdp.holders h
-LEFT JOIN sdp.token_registry t ON h.mint = t.mint
-GROUP BY h.mint, t.symbol, t.name
-ORDER BY top1_pct DESC;
-
-
--- 3f. Token transfer summary (most active token addresses)
-SELECT mint, COUNT(*) AS transfer_count
-FROM sdp.rpc_cache
+FROM sdp.holders
 GROUP BY mint
-ORDER BY transfer_count DESC
+ORDER BY top1_balance DESC
 LIMIT 20;
+
+
+-- 3f. SOL whale ranking (largest staked validators / accounts)
+SELECT address, ui_balance, source, scraped_at
+FROM (
+  SELECT *, ROW_NUMBER() OVER (PARTITION BY source ORDER BY ui_balance DESC) AS rn
+  FROM sdp.whales
+)
+WHERE rn = 1
+ORDER BY ui_balance DESC;
 
 
 -- 3g. Combined dashboard view — latest metrics per token
@@ -153,4 +146,10 @@ UNION ALL
 SELECT 'network', MAX(scraped_at) FROM sdp.network
 UNION ALL
 SELECT 'holders', MAX(scraped_at) FROM sdp.holders
+UNION ALL
+SELECT 'whales', MAX(scraped_at) FROM sdp.whales
+UNION ALL
+SELECT 'validators', MAX(scraped_at) FROM sdp.validators
+UNION ALL
+SELECT 'events', MAX(scraped_at) FROM sdp.events
 ORDER BY last_updated DESC;

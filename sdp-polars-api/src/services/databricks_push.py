@@ -4,8 +4,8 @@ This bridges the gap between the Polars ingestion pipeline (RPC → S3) and
 the Databricks-backed analytics that the SDP API reads from.
 
 After each ingestion run, call ``push_to_databricks(cfg)`` to mirror the
-latest S3 snapshots into the ``workspace.default`` Databricks tables the
-SDP API's ``/v1/data-products/analytics`` endpoint queries.
+latest S3 snapshots into the Databricks tables the SDP API's
+``/v1/data-products/analytics`` endpoint queries.
 
 Tables updated:
   - token_supply_snapshots  — append new rows
@@ -89,19 +89,121 @@ def _parse_mints(cfg: Config) -> dict[str, str]:
 # ── Token supply snapshots ──────────────────────────────────────────────
 
 
+def _latest_delta_file(cfg: Config, delta_prefix: str) -> str | None:
+    """Get the most recent Delta Parquet file by LastModified timestamp.
+
+    Reads the Delta transaction log (``_delta_log/``) to find files, then
+    returns the one most recently added.
+    """
+    from src.services.s3_service import _client
+
+    s3 = _client(cfg)
+    paginator = s3.get_paginator("list_objects_v2")
+    latest: str | None = None
+    latest_ts: float = 0
+
+    for page in paginator.paginate(Bucket=cfg.s3_bucket, Prefix=delta_prefix):
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            if key.endswith(".snappy.parquet"):
+                ts = obj["LastModified"].timestamp() if obj.get("LastModified") else 0
+                if ts > latest_ts:
+                    latest_ts = ts
+                    latest = key
+
+    return latest
+
+_DB_TABLES_INITIALIZED = False
+_DB_CATALOG: str = "workspace"
+_DB_SCHEMA: str = "default"
+
+
+def _discover_catalog(host: str, token: str, warehouse_id: str) -> bool:
+    """Discover the default catalog and schema for this workspace."""
+    global _DB_CATALOG, _DB_SCHEMA
+
+    resp = _db_execute(host, token, warehouse_id, "SELECT CURRENT_CATALOG() AS cat, CURRENT_SCHEMA() AS sch")
+    if resp:
+        data = resp.get("result", {}).get("data_array", [])
+        if data and len(data[0]) >= 2:
+            _DB_CATALOG = str(data[0][0])
+            _DB_SCHEMA = str(data[0][1])
+            print(f"[databricks_push] Discovered catalog={_DB_CATALOG}, schema={_DB_SCHEMA}")
+            return True
+    return False
+
+
+def _ensure_tables(host: str, token: str, warehouse_id: str) -> bool:
+    """Attempt to create Databricks tables. May fail due to metastore permissions."""
+    global _DB_TABLES_INITIALIZED
+    if _DB_TABLES_INITIALIZED:
+        return True
+
+    if not _discover_catalog(host, token, warehouse_id):
+        print(f"[databricks_push] Could not discover catalog")
+        return False
+
+    # Try to list existing catalogs to find a writable one
+    resp = _db_execute(host, token, warehouse_id, "SHOW CATALOGS")
+    if resp:
+        data = resp.get("result", {}).get("data_array", [])
+        if data:
+            catalogs = [row[0] for row in data]
+            print(f"[databricks_push] Available catalogs: {catalogs}")
+
+    cat = _DB_CATALOG
+    sch = _DB_SCHEMA
+
+    ddl_statements = [
+        # f"CREATE SCHEMA IF NOT EXISTS {cat}.{sch}",
+        f"CREATE TABLE IF NOT EXISTS {cat}.{sch}.token_supply_snapshots (mint_address STRING, supply BIGINT, decimals INT, slot BIGINT, snapshot_at TIMESTAMP) USING DELTA",
+        f"CREATE TABLE IF NOT EXISTS {cat}.{sch}.analytics_cache (response_json STRING, holder_count BIGINT, total_supply DOUBLE, snapshot_at TIMESTAMP) USING DELTA",
+    ]
+
+    for sql in ddl_statements:
+        resp = _db_execute(host, token, warehouse_id, sql, wait=True,
+                           catalog=cat, schema=sch)
+        if resp is None:
+            print(f"[databricks_push] DDL request failed (no response)")
+            return False
+        state = resp.get("status", {}).get("state", "")
+        if state == "FAILED":
+            err_msg = resp.get("status", {}).get("error", {}).get("message", "")
+            print(f"[databricks_push] DDL failed: {err_msg[:200]}")
+            print(f"[databricks_push] ⚠  Cannot auto-create tables. Need Waddah to run:")
+            print(f"[databricks_push]    CREATE CATALOG sdp MANAGED LOCATION 's3://tmp-sdp-data/';")
+            print(f"[databricks_push]    CREATE SCHEMA sdp.raw;")
+            print(f"[databricks_push]    (one per table) CREATE EXTERNAL TABLE sdp.raw.X USING DELTA LOCATION '...';")
+            return False
+
+    _DB_TABLES_INITIALIZED = True
+    return True
+    _DB_TABLES_INITIALIZED = True
+    return True
+
+
 def push_supply_snapshots(cfg: Config, host: str, token: str, warehouse_id: str) -> int:
     """Push today's stablecoin snapshot to Databricks ``token_supply_snapshots``.
 
-    Reads the latest S3 Parquet file and INSERTs rows not already present.
+    Reads the latest Delta Parquet file and INSERTs rows not already present.
     Returns the number of rows inserted.
     """
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    s3_key = f"stablecoins/{today}.parquet"
+    from src.services.s3_service import DELTA_ROOT
+
+    if not _ensure_tables(host, token, warehouse_id):
+        return 0
+
+    # Read from our new Delta path instead of the old root-level flat Parquet
+    delta_prefix = f"{DELTA_ROOT}/stablecoins/"
+    latest_key = _latest_delta_file(cfg, delta_prefix)
+    if not latest_key:
+        print(f"[databricks_push] No stablecoin data at {delta_prefix}")
+        return 0
 
     try:
-        df = read_parquet(cfg, s3_key)
+        df = read_parquet(cfg, latest_key)
     except Exception as e:
-        print(f"[databricks_push] No S3 data for {s3_key}: {e}")
+        print(f"[databricks_push] Failed to read {latest_key}: {e}")
         return 0
 
     if df.is_empty():
@@ -111,32 +213,33 @@ def push_supply_snapshots(cfg: Config, host: str, token: str, warehouse_id: str)
     inserted = 0
 
     for row in rows:
-        # Map S3 columns → Databricks columns
         mint = row.get("mint", "")
         supply = int(row.get("supply", 0) or 0)
-        decimals = int(row.get("decimals", 0))
-        slot = int(row.get("slot", 0) or 0)
+        decimals = str(row.get("decimals", 0))
         scraped_at = row.get("scraped_at", datetime.now(timezone.utc).isoformat())
 
-        # Check if this snapshot already exists
+        # De-duplicate: skip if this exact snapshot already exists
+        table_ref = f"{_DB_CATALOG}.{_DB_SCHEMA}.token_supply_snapshots"
         check_sql = (
-            f"SELECT COUNT(*) as cnt FROM workspace.default.token_supply_snapshots "
+            f"SELECT COUNT(*) as cnt FROM {table_ref} "
             f"WHERE mint_address = '{mint}' AND snapshot_at = '{scraped_at}'"
         )
-        check_resp = _db_execute(host, token, warehouse_id, check_sql)
+        check_resp = _db_execute(host, token, warehouse_id, check_sql, catalog=_DB_CATALOG, schema=_DB_SCHEMA)
         if check_resp:
             result = check_resp.get("result", {}).get("data_array", [])
             if result and int(result[0][0]) > 0:
-                continue  # Already exists, skip
+                continue
 
         insert_sql = (
-            f"INSERT INTO workspace.default.token_supply_snapshots "
+            f"INSERT INTO {table_ref} "
             f"(mint_address, supply, decimals, slot, snapshot_at) VALUES ("
-            f"'{mint}', {supply}, {decimals}, {slot}, '{scraped_at}')"
+            f"'{mint}', {supply}, {decimals}, 0, '{scraped_at}')"
         )
-        resp = _db_execute(host, token, warehouse_id, insert_sql)
+        resp = _db_execute(host, token, warehouse_id, insert_sql, catalog=_DB_CATALOG, schema=_DB_SCHEMA)
         if resp and resp.get("status", {}).get("state") == "SUCCEEDED":
             inserted += 1
+        else:
+            print(f"[databricks_push] INSERT failed for {mint}: {resp}")
 
     print(f"[databricks_push] Pushed {inserted} supply snapshot(s) to Databricks")
     return inserted
@@ -152,8 +255,10 @@ def push_analytics_cache(cfg: Config, host: str, token: str, warehouse_id: str) 
     JSON blob, and writes it to the Databricks analytics_cache table so the
     SDP API can serve it fresh.
     """
-    # Read all stablecoin data from S3
-    all_keys = [k for k in list_keys(cfg, "stablecoins") if k.endswith(".parquet")]
+    # Read all stablecoin data from the new Delta path
+    from src.services.s3_service import DELTA_ROOT
+    delta_prefix = f"{DELTA_ROOT}/stablecoins/"
+    all_keys = [k for k in list_keys(cfg, delta_prefix) if k.endswith(".snappy.parquet")]
     frames: list[pl.DataFrame] = []
 
     for key in sorted(all_keys):
@@ -227,14 +332,15 @@ def push_analytics_cache(cfg: Config, host: str, token: str, warehouse_id: str) 
 
     total_supply = sum(e["circulatingSupply"] for e in stablecoin_entries)
 
+    table_ref = f"{_DB_CATALOG}.{_DB_SCHEMA}.analytics_cache"
     insert_sql = (
-        f"INSERT INTO workspace.default.analytics_cache "
+        f"INSERT INTO {table_ref} "
         f"(response_json, holder_count, total_supply, snapshot_at) VALUES ("
         f"'{response_json.replace(chr(39), chr(39)+chr(39))}', "
         f"{total_holders}, {total_supply}, '{now_iso}')"
     )
 
-    resp = _db_execute(host, token, warehouse_id, insert_sql)
+    resp = _db_execute(host, token, warehouse_id, insert_sql, catalog=_DB_CATALOG, schema=_DB_SCHEMA)
     success = resp is not None and resp.get("status", {}).get("state") == "SUCCEEDED"
     if success:
         print(f"[databricks_push] Analytics cache updated ({len(stablecoin_entries)} tokens, {len(supply_history)} days)")

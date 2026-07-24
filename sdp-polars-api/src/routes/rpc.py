@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import polars as pl
 from flask import Blueprint, jsonify, request
 
-from src.services.s3_service import key_exists, read_parquet, write_parquet
+from src.services.s3_service import read_delta, write_delta, list_keys
 from src.services.solana_rpc import get_signatures_for_address, get_transaction
 
 if TYPE_CHECKING:
@@ -30,20 +30,18 @@ def _register_rpc_routes(app):
         limit = request.args.get("limit", default=cfg.default_transfer_limit, type=int)
         limit = min(max(limit, 1), 1000)
 
-        s3_key = cfg.s3_path_templates["rpc-cache"].format(
-            token_address=token_address,
-        )
-
-        # ── Check S3 cache first ──
-        if key_exists(cfg, s3_key):
-            df = read_parquet(cfg, s3_key)
-            records = df.to_dicts()
-            return jsonify({
-                "token_address": token_address,
-                "source": "cache",
-                "transfers": records[:limit],
-                "total_cached": len(records),
-            })
+        # ── Check S3 cache (Delta) first ──
+        df = read_delta(cfg, "rpc_cache")
+        if df is not None:
+            cached = df.filter(pl.col("mint") == token_address)
+            if not cached.is_empty():
+                records = cached.to_dicts()
+                return jsonify({
+                    "token_address": token_address,
+                    "source": "cache",
+                    "transfers": records[:limit],
+                    "total_cached": len(records),
+                })
 
         # ── Fetch from RPC ──
         signatures = get_signatures_for_address(cfg, token_address, limit=limit)
@@ -58,10 +56,10 @@ def _register_rpc_routes(app):
             if parsed:
                 transfers.append(parsed)
 
-        # ── Cache to S3 ──
+        # ── Cache to S3 as Delta (Databricks-readable) ──
         if transfers:
             df = pl.DataFrame(transfers)
-            write_parquet(cfg, s3_key, df)
+            write_delta(cfg, "rpc_cache", df, mode="append")
 
         return jsonify({
             "token_address": token_address,
@@ -133,6 +131,11 @@ def _parse_transfer(tx: dict, signature: str) -> dict | None:
 
     return {
         "signature": signature,
+        "mint": (token_change or {}).get("mint", ""),
+        "owner": (token_change or {}).get("owner", ""),
+        "change": (token_change or {}).get("change", 0),
+        "ui_change": (token_change or {}).get("ui_change", 0),
+        "decimals": (token_change or {}).get("decimals", 0),
         "slot": slot,
         "block_time": block_time,
         "fee": fee,
