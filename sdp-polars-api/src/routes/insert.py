@@ -1,4 +1,12 @@
-"""POST /insert endpoint — writes data to S3 (Delta + Parquet)."""
+"""POST /insert endpoint — writes data to S3 (Delta + Parquet).
+
+Usage:
+    POST /insert?table_name=dev.mlh.polars_metrics
+    Body: {"data": [{"col": "val"}, ...]}
+
+Writes Delta to ``s3://tmp-sdp-data/dev/mlh/polars_metrics/``
+(Databricks: ``SELECT * FROM dev.mlh.polars_metrics``)
+"""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -41,10 +49,13 @@ def _register_insert_routes(app):
             now = datetime.now(timezone.utc)
             df = df.with_columns(pl.lit(now).alias("ingested_at"))
 
-        # Write Delta format (Databricks-readable)
-        delta_uri = write_delta(cfg, table_name, df, mode="append")
+        # Convert table_name like "dev.mlh.polars_metrics" → S3 path "dev/mlh/polars_metrics/"
+        s3_path = table_name.replace(".", "/")
 
-        # Legacy Parquet
+        # Write Delta format (Databricks-readable) to the resolved path
+        delta_uri = write_delta(cfg, table_name, df, mode="append", path=s3_path)
+
+        # Legacy Parquet (under insert/ prefix for backwards compat)
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         s3_key = cfg.s3_path_templates["insert"].format(
             table=table_name,
@@ -57,6 +68,7 @@ def _register_insert_routes(app):
             "table": table_name,
             "rows": len(df),
             "s3_key": delta_uri,
+            "delta_path": f"s3://{cfg.s3_bucket}/{s3_path}/",
             "parquet_key": f"s3://{cfg.s3_bucket}/{s3_key}",
         }), 201
 

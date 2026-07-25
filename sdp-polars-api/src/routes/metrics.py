@@ -1,8 +1,13 @@
-"""GET /metrics endpoint — reads Solana overview metrics from Delta tables in S3.
+"""GET /metrics endpoint — reads Solana metrics from Delta tables in S3.
 
-Reads from Delta Lake format (``s3://{bucket}/dev/mlh/sdp_data/stablecoins``
-and ``s3://{bucket}/dev/mlh/sdp_data/network``) so data is directly queryable
-in Databricks with the same source of truth.
+Reads ``dev/mlh/polars_metrics_values/`` — a Delta table populated by
+Databricks with daily metric snapshots (metric_id, provider_id, value).
+Maps metric IDs to human-readable names and aggregates by date.
+
+Usage:
+    GET /metrics              # last 30 days (default)
+    GET /metrics?days=7       # last 7 days
+    GET /metrics?days=90      # last 90 days
 """
 
 from __future__ import annotations
@@ -20,6 +25,19 @@ if TYPE_CHECKING:
 
 metrics_bp = Blueprint("metrics", __name__)
 
+# Metric ID → human-readable name mapping (from dev.mlh.metrics lookup table)
+METRIC_NAMES: dict[int, str] = {
+    14: "DEX Transactions",
+    17: "Compute Units",
+    22: "Transaction Count (Vote)",
+    23: "DEX Volume",
+    25: "Validator Count",
+    27: "Total Stake",
+    28: "Slots",
+    29: "SOL Price (Network)",
+    31: "Stablecoin Count",
+}
+
 
 def _register_metrics_routes(app):
     """Inject config into the blueprint (called at app init)."""
@@ -31,28 +49,41 @@ def _register_metrics_routes(app):
         days = min(max(days, 1), 365)
 
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-        cutoff_str = cutoff.strftime("%Y-%m-%d")
 
-        # ── Read stablecoins data from Delta ───────────────────────────────
-        stable_data = []
-        stable_table = read_delta(cfg, "stablecoins")
-        if stable_table is not None:
-            if "date" in stable_table.columns:
-                stable_table = stable_table.filter(pl.col("date") >= cutoff_str)
-            stable_data = stable_table.sort("date", descending=True).to_dicts()
+        # ── Read from polars_metrics_values (created by Waddah in Databricks) ─
+        df = read_delta(cfg, path="dev/mlh/polars_metrics_values")
+        if df is None or df.is_empty():
+            return jsonify({
+                "days": days,
+                "metrics": [],
+                "error": "No metrics data found at dev/mlh/polars_metrics_values",
+            })
 
-        # ── Read network data from Delta ───────────────────────────────────
-        network_data = []
-        network_table = read_delta(cfg, "network")
-        if network_table is not None:
-            if "date" in network_table.columns:
-                network_table = network_table.filter(pl.col("date") >= cutoff_str)
-            network_data = network_table.sort("date", descending=True).to_dicts()
+        # Filter by date
+        df = df.filter(pl.col("date") >= cutoff)
+
+        # Add human-readable metric name
+        name_map = pl.DataFrame([
+            {"metric_id": k, "metric_name": v} for k, v in METRIC_NAMES.items()
+        ])
+        df = df.join(name_map, on="metric_id", how="left")
+
+        # Sort by date + metric
+        df = df.sort(["date", "metric_id"])
+
+        # Group by date → { date: { metric_name: value, ... } }
+        metrics_by_date: list[dict] = []
+        for date_group in df.partition_by("date", as_dict=True):
+            date_val = str(date_group["date"][0])
+            row: dict = {"date": date_val}
+            for r in date_group.to_dicts():
+                name = r.get("metric_name") or f"metric_{r['metric_id']}"
+                row[name] = r["value"]
+            metrics_by_date.append(row)
 
         return jsonify({
             "days": days,
-            "stablecoins": stable_data,
-            "network": network_data,
+            "metrics": metrics_by_date,
         })
 
     app.register_blueprint(metrics_bp)

@@ -95,11 +95,15 @@ def write_delta(
     table_name: str,
     df: pl.DataFrame,
     mode: str = "append",
+    path: str | None = None,
 ) -> str:
     """Write a Polars DataFrame as a Delta Lake table to S3.
 
-    The table is written to ``s3://{bucket}/{DELTA_ROOT}/{table_name}/``,
-    which Databricks can query as::
+    By default writes to ``s3://{bucket}/{DELTA_ROOT}/{table_name}/``.
+    If ``path`` is given, writes to ``s3://{bucket}/{path}/`` instead
+    (used by ``/insert`` to write to arbitrary S3 locations).
+
+    Databricks can query either path as::
 
         SELECT * FROM delta.'s3://{bucket}/{DELTA_ROOT}/{table_name}'
 
@@ -108,13 +112,18 @@ def write_delta(
         table_name: Table name (e.g. ``"stablecoins"``, ``"network"``).
         df: DataFrame to write.
         mode: ``"append"`` or ``"overwrite"``.
+        path: If set, override the S3 path instead of ``{DELTA_ROOT}/{table_name}``.
 
     Returns:
         The full S3 Delta table URI.
     """
     from deltalake import write_deltalake
 
-    delta_uri = f"s3://{cfg.s3_bucket}/{DELTA_ROOT}/{table_name}"
+    if path:
+        delta_uri = f"s3://{cfg.s3_bucket}/{path.strip('/')}"
+    else:
+        delta_uri = f"s3://{cfg.s3_bucket}/{DELTA_ROOT}/{table_name}"
+
     write_deltalake(
         delta_uri,
         df.to_arrow(),
@@ -126,15 +135,25 @@ def write_delta(
 
 def read_delta(
     cfg: Config,
-    table_name: str,
+    table_name: str | None = None,
+    path: str | None = None,
 ) -> pl.DataFrame | None:
     """Read a Delta Lake table from S3 into a Polars DataFrame.
+
+    Provide either ``table_name`` (reads from ``{DELTA_ROOT}/{table_name}/``)
+    or ``path`` (reads from an arbitrary S3 path).
 
     Returns ``None`` if the table doesn't exist yet.
     """
     from deltalake import DeltaTable
 
-    delta_uri = f"s3://{cfg.s3_bucket}/{DELTA_ROOT}/{table_name}"
+    if path:
+        delta_uri = f"s3://{cfg.s3_bucket}/{path.strip('/')}"
+    elif table_name:
+        delta_uri = f"s3://{cfg.s3_bucket}/{DELTA_ROOT}/{table_name}"
+    else:
+        return None
+
     try:
         dt = DeltaTable(delta_uri, storage_options=_storage_options(cfg))
         return pl.from_arrow(dt.to_pyarrow_table())
