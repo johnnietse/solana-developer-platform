@@ -124,11 +124,19 @@ def write_delta(
     else:
         delta_uri = f"s3://{cfg.s3_bucket}/{DELTA_ROOT}/{table_name}"
 
+    kwargs = {}
+    if mode == "overwrite":
+        # An overwrite replaces the table wholesale, so let the incoming schema
+        # replace the stored one too. Without this delta-rs rejects any write
+        # whose column set differs from the existing table.
+        kwargs["schema_mode"] = "overwrite"
+
     write_deltalake(
         delta_uri,
         df.to_arrow(),
         mode=mode,
         storage_options=_storage_options(cfg),
+        **kwargs,
     )
     return delta_uri
 

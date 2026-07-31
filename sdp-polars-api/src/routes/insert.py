@@ -2,7 +2,14 @@
 
 Usage:
     POST /insert?table_name=dev.mlh.polars_metrics
+                [&mode=append|overwrite][&timestamp=true|false]
     Body: {"data": [{"col": "val"}, ...]}
+
+``mode`` defaults to ``append``. Use ``overwrite`` for catalog/dimension
+tables that are replaced wholesale (otherwise every call duplicates rows).
+
+``timestamp`` defaults to ``true`` (adds an ``ingested_at`` column). Pass
+``false`` to write the payload columns exactly as given.
 
 Writes Delta to ``s3://tmp-sdp-data/dev/mlh/polars_metrics/``
 (Databricks: ``SELECT * FROM dev.mlh.polars_metrics``)
@@ -41,11 +48,20 @@ def _register_insert_routes(app):
         if not isinstance(records, list) or not records:
             return jsonify({"error": "'data' must be a non-empty array of objects"}), 400
 
+        # Append by default (fact tables); overwrite for dimension/catalog tables
+        # that are replaced wholesale rather than accumulated.
+        mode = request.args.get("mode", "append").lower()
+        if mode not in ("append", "overwrite"):
+            return jsonify({"error": "mode must be 'append' or 'overwrite'"}), 400
+
         # Convert to Polars DataFrame
         df = pl.DataFrame(records)
 
-        # Add ingested_at timestamp if not present
-        if "ingested_at" not in df.columns:
+        # Add ingested_at timestamp if not present. Pass timestamp=false to
+        # store the payload columns verbatim (e.g. a catalog table whose schema
+        # is fixed by an upstream spec).
+        add_timestamp = request.args.get("timestamp", "true").lower() != "false"
+        if add_timestamp and "ingested_at" not in df.columns:
             now = datetime.now(timezone.utc)
             df = df.with_columns(pl.lit(now).alias("ingested_at"))
 
@@ -53,7 +69,7 @@ def _register_insert_routes(app):
         s3_path = table_name.replace(".", "/")
 
         # Write Delta format (Databricks-readable) to the resolved path
-        delta_uri = write_delta(cfg, table_name, df, mode="append", path=s3_path)
+        delta_uri = write_delta(cfg, table_name, df, mode=mode, path=s3_path)
 
         # Legacy Parquet (under insert/ prefix for backwards compat)
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -66,6 +82,7 @@ def _register_insert_routes(app):
         return jsonify({
             "status": "ok",
             "table": table_name,
+            "mode": mode,
             "rows": len(df),
             "s3_key": delta_uri,
             "delta_path": f"s3://{cfg.s3_bucket}/{s3_path}/",
