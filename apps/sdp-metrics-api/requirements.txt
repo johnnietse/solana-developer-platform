@@ -1,4 +1,6 @@
 flask>=3.0,<4.0
 gunicorn>=22.0,<24.0
-# Parquet and S3 support are both built in — no pyarrow, no boto3.
+# Parquet + S3 reads are built into polars — no pyarrow needed.
 polars>=1.9,<2.0
+# S3 get/put for the /rpc cache (polars has no plain object get/put/exists API).
+boto3>=1.34,<2.0

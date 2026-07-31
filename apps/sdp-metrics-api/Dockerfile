@@ -1,9 +1,6 @@
 # syntax=docker/dockerfile:1.7
 #
-# sdp-metrics-api — Flask + Polars service that serves Solana overview
-# metrics read from a Delta table in S3. Build context is this directory:
-#
-#     docker build -t sdp-metrics-api apps/sdp-metrics-api
+
 
 FROM python:3.12-slim AS base
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -30,8 +27,7 @@ RUN groupadd --system --gid 1001 metrics \
 COPY --from=deps --chown=metrics:metrics /root/.local /home/metrics/.local
 COPY --chown=metrics:metrics app.py ./
 
-# HOME is set explicitly because boto3 resolves ~/.aws from it; without it
-# a mounted credentials/config file is invisible to the credential provider.
+
 ENV PATH=/home/metrics/.local/bin:$PATH \
     HOME=/home/metrics \
     PORT=8080
