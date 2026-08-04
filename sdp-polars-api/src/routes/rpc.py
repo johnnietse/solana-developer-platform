@@ -20,6 +20,23 @@ log = logging.getLogger(__name__)
 rpc_bp = Blueprint("rpc", __name__)
 
 
+def _newest_first(records: list[dict]) -> list[dict]:
+    """Order transfers newest-first and drop duplicate signatures.
+
+    "Last N transfers" is only meaningful against a known order, and cached rows
+    carry no guaranteed ordering of their own.
+    """
+    seen: set[str] = set()
+    unique: list[dict] = []
+    for r in sorted(records, key=lambda r: (r.get("slot") or 0), reverse=True):
+        sig = r.get("signature")
+        if sig in seen:
+            continue
+        seen.add(sig)
+        unique.append(r)
+    return unique
+
+
 def _register_rpc_routes(app):
     """Inject config into the blueprint (called at app init)."""
     cfg: Config = app.config["APP_CFG"]
@@ -34,18 +51,24 @@ def _register_rpc_routes(app):
         limit = min(max(limit, 1), 1000)
 
         # ── Check S3 cache (Delta) first ──
+        # The spec is "check s3 first, otherwise read from RPC" AND "returns the
+        # last 100 transfers". Serving a short cache would satisfy the first and
+        # break the second, so the cache is only authoritative when it holds at
+        # least `limit` rows; otherwise fall through and top it up from RPC.
+        cached_records: list[dict] = []
         df = read_delta(cfg, "rpc_cache")
         if df is not None and "mint" in df.columns:
-            cached = df.filter(pl.col("mint") == token_address)
-            if not cached.is_empty():
-                records = cached.to_dicts()
+            cached_records = _newest_first(
+                df.filter(pl.col("mint") == token_address).to_dicts()
+            )
+            if len(cached_records) >= limit:
                 return jsonify({
                     "token_address": token_address,
                     "source": "cache",
-                    "transfers": records[:limit],
-                    "total": len(records),
+                    "transfers": cached_records[:limit],
+                    "total": len(cached_records),
                     "scanned": None,  # not applicable on the cache path
-                    "total_cached": len(records),  # retained for existing callers
+                    "total_cached": len(cached_records),  # retained for callers
                 })
 
         # ── Fetch from RPC ──
@@ -74,24 +97,33 @@ def _register_rpc_routes(app):
                 continue
 
             scanned += 1
-            parsed = _parse_transfer(tx, sig["signature"])
+            parsed = _parse_transfer(tx, sig["signature"], prefer_mint=token_address)
             if parsed:
                 transfers.append(parsed)
 
         # ── Cache to S3 as Delta (Databricks-readable) ──
-        if transfers:
+        # rpc_cache is append-only, so only write signatures it does not already
+        # hold — otherwise every refetch duplicates rows for the same mint.
+        known = {r.get("signature") for r in cached_records}
+        fresh = [t for t in transfers if t["signature"] not in known]
+        if fresh:
             # Caching is best-effort: the caller asked for transfers, so a cache
             # write failure (e.g. schema drift) must not fail the request.
             try:
-                write_delta(cfg, "rpc_cache", pl.DataFrame(transfers), mode="append")
+                write_delta(cfg, "rpc_cache", pl.DataFrame(fresh), mode="append")
             except Exception as exc:
                 log.warning("rpc_cache write failed (%s): %s", type(exc).__name__, exc)
+
+        # Merge what we just fetched with anything already cached, newest first.
+        merged = _newest_first(transfers + cached_records)
 
         return jsonify({
             "token_address": token_address,
             "source": "rpc",
-            "transfers": transfers[:limit],
-            "total": len(transfers),
+            "transfers": merged[:limit],
+            "total": len(merged),
+            "cached_before": len(cached_records),
+            "newly_cached": len(fresh),
             # Signatures reference the address in accountKeys; only some of them
             # actually move tokens. Surfacing both makes an empty result readable.
             "scanned": scanned,
@@ -106,18 +138,27 @@ TOKEN_PROGRAM_IDS: set[str] = {
 }
 
 
-def _token_change(meta: dict) -> dict | None:
+def _token_change(meta: dict, prefer_mint: str | None = None) -> dict | None:
     """Find the SPL token balance delta in a transaction, or None if there is none.
 
     Pre/post balances are matched by ``accountIndex``, per the RPC
     json-structures spec: ``owner`` is optional and one owner can hold several
     accounts for the same mint, so matching on owner drops or mismatches rows.
+
+    ``prefer_mint`` is the mint the caller asked about. getSignaturesForAddress
+    returns every transaction referencing that address, and such a transaction
+    routinely moves several different tokens — so without this the first delta
+    in the list wins and the response describes some unrelated token.
     """
     pre_by_index = {
         b.get("accountIndex"): b for b in (meta.get("preTokenBalances") or [])
     }
 
-    for post in meta.get("postTokenBalances") or []:
+    posts = meta.get("postTokenBalances") or []
+    if prefer_mint:
+        posts = sorted(posts, key=lambda p: p.get("mint") != prefer_mint)
+
+    for post in posts:
         pre = pre_by_index.get(post.get("accountIndex"))
         if pre is None or pre.get("mint") != post.get("mint"):
             continue
@@ -148,7 +189,9 @@ def _token_change(meta: dict) -> dict | None:
     return None
 
 
-def _parse_transfer(tx: dict, signature: str) -> dict | None:
+def _parse_transfer(
+    tx: dict, signature: str, prefer_mint: str | None = None
+) -> dict | None:
     """Extract transfer info from a Solana transaction.
 
     Returns a dict with standardised fields, or None if not a transfer.
@@ -176,7 +219,7 @@ def _parse_transfer(tx: dict, signature: str) -> dict | None:
     # Get accounts from the message
     account_keys = message.get("accountKeys", [])
 
-    token_change = _token_change(meta)
+    token_change = _token_change(meta, prefer_mint=prefer_mint)
     if token_change is None:
         # Not an SPL token transfer — the address appeared in accountKeys but no
         # token balance moved. Callers asked for transfers, so drop it.
