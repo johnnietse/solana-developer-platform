@@ -12,8 +12,10 @@ class Config:
     aws_profile: str | None = getenv("AWS_PROFILE")
 
     # Solana
+    # Devnet is the fellowship's target cluster. The public mainnet endpoint
+    # also rate-limits hard (429) and disables getProgramAccounts (403).
     solana_rpc_url: str = getenv(
-        "SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com"
+        "SOLANA_RPC_URL", "https://api.devnet.solana.com"
     )
     solana_rpc_fallback_url: str | None = getenv("SOLANA_RPC_FALLBACK_URL") or None
     solana_rpc_timeout: int = int(getenv("SOLANA_RPC_TIMEOUT", "30"))
