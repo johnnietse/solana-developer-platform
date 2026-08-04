@@ -168,13 +168,17 @@ def _intelligent_median_analysis(df: pl.DataFrame, cfg: Config, median_params: d
         values = symbol_df["ui_supply"].to_numpy()
         timestamps = symbol_df["scraped_at_dt"].to_numpy()
         
-        # Remove outliers if enabled
+        # Remove outliers if enabled. Count them here: `values` is rebound below,
+        # so deriving the count afterwards reports against the post-removal
+        # length and silently under-reports.
+        outliers_removed = 0
         if remove_outliers and len(values) >= 4:
-            outlier_mask = _modified_z_score_outliers(values)
+            outlier_mask = _modified_z_score_outliers(values, outlier_threshold)
+            outliers_removed = int(outlier_mask.sum())
             if outlier_mask.any():
                 values = values[~outlier_mask]
                 timestamps = timestamps[~outlier_mask]
-        
+
         if len(values) < 3:
             continue
         
@@ -182,8 +186,12 @@ def _intelligent_median_analysis(df: pl.DataFrame, cfg: Config, median_params: d
         simple_median = float(np.median(values))
         time_weighted_median = _time_weighted_median(values, timestamps, half_life_days)
         
-        # Trimmed mean (remove top/bottom 10%)
-        trimmed_mean = float(np.mean(np.sort(values)[int(len(values)*0.1):int(len(values)*0.9)]))
+        # Trimmed mean (remove top/bottom 10%). Trim the same count from each
+        # end: int(n*0.1) floors to 0 for n < 10 while int(n*0.9) still truncates
+        # the top, which biased every small sample downwards.
+        trim = int(len(values) * 0.1)
+        kept = np.sort(values)[trim:len(values) - trim] if trim else np.sort(values)
+        trimmed_mean = float(np.mean(kept))
         
         # Trend detection
         trend = _detect_trend(values, timestamps)
@@ -204,7 +212,7 @@ def _intelligent_median_analysis(df: pl.DataFrame, cfg: Config, median_params: d
             "mean_supply": mean_val,
             "std_supply": std_val if std_val > 0 else None,
             "sample_count": len(values),
-            "outliers_removed": int(outlier_mask.sum()) if remove_outliers and len(values) >= 4 else 0,
+            "outliers_removed": outliers_removed,
             "trend": trend,
             "analysis_timestamp": datetime.now(timezone.utc).isoformat()
         })

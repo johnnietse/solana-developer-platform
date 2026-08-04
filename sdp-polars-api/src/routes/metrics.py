@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 import polars as pl
 from flask import Blueprint, jsonify, request
 
-from src.services.s3_service import read_delta
+from src.services.s3_service import read_delta, scan_delta
 
 if TYPE_CHECKING:
     from config import Config
@@ -78,11 +78,22 @@ def _register_metrics_routes(app):
         days = request.args.get("days", default=cfg.default_metrics_days, type=int)
         days = min(max(days, 1), 365)
 
-        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        # These are daily metrics, so compare dates rather than timestamps.
+        # A "now" cutoff with a time component includes or drops the boundary
+        # day depending on the hour the request happens to run — the same query
+        # returned 1732 rows in the afternoon and 1829 rows at 2am.
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).date()
 
         # ── Read from polars_metrics_values (created by Waddah in Databricks) ─
+        # Scanned lazily so the date filter is pushed down to the Delta scan
+        # rather than pulling the whole table into memory first.
         source = "dev/mlh/polars_metrics_values"
-        df = read_delta(cfg, path=source)
+        lf = scan_delta(cfg, path=source)
+        df = (
+            lf.filter(pl.col("date") >= cutoff).collect()
+            if lf is not None
+            else None
+        )
         if df is None:
             # read_delta returns None for any failure, so this covers a missing
             # table and an S3 credential/permission problem alike. Report it as
@@ -101,8 +112,7 @@ def _register_metrics_routes(app):
         if df.is_empty():
             return jsonify({"days": days, "metrics": [], "count": 0, "source": source})
 
-        # Filter by date
-        df = df.filter(pl.col("date") >= cutoff)
+        # (the date filter already ran as part of the scan above)
 
         # Add human-readable metric name
         name_map = pl.DataFrame([

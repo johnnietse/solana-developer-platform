@@ -141,6 +141,32 @@ def write_delta(
     return delta_uri
 
 
+def scan_delta(
+    cfg: Config,
+    table_name: str | None = None,
+    path: str | None = None,
+) -> pl.LazyFrame | None:
+    """Lazily scan a Delta table on S3, returning a Polars LazyFrame.
+
+    Prefer this over :func:`read_delta` when the caller filters or selects:
+    Polars pushes predicates and projections down to the scan, so only the
+    matching row groups are fetched instead of the whole table.
+
+    Returns ``None`` if the table cannot be read.
+    """
+    if path:
+        delta_uri = f"s3://{cfg.s3_bucket}/{path.strip('/')}"
+    elif table_name:
+        delta_uri = f"s3://{cfg.s3_bucket}/{DELTA_ROOT}/{table_name}"
+    else:
+        return None
+
+    try:
+        return pl.scan_delta(delta_uri, storage_options=_storage_options(cfg))
+    except Exception:
+        return None
+
+
 def read_delta(
     cfg: Config,
     table_name: str | None = None,
