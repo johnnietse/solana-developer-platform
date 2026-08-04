@@ -35,7 +35,7 @@ def _register_rpc_routes(app):
 
         # ── Check S3 cache (Delta) first ──
         df = read_delta(cfg, "rpc_cache")
-        if df is not None:
+        if df is not None and "mint" in df.columns:
             cached = df.filter(pl.col("mint") == token_address)
             if not cached.is_empty():
                 records = cached.to_dicts()
@@ -43,16 +43,33 @@ def _register_rpc_routes(app):
                     "token_address": token_address,
                     "source": "cache",
                     "transfers": records[:limit],
-                    "total_cached": len(records),
+                    "total": len(records),
+                    "scanned": None,  # not applicable on the cache path
+                    "total_cached": len(records),  # retained for existing callers
                 })
 
         # ── Fetch from RPC ──
-        signatures = get_signatures_for_address(cfg, token_address, limit=limit)
+        try:
+            signatures = get_signatures_for_address(cfg, token_address, limit=limit)
+        except Exception as exc:
+            log.exception("getSignaturesForAddress failed for %s", token_address)
+            return jsonify({
+                "error": "Solana RPC request failed",
+                "detail": f"{type(exc).__name__}: {exc}",
+                "token_address": token_address,
+                "rpc_url": cfg.solana_rpc_url,
+            }), 502
+
         transfers: list[dict] = []
         scanned = 0
 
         for sig in signatures:
-            tx = get_transaction(cfg, sig["signature"])
+            try:
+                tx = get_transaction(cfg, sig["signature"])
+            except Exception as exc:
+                # One bad signature should not sink the whole batch.
+                log.warning("getTransaction failed for %s: %s", sig.get("signature"), exc)
+                continue
             if not tx:
                 continue
 

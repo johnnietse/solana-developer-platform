@@ -81,13 +81,25 @@ def _register_metrics_routes(app):
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
         # ── Read from polars_metrics_values (created by Waddah in Databricks) ─
-        df = read_delta(cfg, path="dev/mlh/polars_metrics_values")
-        if df is None or df.is_empty():
+        source = "dev/mlh/polars_metrics_values"
+        df = read_delta(cfg, path=source)
+        if df is None:
+            # read_delta returns None for any failure, so this covers a missing
+            # table and an S3 credential/permission problem alike. Report it as
+            # unavailable rather than as an empty-but-successful result.
             return jsonify({
                 "days": days,
                 "metrics": [],
-                "error": "No metrics data found at dev/mlh/polars_metrics_values",
-            })
+                "count": 0,
+                "source": source,
+                "error": (
+                    f"Could not read the Delta table at {source} — it is missing, "
+                    "or S3 credentials/permissions are not configured"
+                ),
+            }), 503
+
+        if df.is_empty():
+            return jsonify({"days": days, "metrics": [], "count": 0, "source": source})
 
         # Filter by date
         df = df.filter(pl.col("date") >= cutoff)
@@ -116,6 +128,8 @@ def _register_metrics_routes(app):
 
         return jsonify({
             "days": days,
+            "count": len(metrics_by_date),
+            "source": source,
             "metrics": metrics_by_date,
         })
 
