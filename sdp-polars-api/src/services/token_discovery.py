@@ -13,18 +13,18 @@ if TYPE_CHECKING:
 SPL_TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
 MINT_ACCOUNT_SIZE = 82  # Mint accounts are exactly 82 bytes
 
-# ── Fallback mints ──────────────────────────────────────────────────────────
-# Used when getProgramAccounts is unavailable (e.g., public devnet RPC returns
-# 403 for heavy queries).  Keyed by mint address; values are (symbol, decimals).
-FALLBACK_MINTS: dict[str, tuple[str, int]] = {
-    # Devnet tokens that actually exist on devnet
-    # (mainnet addresses removed — they always return 0 on devnet)
-    "Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr": ("USDC", 6),
-    "9fxDZ7rBCNdHureibbAVa6J73srhCYWoKYZWwegXe72Z": ("PYUSD", 6),
-}
+def _get_fallback_mints(cfg: Config) -> dict[str, tuple[str, int]]:
+    """Parse fallback mints from config."""
+    mints = {}
+    if cfg.fallback_mints:
+        for entry in cfg.fallback_mints.split(","):
+            parts = entry.strip().split(":")
+            if len(parts) == 3:
+                mints[parts[0]] = (parts[1], int(parts[2]))
+    return mints
 
 
-def _fallback_mints() -> list[dict]:
+def _fallback_mints(cfg: Config) -> list[dict]:
     """Return the fallback mint list when getProgramAccounts is unavailable."""
     return [
         {
@@ -34,7 +34,7 @@ def _fallback_mints() -> list[dict]:
             "slot": 0,
             "mint_authority": None,
         }
-        for addr, (_, dec) in FALLBACK_MINTS.items()
+        for addr, (_, dec) in _get_fallback_mints(cfg).items()
     ]
 
 
@@ -61,12 +61,12 @@ def discover_token_mints(cfg: Config) -> list[dict]:
         )
     except (HTTPError, Exception) as exc:
         print(f"[token_discovery] getProgramAccounts unavailable ({exc}), using fallback mints")
-        return _fallback_mints()
+        return _fallback_mints(cfg)
 
     accounts = resp.get("result", [])
     if not accounts:
         print("[token_discovery] No accounts returned, using fallback mints")
-        return _fallback_mints()
+        return _fallback_mints(cfg)
 
     mints = []
     for acc in accounts:
@@ -98,10 +98,10 @@ def discover_token_mints(cfg: Config) -> list[dict]:
 def resolve_token_symbol(cfg: Config, mint: str) -> str:
     """Resolve a human-readable symbol for a token mint.
 
-    Uses ``FALLBACK_MINTS`` as the symbol registry; unknown mints get
+    Uses fallback mints from config as the symbol registry; unknown mints get
     a shortened address like ``AbCd...WxYz``.
     """
-    entry = FALLBACK_MINTS.get(mint)
+    entry = _get_fallback_mints(cfg).get(mint)
     if entry:
         return entry[0]
     return f"{mint[:4]}...{mint[-4:]}"

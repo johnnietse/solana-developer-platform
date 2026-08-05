@@ -50,7 +50,10 @@ class Config:
 
     # Token discovery
     token_discovery_enabled: bool = getenv("TOKEN_DISCOVERY_ENABLED", "true").lower() == "true"
-
+    fallback_mints: str = getenv(
+        "FALLBACK_MINTS",
+        "Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr:USDC:6,9fxDZ7rBCNdHureibbAVa6J73srhCYWoKYZWwegXe72Z:PYUSD:6"
+    )
     # Expanded data ingestion
     holders_ingestion_enabled: bool = getenv("HOLDERS_INGESTION_ENABLED", "true").lower() == "true"
     whales_ingestion_enabled: bool = getenv("WHALES_INGESTION_ENABLED", "true").lower() == "true"

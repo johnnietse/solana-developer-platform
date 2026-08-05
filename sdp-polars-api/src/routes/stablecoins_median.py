@@ -24,7 +24,7 @@ from src.services.s3_service import list_keys, read_parquet
 if TYPE_CHECKING:
     from config import Config
 
-median_bp = Blueprint("stablecoins_median", __name__)
+
 
 
 def _get_config_value(cfg: Config, key: str, default: any, cast_type: type = None):

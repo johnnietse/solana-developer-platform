@@ -152,7 +152,7 @@ def get_signatures_for_address(
         return resp.get("result", [])
     except Exception as exc:
         print(f"[solana_rpc] getSignaturesForAddress failed for {address}: {exc}")
-        return []
+        raise
 
 
 def get_transaction(cfg: Config, signature: str) -> dict | None:
