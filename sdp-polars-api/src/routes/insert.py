@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 import polars as pl
 from flask import Blueprint, jsonify, request
 
-from src.services.s3_service import write_parquet, write_delta
+from src.services.s3_service import credentials_available, write_parquet, write_delta
 
 if TYPE_CHECKING:
     from config import Config
@@ -87,12 +87,24 @@ def _register_insert_routes(app):
         except Exception as exc:
             log.exception("Delta write failed for %s", table_name)
             detail = f"{type(exc).__name__}: {exc}"
-            # A column-set change on an existing table needs mode=overwrite.
-            hint = (
-                "Schema differs from the existing table — retry with mode=overwrite"
-                if "schema" in detail.lower()
-                else None
-            )
+            # The underlying object-store error is opaque ("Operation not
+            # supported"), so name the likely cause rather than forwarding it raw.
+            if not credentials_available(cfg):
+                hint = (
+                    "No AWS credentials resolved — set AWS_ACCESS_KEY_ID and "
+                    "AWS_SECRET_ACCESS_KEY (plus AWS_SESSION_TOKEN if temporary), "
+                    "or AWS_PROFILE, or run with an instance/task role"
+                )
+            elif "schema" in detail.lower():
+                # A column-set change on an existing table needs mode=overwrite.
+                hint = "Schema differs from the existing table — retry with mode=overwrite"
+            elif "accesskeyid" in detail.lower() or "privileg" in detail.lower():
+                hint = (
+                    "AWS credentials resolved but were rejected — check the key is "
+                    f"valid and has s3:PutObject on s3://{cfg.s3_bucket}/"
+                )
+            else:
+                hint = None
             return jsonify({
                 "error": "Delta write to S3 failed",
                 "detail": detail,

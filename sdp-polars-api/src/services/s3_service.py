@@ -17,19 +17,48 @@ if TYPE_CHECKING:
 DELTA_ROOT = "dev/mlh/sdp_data"  # Waddah's suggested path prefix
 
 
+def _session(cfg: Config) -> boto3.Session:
+    """A boto3 session honouring AWS_PROFILE when one is configured."""
+    return boto3.Session(profile_name=cfg.aws_profile) if cfg.aws_profile else boto3.Session()
+
+
+def credentials_available(cfg: Config) -> bool:
+    """Whether the AWS credential chain resolves to anything usable."""
+    try:
+        return _session(cfg).get_credentials() is not None
+    except Exception:
+        return False
+
+
 def _storage_options(cfg: Config) -> dict:
-    """Build Delta Lake storage options from the AWS credential chain."""
+    """Build Delta Lake storage options from the AWS credential chain.
+
+    Resolved through boto3 rather than read straight off the environment.
+    delta-rs does not consult ``~/.aws/credentials`` or the container
+    credential endpoint itself, so reading only ``AWS_ACCESS_KEY_ID`` and
+    ``AWS_SECRET_ACCESS_KEY`` breaks three common setups: a named profile, an
+    SSO/STS session, and an ECS task role. All three issue temporary
+    credentials that additionally require ``AWS_SESSION_TOKEN``, which the
+    previous implementation never forwarded — so the Parquet write (boto3,
+    full chain) would succeed while the Delta write failed.
+    """
     opts = {
         "AWS_REGION": cfg.s3_region,
         "AWS_S3_ALLOW_UNSAFE_RENAME": "true",
     }
-    # Try explicit keys from env first, then fall back to profile
-    import os
-    ak = os.environ.get("AWS_ACCESS_KEY_ID")
-    sk = os.environ.get("AWS_SECRET_ACCESS_KEY")
-    if ak and sk:
-        opts["AWS_ACCESS_KEY_ID"] = ak
-        opts["AWS_SECRET_ACCESS_KEY"] = sk
+
+    try:
+        creds = _session(cfg).get_credentials()
+    except Exception:
+        creds = None
+
+    if creds is not None:
+        frozen = creds.get_frozen_credentials()
+        opts["AWS_ACCESS_KEY_ID"] = frozen.access_key
+        opts["AWS_SECRET_ACCESS_KEY"] = frozen.secret_key
+        if frozen.token:
+            opts["AWS_SESSION_TOKEN"] = frozen.token
+
     return opts
 
 
