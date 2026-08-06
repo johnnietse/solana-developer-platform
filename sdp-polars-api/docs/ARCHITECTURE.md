@@ -55,15 +55,105 @@ Three HTTP endpoints and a storage convention.
 | `GET /metrics?days=30` | reads Solana metrics back out of S3 | 30 days of named metrics as JSON |
 | `GET /rpc?token_address=…` | reads token transfers from Solana | the last 100 transfers, cached in S3 |
 
-The idea that makes it work is one line of code:
+### The one idea
 
 ```python
 s3_path = table_name.replace(".", "/")
 ```
 
-`dev.mlh.polars_metrics` becomes `s3://tmp-sdp-data/dev/mlh/polars_metrics/`.
-The name you use in Databricks and the place the bytes live are the same thing,
-by construction. Nobody has to maintain a mapping.
+That single line is the design. `dev.mlh.polars_metrics` becomes
+`s3://tmp-sdp-data/dev/mlh/polars_metrics/`. The name an analyst types in
+Databricks and the place the bytes physically live are the same thing, derived
+from each other. Nobody maintains a mapping table, and the two cannot drift.
+
+Waddah described the target as an equivalence:
+
+```sql
+-- what he showed as the pattern
+select * from solana.idl
+select * from delta.`s3://solana-fdn-dw/prod/solana/idl`
+
+-- what this produces
+select * from dev.mlh.polars_metrics
+select * from delta.`s3://tmp-sdp-data/dev/mlh/polars_metrics`
+```
+
+### What happens on one request
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Caller
+    participant F as Flask
+    participant P as Polars
+    participant S3 as Amazon S3
+    participant DB as Databricks
+
+    C->>F: POST /insert?table_name=dev.mlh.polars_metrics<br/>{"data":[{...22 rows...}]}
+    F->>F: validate — 5 checks before anything is written
+    F->>P: build a DataFrame from the JSON
+    F->>F: dev.mlh.polars_metrics → dev/mlh/polars_metrics
+    P->>S3: write Delta — parquet + _delta_log
+    F-->>C: 201 {rows: 22, delta_path: "s3://…"}
+    DB->>S3: SELECT * FROM delta.`s3://…`
+    S3-->>DB: 22 rows
+```
+
+Nine steps, no pipeline, no scheduled job, no database. The write and the read
+touch the same bytes.
+
+### Why this shape, and not the obvious alternative
+
+The obvious approach is to push data *into* Databricks over its SQL API. That is
+what the project originally did, and it is what Waddah told us to stop doing on
+23 July:
+
+> "Write to the s3 is sufficient… You should write in delta instead of parquet.
+> Then you create an external table on top of that path."
+
+The difference matters:
+
+| | Push into Databricks | Write Delta to S3 |
+|---|---|---|
+| Copies of the data | two | one |
+| Credentials the service holds | a Databricks token | none — an IAM role |
+| Who can read it | Databricks only | anything that reads Delta |
+| What breaks when the token expires | everything | nothing |
+
+The second shape is why the service holds no Databricks credential at all.
+
+### The data it moves
+
+Two tables, and the relationship between them is the reason the first task was
+initially confusing.
+
+```mermaid
+erDiagram
+    polars_metrics ||--o{ polars_metrics_values : "id = metric_id"
+    polars_metrics {
+        int id PK
+        string name
+        string unit
+        string description
+        string tab
+    }
+    polars_metrics_values {
+        date date
+        int metric_id FK
+        int provider_id
+        double value
+    }
+```
+
+`polars_metrics` is the **catalog** — 22 rows naming what each metric is
+("Supply", "DEX Volume", "Validator Count"). That is the CSV Waddah attached,
+and what `/insert` writes.
+
+`polars_metrics_values` is the **measurements** — 2,217 daily readings, already
+in Databricks. That is what `/metrics` reads.
+
+`/metrics` joins them so the API returns `"DEX Volume": 6117296684.87` rather
+than `"metric_23": 6117296684.87`.
 
 ---
 
@@ -95,111 +185,282 @@ request, not a piece of code.
 
 ## The pull requests, and how they fit
 
-Two branches, because Waddah asked for two different things at two different
-times.
+There are two artifacts because the ask changed twice, and both changes were
+reasonable.
 
 ```mermaid
 graph TD
-    A["Full Polars API<br/>25 routes"] --> B["polars-api-only<br/><i>everything</i>"]
-    A --> C["insert-api<br/><i>/insert only</i>"]
-    B --> D["Waddah: 'this repo should<br/>only be the polars api service'"]
-    C --> E["Waddah: 'push only code that<br/>gets /insert working'"]
+    T1["Jul 24 · project board<br/>'Implement /insert to s3.<br/>Must be readable on Databricks'"] --> A
+    A["Full Polars API<br/>25 routes, 43 files"]
+    T2["Jul 31 · Waddah<br/>'This repo should only be<br/>the polars api service'"] --> B
+    T3["Aug 4 · Waddah<br/>'push only code that gets<br/>/insert working'"] --> C
+    A --> B["<b>polars-api-only</b><br/>full service · 25 routes"]
+    A --> C["<b>insert-api</b><br/>/insert only · 14 files"]
+    B --> D["matches the architecture<br/>diagram in the brief"]
+    C --> E["matches the literal<br/>board task"]
     style B fill:#E1F5EE,stroke:#0F6E56
     style C fill:#E1F5EE,stroke:#0F6E56
+    style A fill:#F1EFE8,stroke:#5F5E5A
 ```
 
-### PR: `insert-api` → `main`
+### Why two, and not one
 
-The `/insert` deliverable as a standalone service — 14 files, nothing else.
+The project brief specifies an architecture with three endpoints. The board task
+specifies one endpoint. Both are real requirements from the same stakeholder,
+issued eleven days apart as the scope sharpened.
 
-Where it connects: this is the literal task from the project board — *"Implement
-/insert to s3. Must be readable on Databricks."* It writes the 22-row metrics
-catalog from Waddah's CSV to `s3://tmp-sdp-data/dev/mlh/polars_metrics`, byte-for
--byte identical to the source.
+Rather than pick one and argue, both exist, and the code that matters is shared
+verbatim between them. `config.py`, `src/routes/insert.py` and
+`src/services/s3_service.py` are **byte-identical** across the two branches —
+verified with `cmp`, not by eye. It is a packaging split, not a fork, so a fix
+in one is a fix in both.
 
-What is in it, and deliberately nothing more:
+---
+
+### PR — `insert-api` → `main`
+
+**What it delivers.** The `/insert` task from the board, as a service that does
+nothing else.
+
+**How it connects to the project.** The board task reads:
+
+> **Implement /insert to s3. Must be readable on Databricks**
+> `/insert?table_name=` — insert this data using Polars (as a `delta` format),
+> using `table_name = 'dev.mlh.polars_metrics'`
+
+Waddah attached a CSV — 22 rows, the metric catalog. This PR is the machine that
+turns that CSV into a Databricks table. Run it and
+`s3://tmp-sdp-data/dev/mlh/polars_metrics` exists, holding those 22 rows,
+byte-for-byte identical to the source file. Verified by reading the table back
+from S3 in a separate process and comparing against the CSV.
+
+**Commits, oldest first**
+
+| Commit | What it does |
+|---|---|
+| `b50fa2c` | the standalone service — entry point, trimmed dependencies, Dockerfile, README |
+| `ac5cc5c` | credential resolution through boto3, forwarding the session token |
+| `f1a5147` | populate `.gitignore` so secrets cannot be committed |
+| merge commit | `ours` strategy, purely to give GitHub a merge base |
+
+**The 14 files**
 
 ```
-app.py  config.py  src/routes/insert.py  src/services/s3_service.py
-Dockerfile  requirements.txt  README.md  .env.example
-queries/databricks-analytics.sql
+app.py                            entry point — /health and /insert, nothing else
+config.py                         environment-driven settings
+src/routes/insert.py              the endpoint: validation, modes, error handling
+src/services/s3_service.py        Delta and Parquet writers, credential resolution
+src/{,routes/,services/}__init__.py
+queries/databricks-analytics.sql  the DDL to register the table in Databricks
+Dockerfile                        python:3.12-slim, gunicorn, healthcheck
+requirements.txt                  7 packages
+README.md                         endpoint contract and run instructions
+.env.example  .dockerignore  .gitignore
 ```
 
-Dropping the other endpoints also dropped four dependencies (APScheduler,
-flask-socketio, websockets, numpy), took the image from 775 MB to 701 MB, and
-removed the background scheduler — which means this build can run two gunicorn
-workers where the full service is pinned to one.
+**What removing the rest bought**
 
-### Branch: `polars-api-only`
+| | Full service | `/insert` only |
+|---|---|---|
+| Routes | 25 | 2 |
+| Python dependencies | 11 | 7 |
+| Docker image | 775 MB | 701 MB |
+| Gunicorn workers | 1 | 2 |
+| Background threads | scheduler + WebSocket | none |
 
-The complete service — all three endpoints plus the ingestion pipeline and
-WebSocket subsystem. This is the artifact matching the architecture diagram in
-the project brief.
+The worker count is the one that matters operationally. The full service pins
+`--workers 1` because `create_app()` starts the ingestion scheduler — a second
+worker would run a second scheduler and duplicate every 15-minute snapshot. This
+build starts no background threads, so it scales horizontally without that trap.
 
-The three files that do the actual `/insert` work are **byte-identical** between
-the two branches, checked with `cmp`. It is a packaging split, not a fork, so
-they cannot drift apart.
+**What a reviewer should check**
 
-### A note on how the PR reads
+1. `src/routes/insert.py` — the endpoint itself, about 140 lines
+2. `src/services/s3_service.py` — `write_delta` and `_storage_options`
+3. `queries/databricks-analytics.sql` — the registration DDL
+4. Everything else is packaging
 
-Both branches came from a `git subtree split`, so they share no commit history
-with `main`. GitHub refuses to open a PR across unrelated histories, so the PR
-carries a merge commit created with the `ours` strategy — it records `main` as a
-parent and pulls in none of its files.
+---
 
-The practical effect: **the diff reads as a replacement, not an increment.**
-Reviewers should read the file tree, not the line diff.
+### Branch — `polars-api-only`
+
+**What it delivers.** The complete service: all three endpoints, the ingestion
+pipeline, the WebSocket subsystem, and the analytics routes. This is the artifact
+that matches the architecture diagram in the project brief.
+
+**How it connects to the project.** The brief's diagram shows Solana RPC feeding
+an ECS-hosted Flask/Polars service, which reads and writes S3, which Databricks
+reads, and which serves `GET /metrics` and `GET /rpc` to SDP Analytics. This
+branch is that diagram, implemented.
+
+It also carries the work that came out of verification — twelve defect fixes,
+the credential handling, and this document.
+
+**Notable commits**
+
+| Commit | What it does |
+|---|---|
+| `7e8d45a` | repair `/metrics` returning HTTP 500 on every request |
+| `93b7210` | correct SPL token transfer detection; default to devnet |
+| `924edb3` | harden all three endpoints against malformed input |
+| `8becbf4` | honour the last-N contract; return the queried token |
+| `637a47e` | push the date filter into the scan; correct the median math |
+| `6fc6e1e` | resolve credentials through boto3, forward the session token |
+| `f6ecec7` | this document |
+
+---
+
+### How to read either PR
+
+Both branches were produced by `git subtree split`, so they share no commit
+history with `main`. GitHub refuses to open a pull request across unrelated
+histories, so each PR carries a merge commit created with the `ours` strategy.
+That records `main` as a parent while pulling in none of its files — verified by
+confirming the tree hash is identical before and after.
+
+The practical consequence: **the diff reads as a replacement, not an
+increment.** It shows `main`'s current scaffold being removed and a service
+appearing in its place. That is what is being proposed, but it means the line
+diff is close to useless for review.
+
+**Read the file tree, not the diff.**
 
 ---
 
 ## Key learnings
 
-**1. Passing tests is not the same as correct data.**
+### 1. Passing tests is not the same as correct data
 
-Seven of the twelve defects I found produced no error at all. `/rpc` returned a
-*different token* than the one requested, because the parser took the first
-token balance change it found and transactions routinely move several. Nothing
-crashed. The response looked plausible. It was simply wrong.
+Twelve defects were found during verification. **Seven produced no error at
+all** — no exception, no log line, no failing request. They returned wrong data
+with a 200.
 
-The lesson: for a data service, "no exception" is a very weak signal. I only
-caught these by comparing output against the source of truth.
+The worst was `/rpc`. Asked for token X, it would describe token Y. The cause:
+`getSignaturesForAddress` returns every transaction that *references* an
+address, and such a transaction routinely moves several different tokens. The
+parser took the first token-balance change it found. Nothing crashed; the
+response was well-formed and plausible.
 
-**2. Reading the spec beat reasoning about the code.**
+I only caught it by looking at what had actually been written to S3:
 
-Three `/rpc` defects came directly from the Solana RPC `json-structures` docs:
-`owner` is optional in token balances, `uiAmount` is deprecated and often
-`null`, and balances must be matched by `accountIndex`. I had read the code
-several times without seeing them. Ten minutes with the specification found all
-three.
+```
+query for the USDC mint
+  distinct mints stored: 5     rows for the USDC mint: 1
+```
 
-**3. Measure the environment, not just the code.**
+Four unrelated tokens, cached under a query for a fifth.
 
-I twice reported problems that did not exist, because my *measurement* was
-broken rather than the branches. Git Bash silently rewrote `ref:path` arguments
-into Windows paths, and `git grep -I` skipped a file that had null bytes in it
-— reporting a missing `.env` rule that was actually on line 2.
+Two more in the same family:
 
-Both times the tool failed quietly and I nearly acted on it. Now I verify the
-measurement before trusting the finding.
+| Defect | Symptom |
+|---|---|
+| `uiAmount` used for the amount | a real 2.5-token transfer reported as **0.0** |
+| `trimmed_mean` trimmed asymmetrically | n=5 returned **2.5 against a true mean of 3.0** — 17% low |
 
-**4. Credentials are where local and production diverge.**
+**What I'd carry forward:** for a data service, "no exception" is nearly no
+signal at all. The check that found these was always the same — compare output
+against a source of truth, not against expectations.
 
-The service resolved AWS credentials by reading two environment variables. That
-works on a laptop. It fails on ECS, because task roles deliver *temporary*
-credentials through a container endpoint and require a session token that was
-never being forwarded — and it fails *silently*, because the Parquet write used
-boto3's full chain and succeeded while the Delta write did not.
+### 2. Reading the specification beat reasoning about the code
 
-That bug would have surfaced on deploy day. It was found by testing the
-credential path deliberately, not by running the app.
+Three `/rpc` defects came directly from one page of the Solana RPC docs
+(`json-structures`):
 
-**5. Ask what the deliverable actually is.**
+| What the spec says | What the code assumed |
+|---|---|
+| `owner` is optional in token balances | `owner` is always present, and unique |
+| balances must be matched by `accountIndex` | matching on `owner` is equivalent |
+| `uiAmount` is deprecated and often `null` | `uiAmount` is a usable number |
 
-The service grew to 25 routes. The brief asked for three. Most of the
-operational risk — the background scheduler forcing a single gunicorn worker,
-the WebSocket subsystem needing a different worker class — came from code
-nobody had asked for. The narrower `insert-api` build has none of those
-problems.
+I had read that parser several times without seeing any of it, because the code
+is internally consistent — it just encodes wrong assumptions about the upstream
+format. Ten minutes with the specification found all three.
+
+**What I'd carry forward:** when code integrates with someone else's format,
+read their format description before reading the integration.
+
+### 3. Verify the measurement before trusting the finding
+
+Twice I reported a problem that did not exist, because my *tooling* was broken
+rather than the code.
+
+**Git Bash rewrote path arguments.** `git cat-file -p aud/insert-api:.gitignore`
+became `aud\insert-api;.gitignore` through MSYS path conversion. Every read
+returned empty, so a survey table showed nine branches with no `.gitignore` when
+most had one.
+
+**`git grep -I` silently skipped a file.** Three branches had a `.gitignore`
+containing 15 null bytes — a UTF-16 tail appended by PowerShell `>>`. Git
+classifies such a file as binary and `-I` skips binaries, so the scan reported a
+missing `.env` rule that was sitting on line 2.
+
+In both cases the tool reported an absence rather than an error, and I nearly
+acted on it — the second time, by overwriting three files that were mostly fine.
+What stopped me was reading the file contents before rewriting them.
+
+**What I'd carry forward:** when a scan says "nothing there," confirm the scan
+can see anything at all before believing it.
+
+### 4. Credentials are where local and production diverge
+
+The service resolved AWS credentials like this:
+
+```python
+ak = os.environ.get("AWS_ACCESS_KEY_ID")
+sk = os.environ.get("AWS_SECRET_ACCESS_KEY")
+if ak and sk: ...
+```
+
+That works on a laptop with static keys. It fails on ECS, because task roles
+deliver **temporary** credentials through the container credential endpoint —
+not environment variables — and those require a session token that was never
+being forwarded.
+
+The failure mode is what makes it interesting. `write_parquet` goes through
+boto3, which walks the full credential chain, so it would have succeeded.
+`write_delta` passes explicit options to delta-rs, so it would have failed. One
+request, two writes, one silently missing — and the error surfaced as:
+
+```
+OSError: Kernel error -> Operation not supported
+```
+
+Nothing in that message points at credentials.
+
+This would have appeared on deploy day, under time pressure, with a useless
+error string. It was found by testing the credential path deliberately — running
+the app with no credentials, with bad credentials, and with a profile — rather
+than by running the app normally.
+
+**What I'd carry forward:** test the auth path as its own thing, with the
+failure cases, before the deploy that depends on it.
+
+### 5. Ask what the deliverable actually is
+
+The service reached 25 routes. The brief asked for three.
+
+Almost all the operational risk lives in the other 22:
+
+| Risk | Comes from |
+|---|---|
+| pinned to one gunicorn worker | the ingestion scheduler starting inside `create_app()` |
+| WebSockets broken under the configured worker | flask-socketio needing gevent/eventlet |
+| 429 rate-limit storms | ingestion routes polling public devnet |
+| 74 MB of extra image | four dependencies only the extras use |
+
+The `insert-api` build has none of these, because it has none of that code.
+
+**What I'd carry forward:** scope creep in a service is not just extra code, it
+is extra failure modes in the parts you *did* need.
+
+### What I would do differently
+
+| | |
+|---|---|
+| **Write the verification harness first** | Every defect was found by a script I wrote after the fact. Writing them alongside the endpoints would have caught the silent ones far earlier. |
+| **Read the upstream format before integrating** | Three defects, one doc page, ten minutes. |
+| **Keep one branch, not five** | The repo accumulated redundant branches while the scope was in flux. It made review harder for everyone. |
+| **Confirm the environment before reporting** | Both false alarms came from trusting a tool that had failed quietly. |
 
 ---
 
@@ -207,31 +468,89 @@ problems.
 
 **Immediate — this closes the project**
 
-1. **Get ECS/ECR IAM from Waddah.** `ecr:*`, `ecs:*`, and an
-   `sdp-polars-api-task-role` with `s3:GetObject`, `s3:PutObject`,
-   `s3:ListBucket` on `tmp-sdp-data`. This is the only outstanding deliverable
-   and it is a permissions request, not engineering.
-2. **Run one query inside Databricks.** The Delta round trip is proven from S3;
-   nobody has yet run `SELECT * FROM delta.\`s3://…\`` in the workspace. Two
-   minutes turns an inference into an observation.
-3. **Deploy.** The task definition needs three corrections first — memory raised
-   from 512 MB (Polars and pyarrow alone need ~300 MB resident), a longer
-   healthcheck `startPeriod`, and the ingestion flags set explicitly.
+```mermaid
+graph LR
+    A["1 · IAM request<br/><i>blocked on Waddah</i>"] --> C["3 · Deploy to ECS"]
+    B["2 · Databricks query<br/><i>2 minutes</i>"] --> D["project complete"]
+    C --> D
+    D --> E["4-6 · Production hardening"]
+    E --> F["7-8 · SDP integration + CI"]
+    style A fill:#FCEBEB,stroke:#A32D2D
+    style D fill:#E1F5EE,stroke:#0F6E56
+```
+
+| # | Step | Blocked on | Effort |
+|---|---|---|---|
+| 1 | IAM permissions | **Waddah** | a message |
+| 2 | Databricks query | nobody | 2 min |
+| 3 | Correct the task definition, deploy | step 1 | ~1 hr |
+| 4 | Scheduler out of the web process | — | ~half a day |
+| 5 | DynamoDB locking provider | — | ~half a day |
+| 6 | Retire the Parquet mirror | confirming nothing reads it | ~1 hr |
+| 7 | Integrate into SDP | — | beyond the fellowship |
+| 8 | CI | — | ~half a day |
+
+**1. Get ECS/ECR IAM from Waddah.** Requested 20 July, still outstanding. Three
+things are needed, and the third is easy to forget:
+
+- `ecr:*` — to push the image
+- `ecs:*` — to create the service
+- an `sdp-polars-api-task-role` carrying `s3:GetObject`, `s3:PutObject` and
+  `s3:ListBucket` on `tmp-sdp-data`
+
+Without the third, the deploy succeeds and the first write fails. The task
+definition already references that role by ARN.
+
+**2. Run one query inside Databricks.** The Delta round trip is proven from S3 —
+an independent process reads back byte-identical data, and the table is at
+reader protocol v1. But nobody has run a query in the workspace itself, so
+"readable on Databricks" remains an inference:
+
+```sql
+SELECT * FROM delta.`s3://tmp-sdp-data/dev/mlh/polars_metrics`;
+```
+
+22 rows back and the last soft claim in this project becomes an observation.
+
+**3. Correct the task definition, then deploy.** `deploy/ecs-task-def.json`
+predates every change in this session. Three fixes before it is used:
+
+| Field | Now | Should be | Why |
+|---|---|---|---|
+| `memory` | `512` | `1024` | pyarrow + polars + deltalake are ~300 MB resident before serving anything; `read_delta` then materializes the whole table |
+| `startPeriod` | `15` | `45` | local boots took 12–16 s; the healthcheck can fail before the app is up |
+| ingestion flags | absent | set explicitly | defaults enable every ingestion route, which is what caused the 429 storms |
+
+An OOM kill on ECS presents as a task that silently restarts. Worth not
+discovering that on deadline.
 
 **Shortly after**
 
-4. **Move the scheduler out of the web process** so the service scales
-   horizontally instead of being pinned to one worker.
-5. **Add a DynamoDB locking provider** before running multiple ECS tasks — Delta
-   writes currently rely on `AWS_S3_ALLOW_UNSAFE_RENAME`, which held under 12
-   concurrent writers in testing but is not a guarantee.
-6. **Retire the legacy Parquet mirror** once nothing reads the `insert/` prefix.
+**4. Move the scheduler out of the web process.** It starts inside
+`create_app()`, which is why gunicorn is pinned to `--workers 1` — a second
+worker would duplicate every 15-minute snapshot. Moving it to a scheduled ECS
+task lets the API scale horizontally.
+
+**5. Add a DynamoDB locking provider.** Delta writes currently set
+`AWS_S3_ALLOW_UNSAFE_RENAME=true`, which disables delta-rs's multi-writer
+protection. Twelve concurrent appends produced a contiguous commit log with
+nothing lost, but that is evidence, not a guarantee. Needed before multiple ECS
+tasks write the same table.
+
+**6. Retire the legacy Parquet mirror.** Every insert currently writes twice —
+Delta to `dev/mlh/`, Parquet to `insert/`. Once nothing reads the `insert/`
+prefix, the second write is pure cost.
 
 **Longer term**
 
-7. Integrate into the Solana Developer Platform proper, which is the point of
-   the fellowship project.
-8. Add CI — the verification suites in this repo are all manual today.
+**7. Integrate into the Solana Developer Platform.** The point of the fellowship
+project — the brief describes folding the Foundation's data products into the
+open-source platform at
+`github.com/solana-foundation/solana-developer-platform`.
+
+**8. Add CI.** Every verification suite in this repo is run by hand. The 43-check
+endpoint suite, the 27-check end-to-end run and the 20 unit checks should run on
+push, or they will rot.
 
 ---
 
