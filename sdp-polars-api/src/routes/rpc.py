@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
@@ -10,7 +11,11 @@ import polars as pl
 from flask import Blueprint, jsonify, request
 
 from src.services.s3_service import read_delta, write_delta, list_keys
-from src.services.solana_rpc import get_signatures_for_address, get_transaction
+from src.services.solana_rpc import (
+    count_signatures_since,
+    get_signatures_for_address,
+    get_transaction,
+)
 
 if TYPE_CHECKING:
     from config import Config
@@ -18,6 +23,16 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 rpc_bp = Blueprint("rpc", __name__)
+
+# Named clusters for the ?cluster= param on /rpc/count. The service is normally
+# pinned to one endpoint via SOLANA_RPC_URL; naming a cluster overrides it for
+# that request only, so a devnet-configured instance can still be asked about
+# mainnet activity without a redeploy.
+CLUSTER_RPC: dict[str, str] = {
+    "devnet": "https://api.devnet.solana.com",
+    "mainnet-beta": "https://api.mainnet-beta.solana.com",
+    "testnet": "https://api.testnet.solana.com",
+}
 
 
 def _newest_first(records: list[dict]) -> list[dict]:
@@ -127,6 +142,67 @@ def _register_rpc_routes(app):
             # Signatures reference the address in accountKeys; only some of them
             # actually move tokens. Surfacing both makes an empty result readable.
             "scanned": scanned,
+        })
+
+    @rpc_bp.route("/rpc/count", methods=["GET"])
+    def get_rpc_count():
+        """Count transactions referencing a mint over a recent window.
+
+        A companion to ``/rpc`` rather than a variant of it: ``/rpc`` returns
+        the transfer records themselves, this returns only how many there were,
+        which is answerable from signature pages alone and so stays cheap over
+        long windows.
+        """
+        # `mint` is the natural name here; `token_address` is accepted so a
+        # caller does not have to rename the param moving between the two routes.
+        mint = request.args.get("mint") or request.args.get("token_address")
+        if not mint:
+            return jsonify({"error": "Missing required query param: mint"}), 400
+
+        days = request.args.get("days", default=cfg.default_metrics_days, type=int)
+        if days is None or days < 1 or days > 365:
+            return jsonify({"error": "days must be between 1 and 365"}), 400
+
+        include_failed = request.args.get("include_failed", "false").lower() == "true"
+
+        cluster = request.args.get("cluster")
+        if cluster and cluster not in CLUSTER_RPC:
+            return jsonify({
+                "error": f"Unknown cluster: {cluster}",
+                "valid": sorted(CLUSTER_RPC),
+            }), 400
+
+        # Override the configured endpoint for this request only.
+        req_cfg = replace(cfg, solana_rpc_url=CLUSTER_RPC[cluster]) if cluster else cfg
+
+        try:
+            result = count_signatures_since(
+                req_cfg, mint, days=days, include_failed=include_failed
+            )
+        except Exception as exc:
+            log.exception("getSignaturesForAddress failed counting %s", mint)
+            return jsonify({
+                "error": "Solana RPC request failed",
+                "detail": f"{type(exc).__name__}: {exc}",
+                "mint": mint,
+                "rpc_url": req_cfg.solana_rpc_url,
+            }), 502
+
+        return jsonify({
+            "mint": mint,
+            "cluster": cluster or "configured",
+            "rpc_url": req_cfg.solana_rpc_url,
+            "days": days,
+            "include_failed": include_failed,
+            "transaction_count": result["count"],
+            "since": datetime.fromtimestamp(
+                result["cutoff"], tz=timezone.utc
+            ).isoformat(),
+            "signatures_scanned": result["scanned"],
+            "pages": result["pages"],
+            # False when the page cap stopped the walk early — the count is then
+            # a lower bound over the window, not the total.
+            "complete": result["complete"],
         })
 
     app.register_blueprint(rpc_bp)

@@ -1,0 +1,23 @@
+id,name,unit,description,tab
+20,Non Vote Transaction Count (Success),Count,Count of successful non-vote transactions on Solana per day,Overview
+21,Non Vote Transaction Count (Failed),Count,Count of failed none-vote transactions on Solana per day,Overview
+4,Active Addresses,Count,Number of unique addresses interacting with stablecoins on Solana,Stablecoins
+2,Transfer Volume,USD,"Total transfer volume of stablecoins on Solana, denominated in USD.",Stablecoins
+30,Top 3 ASN Share,Percent,Percentage of stake concentrated in the top 3 ASNs on Solana daily,Network
+15,Fee Payers,Count,Number of unique addresses that pay transaction fees daily on Solana,Overview
+1,Supply,USD,"Total circulating supply of stablecoins on Solana, denominated in USD.",Stablecoins
+3,Transfer Count,Count,Total number of stablecoin transfer transactions on Solana,Stablecoins
+19,Transaction Count (Total),Count,Total count of all transactions on Solana per day,Overview
+22,Transaction Count (Vote),Count,Count of vote transactions on Solana per day,Overview
+27,Total Stake,SOL,Total staked SOL across all validators on Solana daily,Network
+17,Compute Units,Count,Average compute units per block daily on Solana,Overview
+23,DEX Volume,USD,Daily spot trading volume across DEXes on Solana in USD,DeFi
+25,DEX Transactions,Count,Number of transactions on Solana DEXes per day,DeFi
+29,Validator Count,Count,Number of active validators on Solana daily,Network
+24,DEX Traders,Count,Number of unique daily traders on Solana DEXes,DeFi
+18,Fees,SOL,Daily fees (base plus priority) on Solana in SOL,Overview
+26,DEX Count,Count,Number of supported unique DEXes on Solana,DeFi
+28,SOL Price (Network),USD,Daily average SOL price in USD,Network
+14,Slots,Count,Number of slots per day on Solana,Overview
+16,SOL Price,USD,Daily average SOL price in USD,Overview
+31,Stablecoin Count,Count,Number of distinct stablecoins supported on Solana,Stablecoins

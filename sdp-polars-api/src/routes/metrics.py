@@ -12,7 +12,9 @@ Usage:
 
 from __future__ import annotations
 
+import csv
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import polars as pl
@@ -53,20 +55,78 @@ METRIC_NAMES: dict[int, str] = {
     31: "Stablecoin Count",
 }
 
+# Vendored copy of the catalog seed data, used when S3 is unreachable. Carries
+# the full metadata (unit/description/tab) that METRIC_NAMES cannot.
+_CATALOG_CSV = Path(__file__).resolve().parents[2] / "data" / "metrics-catalog.csv"
+
 # Cached catalog lookup — the catalog changes rarely, so read it once per process.
-_metric_names_cache: dict[int, str] | None = None
+_metric_catalog_cache: dict[int, dict] | None = None
+
+
+def _catalog_from_csv() -> dict[int, dict] | None:
+    """Load the vendored catalog CSV, or None if it is missing/unreadable."""
+    try:
+        with _CATALOG_CSV.open(newline="", encoding="utf-8") as fh:
+            rows = list(csv.DictReader(fh))
+    except (OSError, csv.Error):
+        return None
+
+    catalog: dict[int, dict] = {}
+    for row in rows:
+        try:
+            metric_id = int(row["id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        catalog[metric_id] = {
+            "id": metric_id,
+            "name": row.get("name", ""),
+            "unit": row.get("unit"),
+            "description": row.get("description"),
+            "tab": row.get("tab"),
+        }
+    return catalog or None
+
+
+def _metric_catalog(cfg: Config) -> dict[int, dict]:
+    """Metric ID → full catalog row, resolved through three tiers.
+
+    S3 Delta catalog is authoritative; the vendored CSV covers an S3 outage
+    while keeping unit/description/tab; METRIC_NAMES is the last resort and
+    carries names only. All three were verified to agree on all 22 metrics.
+    """
+    global _metric_catalog_cache
+    if _metric_catalog_cache is not None:
+        return _metric_catalog_cache
+
+    catalog = read_delta(cfg, path="dev/mlh/polars_metrics")
+    if catalog is not None and not catalog.is_empty():
+        _metric_catalog_cache = {
+            r["id"]: {
+                "id": r["id"],
+                "name": r.get("name", ""),
+                "unit": r.get("unit"),
+                "description": r.get("description"),
+                "tab": r.get("tab"),
+            }
+            for r in catalog.to_dicts()
+        }
+        return _metric_catalog_cache
+
+    from_csv = _catalog_from_csv()
+    if from_csv is not None:
+        _metric_catalog_cache = from_csv
+        return _metric_catalog_cache
+
+    _metric_catalog_cache = {
+        k: {"id": k, "name": v, "unit": None, "description": None, "tab": None}
+        for k, v in METRIC_NAMES.items()
+    }
+    return _metric_catalog_cache
 
 
 def _metric_names(cfg: Config) -> dict[int, str]:
-    """Metric ID → name, read from the S3 catalog with a static fallback."""
-    global _metric_names_cache
-    if _metric_names_cache is None:
-        catalog = read_delta(cfg, path="dev/mlh/polars_metrics")
-        if catalog is not None and not catalog.is_empty():
-            _metric_names_cache = {r["id"]: r["name"] for r in catalog.to_dicts()}
-        else:
-            _metric_names_cache = METRIC_NAMES
-    return _metric_names_cache
+    """Metric ID → name, projected out of the full catalog."""
+    return {k: v["name"] for k, v in _metric_catalog(cfg).items()}
 
 
 def _register_metrics_routes(app):
@@ -141,6 +201,73 @@ def _register_metrics_routes(app):
             "count": len(metrics_by_date),
             "source": source,
             "metrics": metrics_by_date,
+        })
+
+    @metrics_bp.route("/metrics/latest", methods=["GET"])
+    def get_metrics_latest():
+        """Return the most recent snapshot, one entry per metric.
+
+        A different projection of the same two tables that ``/metrics`` reads.
+        ``/metrics`` gives a wide time series — one row per date, metrics as
+        columns — which suits charting. This gives the newest date only, keeps
+        each metric as its own object with its catalog metadata attached, and
+        preserves the per-provider values that the wide pivot has to collapse.
+        """
+        source = "dev/mlh/polars_metrics_values"
+        lf = scan_delta(cfg, path=source)
+        if lf is None:
+            return jsonify({
+                "error": (
+                    f"Could not read the Delta table at {source} — it is missing, "
+                    "or S3 credentials/permissions are not configured"
+                ),
+                "source": source,
+            }), 503
+
+        # Resolve the newest date first so the row filter is pushed into the
+        # scan, rather than collecting every date and discarding most of them.
+        try:
+            latest_date = lf.select(pl.col("date").max()).collect().item()
+        except Exception:
+            latest_date = None
+
+        if latest_date is None:
+            return jsonify({
+                "error": f"{source} has no rows",
+                "source": source,
+            }), 503
+
+        values = lf.filter(pl.col("date") == latest_date).collect()
+        catalog = _metric_catalog(cfg)
+
+        # Group by metric, keeping every provider's reading for that date.
+        by_metric: dict[int, list[dict]] = {}
+        for row in values.to_dicts():
+            by_metric.setdefault(row["metric_id"], []).append({
+                "provider_id": row.get("provider_id"),
+                "value": row.get("value"),
+            })
+
+        data = []
+        for metric_id in sorted(by_metric):
+            meta = catalog.get(metric_id, {})
+            data.append({
+                "id": metric_id,
+                # An id absent from the catalog still gets an entry rather than
+                # being dropped — a value with no name is a catalog gap worth
+                # seeing, not a row to hide.
+                "name": meta.get("name") or f"metric_{metric_id}",
+                "unit": meta.get("unit"),
+                "description": meta.get("description"),
+                "tab": meta.get("tab"),
+                "values": by_metric[metric_id],
+            })
+
+        return jsonify({
+            "date": str(latest_date),
+            "count": len(data),
+            "source": source,
+            "data": data,
         })
 
     app.register_blueprint(metrics_bp)

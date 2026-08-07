@@ -1,11 +1,22 @@
-flask>=3.0.0
-polars>=1.0.0
-boto3>=1.34.0
-botocore>=1.34.0
-gunicorn>=22.0.0
-numpy>=1.24.0
-websockets>=12.0
-flask-socketio>=5.3
-deltalake>=1.0.0
-pyarrow>=14.0.0
-APScheduler>=3.10.0
+# Upper bounds are pinned to the next major so an unattended rebuild cannot
+# pull a breaking release. Versions verified working are noted per line.
+
+flask>=3.0,<4.0                 # 3.1.3
+gunicorn>=22.0,<27.0            # 26.0.0
+polars>=1.9,<2.0                # 1.43.2
+
+# pl.scan_delta/read_delta shell out to delta-rs; not a transitive dep of polars.
+# The 1.5.x exclusion is inherited from ari-branch2 — reason not yet confirmed,
+# and we have not reproduced it. Harmless to keep: we run 1.6.2.
+deltalake>=1.0,!=1.5.*,<2.0     # 1.6.2
+
+# Polars exports Int128 columns in a layout pyarrow cannot import, so
+# write_delta casts to Decimal first — see s3_service.write_delta.
+pyarrow>=14.0,<26.0             # 25.0.0
+
+boto3>=1.34,<2.0                # 1.43.66
+botocore>=1.34,<2.0             # 1.43.66 — explicit, not just via boto3
+numpy>=1.24,<3.0                # 2.4.6
+websockets>=12.0,<18.0          # 17.0.1
+flask-socketio>=5.3,<6.0        # 5.6.1
+APScheduler>=3.10,<4.0          # 3.11.3 — 4.x reworks the scheduler API
