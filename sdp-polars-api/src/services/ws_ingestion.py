@@ -71,7 +71,7 @@ def _update_holder(account_pubkey: str, mint: str, owner: str, balance: int) -> 
             _HOLDER_ACCUMULATOR.pop(account_pubkey, None)
 
 
-def snapshot_holders(mints_of_interest: set[str] | None = None) -> pl.DataFrame:
+def snapshot_holders(cfg: Config, mints_of_interest: set[str] | None = None) -> pl.DataFrame:
     """Snapshot current holder data from the WebSocket accumulator.
 
     Returns the top 20 holders by balance for each tracked mint.
@@ -98,13 +98,14 @@ def snapshot_holders(mints_of_interest: set[str] | None = None) -> pl.DataFrame:
     print(f"[ws_ingestion] snapshot_holders: {len(owner_balances)} holder entries "
           f"across {len(set(k[0] for k in owner_balances))} mints")
 
-    from src.services.token_discovery import FALLBACK_MINTS
+    from src.services.token_discovery import _get_fallback_mints
 
+    fallback_mints = _get_fallback_mints(cfg)
     now_iso = datetime.now(timezone.utc).isoformat()
     records: list[dict[str, Any]] = []
     for (mint, owner), total_balance in owner_balances.items():
         decimals = 0
-        entry = FALLBACK_MINTS.get(mint)
+        entry = fallback_mints.get(mint)
         if entry:
             decimals = entry[1]
         ui_amount = total_balance / (10 ** decimals) if decimals else float(total_balance)

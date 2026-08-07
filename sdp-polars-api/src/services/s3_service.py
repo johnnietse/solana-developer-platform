@@ -160,6 +160,14 @@ def write_delta(
         # whose column set differs from the existing table.
         kwargs["schema_mode"] = "overwrite"
 
+    # Polars exports Int128 columns (values outside the int64 range) using its
+    # own Arrow format string, which pyarrow's C Data Interface importer does
+    # not recognize ("Invalid or unsupported format string: '_pli128'").
+    # Casting to Decimal first produces a standard decimal128 array instead.
+    int128_cols = [name for name, dtype in df.schema.items() if dtype == pl.Int128]
+    if int128_cols:
+        df = df.with_columns(pl.col(c).cast(pl.Decimal(38, 0)) for c in int128_cols)
+
     write_deltalake(
         delta_uri,
         df.to_arrow(),

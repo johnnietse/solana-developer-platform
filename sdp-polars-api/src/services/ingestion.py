@@ -298,11 +298,11 @@ def fetch_holders_snapshot(cfg: Config) -> pl.DataFrame:
         from src.services.ws_ingestion import snapshot_holders
 
         target_mints = {m["mint"] for m in mints}
-        ws_df = snapshot_holders(target_mints)
+        ws_df = snapshot_holders(cfg, target_mints)
         if ws_df.is_empty():
             # No data for our specific mints — return whatever the WS has
             # (real on-chain holder activity for tokens active on this network)
-            ws_df = snapshot_holders(None)
+            ws_df = snapshot_holders(cfg, None)
 
         if not ws_df.is_empty():
             records = ws_df.to_dicts()

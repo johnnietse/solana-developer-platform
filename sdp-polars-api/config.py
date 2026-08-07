@@ -1,7 +1,21 @@
 """Application configuration."""
 
 from dataclasses import dataclass, field
-from os import getenv
+from os import getenv as _raw_getenv
+
+
+def getenv(name: str, default: str | None = None) -> str | None:
+    """``os.getenv`` that treats a blank value as unset.
+
+    A bare ``KEY=`` line in a sourced .env (or an ECS task definition with an
+    empty string) sets the variable to ``""`` rather than leaving it unset, so
+    plain ``os.getenv(name, default)`` hands back ``""`` and the default never
+    applies. That silently blanked string settings — ``s3_bucket=""`` turns
+    every path into ``s3:///dev/mlh/...`` — and made the numeric ones raise
+    ``ValueError: invalid literal for int() with base 10: ''`` at import.
+    """
+    value = _raw_getenv(name)
+    return value if value else default
 
 
 @dataclass(frozen=True)
