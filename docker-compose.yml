@@ -116,5 +116,35 @@ services:
     ports:
       - "${SDP_DOCS_PORT:-3001}:3001"
 
+  sdp-polars-api:
+    build:
+      context: ./sdp-polars-api
+    restart: unless-stopped
+    ports:
+      - "${SDP_POLARS_API_PORT:-8080}:8080"
+    environment:
+      # S3 (Delta tables written by Databricks and read back by Polars)
+      S3_BUCKET: ${S3_BUCKET:-tmp-sdp-data}
+      S3_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+
+      # Solana
+      SOLANA_RPC_URL: ${SOLANA_RPC_URL:-https://api.devnet.solana.com}
+
+      # Databricks bridge (optional)
+      DATABRICKS_HOST: ${DATABRICKS_HOST:-}
+      DATABRICKS_TOKEN: ${DATABRICKS_TOKEN:-}
+      DATABRICKS_WAREHOUSE_ID: ${DATABRICKS_WAREHOUSE_ID:-}
+    # The image defines no HEALTHCHECK, so declare one here; curl is installed
+    # by the Dockerfile. /health never touches S3, so it can't flap on Delta
+    # table availability.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
 volumes:
   sdp-postgres-data:

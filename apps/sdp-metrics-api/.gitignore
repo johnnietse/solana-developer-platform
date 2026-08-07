@@ -1,0 +1,17 @@
+# Local environment / secrets — never commit
+.env
+
+# File-manager duplicates such as ".env copy" carry the same secrets as the
+# original but are not matched by the rules above, so ignore the pattern too.
+* copy
+* copy/
+
+# Python virtualenv
+.venv/
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Test caches
+.pytest_cache/
