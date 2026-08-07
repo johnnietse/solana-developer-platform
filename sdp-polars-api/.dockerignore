@@ -1,7 +1,44 @@
-__pycache__
-*.pyc
+# Virtualenvs — these hold a full platform-specific copy of every dependency
+# that the image already installs from requirements.txt. Copying one in both
+# bloats the image (+571 MB measured) and risks shadowing the installed
+# packages with host-built binaries that do not run on the image's platform.
+.venv/
+venv/
+env/
+
+# Python artifacts
+**/__pycache__/
+**/*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Secrets — never bake credentials into an image layer
 .env
-.git
+.env.*
+!.env.example
+*.pem
+*.key
+credentials
+.aws/
+
+# VCS and tooling
+.git/
 .gitignore
+.dockerignore
+.superpowers/
+.claude/
+
+# Docs and deployment scripts are not needed at runtime
 *.md
-tests/
+docs/
+deploy/
+
+# Local scratch
+test_output/
+*.parquet
+.tmp/
+
+# NOTE: data/ is deliberately NOT excluded — data/metrics-catalog.csv is the
+# offline fallback for the metric catalog when S3 is unreachable.
