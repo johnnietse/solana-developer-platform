@@ -1,0 +1,152 @@
+name: Deploy SDP Polars API to ECS
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - sdp-polars-api/**
+      - .github/workflows/deploy-sdp-polars-api.yml
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        type: choice
+        options:
+          - dev
+          - production
+        default: dev
+        required: true
+      image_tag:
+        description: "Docker image tag"
+        type: string
+        default: "latest"
+        required: false
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-sdp-polars-api-${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'dev' }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy SDP Polars API to ECS (${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'dev' }})
+    runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'dev' }}
+    env:
+      AWS_REGION: us-east-1
+      ECR_REPOSITORY: sdp-polars-api
+      ECS_CLUSTER: sdp-polars-api
+      ECS_SERVICE: sdp-polars-api
+      ECS_TASK_DEFINITION: sdp-polars-api
+      CONTAINER_NAME: polars-api
+      IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || github.sha }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.3
+        with:
+          fetch-depth: 0
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: arn:aws:iam::017605949106:role/github-actions-deploy
+          role-session-name: GitHubActionsDeploy
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push image to Amazon ECR
+        working-directory: ./sdp-polars-api
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+        run: |
+          docker build -t $ECR_REGISTRY/sdp-polars-api:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/sdp-polars-api:$IMAGE_TAG
+          echo "IMAGE_URI=$ECR_REGISTRY/sdp-polars-api:$IMAGE_TAG" >> $GITHUB_ENV
+
+      - name: Update ECS task definition with new image
+        id: task-def
+        run: |
+          cat > task-definition.json <<EOF
+          {
+            "family": "sdp-polars-api",
+            "networkMode": "awsvpc",
+            "requiresCompatibilities": ["FARGATE"],
+            "cpu": "256",
+            "memory": "512",
+            "executionRoleArn": "arn:aws:iam::017605949106:role/ecsTaskExecutionRole",
+            "taskRoleArn": "arn:aws:iam::017605949106:role/sdp-polars-api-task-role",
+            "containerDefinitions": [
+              {
+                "name": "polars-api",
+                "image": "${{ env.IMAGE_URI }}",
+                "essential": true,
+                "portMappings": [
+                  {
+                    "containerPort": 8080,
+                    "protocol": "tcp"
+                  }
+                ],
+                "environment": [
+                  { "name": "S3_BUCKET", "value": "tmp-sdp-data" },
+                  { "name": "S3_REGION", "value": "us-east-1" },
+                  { "name": "SOLANA_RPC_URL", "value": "https://api.devnet.solana.com" },
+                  { "name": "HOST", "value": "0.0.0.0" },
+                  { "name": "PORT", "value": "8080" },
+                  { "name": "DEBUG", "value": "false" }
+                ],
+                "logConfiguration": {
+                  "logDriver": "awslogs",
+                  "options": {
+                    "awslogs-group": "/ecs/sdp-polars-api",
+                    "awslogs-region": "us-east-1",
+                    "awslogs-stream-prefix": "ecs"
+                  }
+                },
+                "healthCheck": {
+                  "command": ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"],
+                  "interval": 30,
+                  "timeout": 5,
+                  "retries": 3,
+                  "startPeriod": 15
+                }
+              }
+            ]
+          }
+          EOF
+          echo "task-definition.json created"
+
+      - name: Register ECS task definition
+        id: register-task
+        run: |
+          TASK_DEFINITION_ARN=$(aws ecs register-task-definition --cli-input-json file://task-definition.json --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "TASK_DEFINITION_ARN=$TASK_DEFINITION_ARN" >> $GITHUB_ENV
+
+      - name: Update ECS service
+        run: |
+          aws ecs update-service \
+            --cluster sdp-polars-api \
+            --service sdp-polars-api \
+            --task-definition ${{ env.TASK_DEFINITION_ARN }} \
+            --force-new-deployment
+
+      - name: Wait for deployment to complete
+        run: |
+          aws ecs wait services-stable \
+            --cluster sdp-polars-api \
+            --services sdp-polars-api
+
+      - name: Verify deployment
+        run: |
+          echo "Deployment completed successfully!"
+          echo "Service: sdp-polars-api"
+          echo "Task Definition: ${{ env.TASK_DEFINITION_ARN }}"
+          echo "Image: ${{ env.IMAGE_URI }}"
