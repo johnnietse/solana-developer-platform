@@ -203,6 +203,36 @@ def _register_metrics_routes(app):
             "metrics": metrics_by_date,
         })
 
+    @metrics_bp.route("/metrics/catalog", methods=["GET"])
+    def get_metrics_catalog():
+        """Return the metric definitions, with no readings attached.
+
+        The catalog answers what a metric IS — its name, unit, description and
+        which dashboard tab it belongs to. /metrics and /metrics/latest answer
+        what it MEASURED. The dashboard needs both: it reads units from here to
+        format values it reads from there, and it groups the page by `tab`.
+
+        This exists as its own route because it keeps working when the values
+        table is empty or stale. _metric_catalog falls back from the S3 Delta
+        table to a vendored CSV to a name-only map, so a reader can still see
+        the 22 definitions and tell "no readings yet" apart from "the service
+        is broken" — which is the whole diagnostic value of the panel.
+        """
+        catalog = _metric_catalog(cfg)
+        entries = sorted(catalog.values(), key=lambda r: r["id"])
+
+        tabs: dict[str, int] = {}
+        for entry in entries:
+            tab = entry.get("tab") or "Uncategorised"
+            tabs[tab] = tabs.get(tab, 0) + 1
+
+        return jsonify({
+            "count": len(entries),
+            "source": "dev/mlh/polars_metrics",
+            "tabs": tabs,
+            "data": entries,
+        })
+
     @metrics_bp.route("/metrics/latest", methods=["GET"])
     def get_metrics_latest():
         """Return the most recent snapshot, one entry per metric.

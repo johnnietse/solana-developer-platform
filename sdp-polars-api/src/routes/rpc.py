@@ -58,9 +58,21 @@ def _register_rpc_routes(app):
 
     @rpc_bp.route("/rpc", methods=["GET"])
     def get_rpc_data():
-        token_address = request.args.get("token_address")
+        # Both spellings, for the same reason /rpc/count below accepts both: a
+        # caller should not have to know which service it reached to name the
+        # token. The deployed service reads `mint` and the dashboard's newer
+        # components send it, so a client written against either one works here
+        # without a rewrite.
+        #
+        # Unlike the deployed service, a missing token is an error rather than a
+        # fallback. That service defaults to USDC and reports mint_defaulted;
+        # this one has no such flag, and answering a question about a token the
+        # caller never named is the worse of the two failures.
+        token_address = request.args.get("token_address") or request.args.get("mint")
         if not token_address:
-            return jsonify({"error": "Missing required query param: token_address"}), 400
+            return jsonify({
+                "error": "Missing required query param: token_address (or mint)"
+            }), 400
 
         limit = request.args.get("limit", default=cfg.default_transfer_limit, type=int)
         limit = min(max(limit, 1), 1000)
