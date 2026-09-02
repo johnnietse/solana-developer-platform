@@ -6,6 +6,38 @@ Flask API that serves Solana overview metrics read from a Delta table in S3, usi
 
 - `GET /metrics` — reads the most recent row of the `analytics_cache` Delta table (see schema below) and returns its `response_json` payload, merged with `holderCount`, `totalSupply`, and `lastUpdated`. Returns `503` if the table can't be read or has no rows.
 - `GET /healthz` — liveness check. Never touches S3.
+- `GET /rpc` — transaction count for one SPL mint over a lookback window, cached as a Delta table on S3 (see below).
+- `POST /insert?table_name=X` — writes a JSON payload to S3 as a Delta table (Databricks-readable). Accepts either a bare array or `{"data": [...]}`; `mode` is `append` (default) or `overwrite`.
+
+### `GET /rpc`
+
+Counts the signatures for one SPL mint over a lookback window.
+
+| param            | default               | notes                                             |
+| ---------------- | --------------------- | ------------------------------------------------- |
+| `mint`           | `config.DEFAULT_MINT` | SPL mint address                                  |
+| `cluster`        | `devnet`              | `devnet` / `mainnet-beta` / `testnet`             |
+| `days`           | `30`                  | 1-365                                             |
+| `refresh`        | off                   | `true` bypasses the cache                         |
+| `include_failed` | off                   | counts failed txs; never cached (see below)       |
+| `rpc`            | cluster default       | overrides the RPC URL — never expose to a browser |
+
+The response body **is** the `dev.mlh.rpc_counts` Delta schema, so `insert_rpc.py`
+appends it verbatim. Changing these keys changes the table:
+
+| column             | type                           |
+| ------------------ | ------------------------------ |
+| `mint`             | str                            |
+| `cluster`          | str                            |
+| `days`             | i64                            |
+| `transactionCount` | i64                            |
+| `since`            | str (`%Y-%m-%dT%H:%M:%S.000Z`) |
+
+Cache state is reported in the `X-Cache: HIT|MISS` response header rather than in
+the body, which keeps the body byte-for-byte the table schema. A cache write that
+fails (no AWS credentials, say) is logged and the request still succeeds — it just
+costs a live RPC read next time. `include_failed` changes the count but is not one
+of the columns, so those calls are answered live and never cached.
 
 ### Delta table schema
 

@@ -140,6 +140,10 @@ const PROCESS_ENV_FALLBACK_KEYS = [
   "DATABRICKS_HOST",
   "DATABRICKS_TOKEN",
   "DATABRICKS_WAREHOUSE_ID",
+  // Without these the analytics queries silently fall back to the
+  // workspace.default default and fail on workspaces organised differently.
+  "DATABRICKS_CATALOG",
+  "DATABRICKS_SCHEMA",
   // Analytics ingestion cron
   "ANALYTICS_ENABLED",
   "ANALYTICS_MINTS",

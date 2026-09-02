@@ -5,8 +5,39 @@
 
 import type { Env } from "@/types/env";
 
+/**
+ * Unity Catalog location of the analytics tables. These defaults match the
+ * original hardcoded `workspace.default`, so an existing deployment keeps
+ * working untouched; a workspace organised differently sets DATABRICKS_CATALOG
+ * / DATABRICKS_SCHEMA instead of having every query patched.
+ */
+export const DEFAULT_ANALYTICS_CATALOG = "workspace";
+export const DEFAULT_ANALYTICS_SCHEMA = "default";
+
+type CatalogEnv = Pick<Env, "DATABRICKS_CATALOG" | "DATABRICKS_SCHEMA">;
+
+export function analyticsCatalog(env: CatalogEnv): string {
+  return env.DATABRICKS_CATALOG || DEFAULT_ANALYTICS_CATALOG;
+}
+
+export function analyticsSchema(env: CatalogEnv): string {
+  return env.DATABRICKS_SCHEMA || DEFAULT_ANALYTICS_SCHEMA;
+}
+
+/** Fully-qualified name for one analytics table, e.g. dev.mlh.analytics_cache. */
+export function analyticsTable(env: CatalogEnv, table: string): string {
+  return `${analyticsCatalog(env)}.${analyticsSchema(env)}.${table}`;
+}
+
 export async function queryDatabricks(
-  env: Pick<Env, "DATABRICKS_HOST" | "DATABRICKS_TOKEN" | "DATABRICKS_WAREHOUSE_ID">,
+  env: Pick<
+    Env,
+    | "DATABRICKS_HOST"
+    | "DATABRICKS_TOKEN"
+    | "DATABRICKS_WAREHOUSE_ID"
+    | "DATABRICKS_CATALOG"
+    | "DATABRICKS_SCHEMA"
+  >,
   sql: string,
   params: unknown[] = [],
   timeout = "10s"
@@ -30,8 +61,8 @@ export async function queryDatabricks(
       },
       body: JSON.stringify({
         warehouse_id: DATABRICKS_WAREHOUSE_ID,
-        catalog: "workspace",
-        schema: "default",
+        catalog: analyticsCatalog(env),
+        schema: analyticsSchema(env),
         // Databricks SQL only supports named parameters (`:name` syntax), not
         // `:1` positional or `?`. Rewrite the caller's `:1`/`:2`/… placeholders
         // to `:p1`/`:p2`/… and bind each by its 1-based index. `::` casts are

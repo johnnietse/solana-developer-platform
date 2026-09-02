@@ -41,6 +41,11 @@ const NAME = process.env.TOKEN_NAME || mintMeta.name || `Token ${MINT.slice(0, 8
 const DATABRICKS_HOST = process.env.DATABRICKS_HOST;
 const DATABRICKS_TOKEN = process.env.DATABRICKS_TOKEN;
 const DATABRICKS_WAREHOUSE_ID = process.env.DATABRICKS_WAREHOUSE_ID;
+// Unity Catalog location of the analytics tables; defaults preserve the
+// original hardcoded workspace.default.
+const DATABRICKS_CATALOG = process.env.DATABRICKS_CATALOG || "workspace";
+const DATABRICKS_SCHEMA = process.env.DATABRICKS_SCHEMA || "default";
+const analyticsTable = (table) => `${DATABRICKS_CATALOG}.${DATABRICKS_SCHEMA}.${table}`;
 
 let id = 1;
 
@@ -86,8 +91,8 @@ async function databricksQuery(sql) {
     },
     body: JSON.stringify({
       warehouse_id: DATABRICKS_WAREHOUSE_ID,
-      catalog: "workspace",
-      schema: "default",
+      catalog: DATABRICKS_CATALOG,
+      schema: DATABRICKS_SCHEMA,
       statement: sql,
       wait_timeout: "30s",
     }),
@@ -152,7 +157,7 @@ async function main() {
   console.log("\n4. Writing to Databricks...");
 
   // 4a. Insert token supply snapshot
-  const supplySql = `INSERT INTO workspace.default.token_supply_snapshots
+  const supplySql = `INSERT INTO ${analyticsTable("token_supply_snapshots")}
     (mint_address, supply, decimals, slot, snapshot_at)
   VALUES ('${MINT}', ${supplyAdjusted}, ${decimals}, ${supplyResult.context?.slot || 0}, '${now}')`;
   await databricksQuery(supplySql);
@@ -166,7 +171,7 @@ async function main() {
       const values = batch.map(h =>
         `('${MINT}', '${h.walletAddress}', ${h.balance}, ${supplyResult.context?.slot || 0}, '${now}')`
       ).join(",\n");
-      const insertSql = `INSERT INTO workspace.default.token_holders
+      const insertSql = `INSERT INTO ${analyticsTable("token_holders")}
         (mint_address, wallet_address, balance, slot, snapshot_at)
         VALUES ${values}`;
       await databricksQuery(insertSql);
@@ -181,7 +186,7 @@ async function main() {
     const labelValues = uniqueHolders.map(w =>
       `('${w}', 'Unknown', 'unknown', 'sdp-analytics', '${now}')`
     ).join(",\n");
-    const labelSql = `INSERT INTO workspace.default.wallet_labels
+    const labelSql = `INSERT INTO ${analyticsTable("wallet_labels")}
       (wallet_address, geography, attribution_category, source, updated_at)
       VALUES ${labelValues}`;
     await databricksQuery(labelSql);
@@ -208,15 +213,18 @@ async function main() {
     }],
     holders: {
       totalHolders,
-      geography: [{ region: "Unknown", percentage: 100, holderCount: totalHolders }],
-      attribution: [{ category: "unknown", percentage: 100, holderCount: totalHolders }],
+      // Left empty on purpose. Geography and attribution are only real once
+      // wallet_labels has been enriched; emitting a synthetic "100% Unknown"
+      // row here made an unmeasured field look like a measurement.
+      geography: [],
+      attribution: [],
     },
     holdersHistory: [],
     supplyHistory: [],
     lastUpdated: now,
   };
 
-  const cacheSql = `INSERT INTO workspace.default.analytics_cache
+  const cacheSql = `INSERT INTO ${analyticsTable("analytics_cache")}
     (response_json, holder_count, total_supply, snapshot_at)
     VALUES ('${JSON.stringify(cachePayload).replace(/'/g, "''")}', ${totalHolders}, ${supplyAdjusted}, '${now}')`;
   await databricksQuery(cacheSql);

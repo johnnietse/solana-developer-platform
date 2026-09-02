@@ -11,10 +11,8 @@ import { StablecoinCards } from "./stablecoin-cards";
 import { BarChartCard } from "./bar-chart-card";
 import { AreaChartCard } from "./area-chart-card";
 import { StackedChartCard } from "./stacked-chart-card";
-import { DonutCard } from "./donut-card";
 import { AnalyticsTable } from "./analytics-table";
 import { InsightBanners } from "./insight-banners";
-import { GeoTooltip, AttrTooltip } from "./chart-tooltips";
 import { ConcentrationMetrics } from "./concentration-metrics";
 import { ReportButton } from "./analytics-report";
 import { relativeTime, downloadCsv, formatCurrency, formatNumber, buildSupplyKeys, buildStackColors } from "./analytics-utils";
@@ -100,40 +98,6 @@ export function AnalyticsWorkspace({
     },
     [stablecoinData?.stablecoins]
   );
-  const onRegionClick = useCallback(
-    (region: string) => {
-      if (!stablecoinData) return;
-      const entry = stablecoinData.holders.geography.find((g) => g.region === region);
-      if (!entry) return;
-      setDrillDown({
-        title: region,
-        subtitle: "Holder region",
-        items: [
-          { label: "Share", value: `${entry.percentage}%` },
-          { label: "Holders", value: formatNumber(entry.holderCount) },
-        ],
-      });
-    },
-    [stablecoinData?.holders.geography]
-  );
-  const onAttrClick = useCallback(
-    (category: string) => {
-      if (!stablecoinData) return;
-      const entry = stablecoinData.holders.attribution.find(
-        (a) => a.category === category.toLowerCase()
-      );
-      if (!entry) return;
-      setDrillDown({
-        title: category,
-        subtitle: "Holder category",
-        items: [
-          { label: "Share", value: `${entry.percentage}%` },
-          { label: "Holders", value: formatNumber(entry.holderCount) },
-        ],
-      });
-    },
-    [stablecoinData?.holders.attribution]
-  );
 
   if (error) {
     return (
@@ -193,28 +157,6 @@ export function AnalyticsWorkspace({
     () => stablecoinData.stablecoins.map((c) => ({ name: c.symbol, value: c.medianBalance })),
     [stablecoinData.stablecoins]
   );
-  const holderRegionData = useMemo(
-    () => stablecoinData.holders.geography.map((g) => ({ name: g.region, value: g.holderCount })),
-    [stablecoinData.holders.geography]
-  );
-  const geoData = useMemo(
-    () =>
-      stablecoinData.holders.geography.map((g) => ({
-        name: g.region,
-        value: g.percentage,
-        holderCount: g.holderCount,
-      })),
-    [stablecoinData.holders.geography]
-  );
-  const attrData = useMemo(
-    () =>
-      stablecoinData.holders.attribution.map((a) => ({
-        name: a.category.charAt(0).toUpperCase() + a.category.slice(1),
-        value: a.percentage,
-        holderCount: a.holderCount,
-      })),
-    [stablecoinData.holders.attribution]
-  );
 
   const periodDays = period === "7d" ? 7 : period === "30d" ? 30 : period === "90d" ? 90 : Infinity;
   const filteredHolderHistory = useMemo(
@@ -243,14 +185,6 @@ export function AnalyticsWorkspace({
       title: "Median Holder Balance",
       chart: <BarChartCard title="Median Holder Balance" description="By stablecoin" data={balanceData} configs={[{ dataKey: "value", label: "Balance", formatter: (v) => `$${(v / 1_000).toFixed(0)}K`, isCurrency: true }]} barSize={52} />,
     },
-    "holder-geography": {
-      title: "Holder Geography",
-      chart: <DonutCard title="Holder Geography" description="Regional distribution" data={geoData} centerLabel={`${Math.max(...geoData.map((g) => g.value), 0).toFixed(0)}%`} centerSublabel="top region" tooltip={<GeoTooltip />} />,
-    },
-    "holder-attribution": {
-      title: "Holder Attribution",
-      chart: <DonutCard title="Holder Attribution" description="By category" data={attrData} centerLabel={`${Math.max(...attrData.map((a) => a.value), 0).toFixed(0)}%`} centerSublabel="top category" tooltip={<AttrTooltip />} />,
-    },
     "holder-growth": {
       title: "Holder Growth",
       chart: <AreaChartCard title="Holder Growth" description={`Total unique holders over the last ${periodDays === Infinity ? "all" : periodDays} days`} data={filteredHolderHistory} color="#2163b6" gradientColor="#2163b6" formatValue={(v) => `${(v / 1_000).toFixed(0)}K`} />,
@@ -259,11 +193,7 @@ export function AnalyticsWorkspace({
       title: "Supply Composition",
       chart: <StackedChartCard title="Supply Composition" description={`Circulating supply over time by stablecoin`} data={filteredSupplyHistory} keys={supplyKeys} colors={stackColors} />,
     },
-    "holders-by-region": {
-      title: "Holders by Region",
-      chart: <BarChartCard title="Holders by Region" description="Absolute holder counts across regions" data={holderRegionData} configs={[{ dataKey: "value", label: "Holders", formatter: (v) => `${(v / 1_000).toFixed(0)}K` }]} barSize={28} layout="vertical" />,
-    },
-  }), [supplyData, balanceData, geoData, attrData, filteredHolderHistory, filteredSupplyHistory, holderRegionData, periodDays]);
+  }), [supplyData, balanceData, filteredHolderHistory, filteredSupplyHistory, periodDays]);
 
   return (
     <div className="flex flex-col gap-6" data-analytics-root>
@@ -401,41 +331,6 @@ export function AnalyticsWorkspace({
             />
           </motion.div>
 
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.2, ease: "easeOut", delay: 0.12 }}
-            className="grid grid-cols-1 gap-6 lg:grid-cols-2"
-          >
-            <DonutCard
-              title="Holder Geography"
-              description="Regional distribution"
-              data={geoData}
-              centerLabel={`${Math.max(...geoData.map((g) => g.value), 0).toFixed(0)}%`}
-              centerSublabel="top region"
-              tooltip={<GeoTooltip />}
-              onItemClick={onRegionClick}
-              headerAction={
-                <Button variant="ghost" size="sm" type="button" onClick={() => setModalChartKey("holder-geography")} className="h-7 w-7 p-0 text-[rgba(28,28,29,0.72)] hover:text-[#1c1c1d]">
-                  <Maximize2Icon className="h-3.5 w-3.5" />
-                </Button>
-              }
-            />
-            <DonutCard
-              title="Holder Attribution"
-              description="By category"
-              data={attrData}
-              centerLabel={`${Math.max(...attrData.map((a) => a.value), 0).toFixed(0)}%`}
-              centerSublabel="top category"
-              tooltip={<AttrTooltip />}
-              onItemClick={onAttrClick}
-              headerAction={
-                <Button variant="ghost" size="sm" type="button" onClick={() => setModalChartKey("holder-attribution")} className="h-7 w-7 p-0 text-[rgba(28,28,29,0.72)] hover:text-[#1c1c1d]">
-                  <Maximize2Icon className="h-3.5 w-3.5" />
-                </Button>
-              }
-            />
-          </motion.div>
 
           {(filteredHolderHistory.length > 0 || filteredSupplyHistory.length > 0) && (
             <motion.div
@@ -476,32 +371,10 @@ export function AnalyticsWorkspace({
             </motion.div>
           )}
 
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.2, ease: "easeOut", delay: 0.2 }}
-          >
-            <BarChartCard
-              title="Holders by Region"
-              description="Absolute holder counts across regions"
-              data={holderRegionData}
-              configs={[{ dataKey: "value", label: "Holders", formatter: (v) => `${(v / 1_000).toFixed(0)}K` }]}
-              barSize={28}
-              layout="vertical"
-              onItemClick={onRegionClick}
-              headerAction={
-                <Button variant="ghost" size="sm" type="button" onClick={() => setModalChartKey("holders-by-region")} className="h-7 w-7 p-0 text-[rgba(28,28,29,0.72)] hover:text-[#1c1c1d]">
-                  <Maximize2Icon className="h-3.5 w-3.5" />
-                </Button>
-              }
-            />
-          </motion.div>
 
           <div data-report="section">
             <AnalyticsTable
               stablecoins={stablecoinData.stablecoins}
-              geography={stablecoinData.holders.geography}
-              attribution={stablecoinData.holders.attribution}
             />
           </div>
 

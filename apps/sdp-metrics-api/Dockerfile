@@ -25,7 +25,9 @@ RUN groupadd --system --gid 1001 metrics \
  && useradd --system --uid 1001 --gid metrics metrics
 
 COPY --from=deps --chown=metrics:metrics /root/.local /home/metrics/.local
-COPY --chown=metrics:metrics app.py ./
+# app.py imports every one of these at module scope; shipping app.py alone
+# makes the container fail on startup rather than at first request.
+COPY --chown=metrics:metrics app.py config.py insert.py metrics.py rpc.py rpc_cache.py ./
 
 
 ENV PATH=/home/metrics/.local/bin:$PATH \

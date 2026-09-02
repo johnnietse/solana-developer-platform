@@ -15,7 +15,7 @@
 
 import { Hono } from "hono";
 import type { Env } from "@/types/env";
-import { queryDatabricks } from "@/lib/databricks-query";
+import { analyticsTable, queryDatabricks } from "@/lib/databricks-query";
 
 const analytics = new Hono<{ Bindings: Env }>();
 
@@ -90,7 +90,7 @@ async function queryHoldersHistory(env: Env, days = 30): Promise<TimeSeriesEntry
   const rows = await queryDatabricks(
     env,
     `SELECT DATE(snapshot_at) as snapshot_date, COUNT(DISTINCT wallet_address) AS holders
-     FROM workspace.default.token_holders
+     FROM ${analyticsTable(env, "token_holders")}
      WHERE snapshot_at >= DATE_SUB(CURRENT_DATE(), INTERVAL ${days} DAY)
      GROUP BY DATE(snapshot_at)
      ORDER BY snapshot_date ASC`
@@ -114,7 +114,7 @@ async function querySupplyHistory(
   const rows = await queryDatabricks(
     env,
     `SELECT DATE(snapshot_at) as snapshot_date, mint_address, SUM(supply) as total_supply
-     FROM workspace.default.token_supply_snapshots
+     FROM ${analyticsTable(env, "token_supply_snapshots")}
      WHERE snapshot_at >= DATE_SUB(CURRENT_DATE(), INTERVAL ${days} DAY)
      GROUP BY DATE(snapshot_at), mint_address
      ORDER BY snapshot_date ASC, mint_address ASC`
@@ -146,13 +146,12 @@ analytics.get("/", async (c) => {
 
   // ── Helper: enrich holders with wallet_labels ─────────────────────────────
   async function enrichGeography(
-    env: Env,
-    totalHolders: number
+    env: Env
   ): Promise<{ geography: GeographyEntry[]; attribution: AttributionEntry[] }> {
     const labelData = await queryDatabricks(
       env,
       `SELECT geography, COUNT(*) AS cnt
-       FROM workspace.default.wallet_labels
+       FROM ${analyticsTable(env, "wallet_labels")}
        WHERE geography IS NOT NULL AND geography != 'Unknown'
        GROUP BY geography
        ORDER BY cnt DESC`
@@ -168,7 +167,7 @@ analytics.get("/", async (c) => {
       const attribution = await queryDatabricks(
         env,
         `SELECT attribution_category, COUNT(*) AS cnt
-         FROM workspace.default.wallet_labels
+         FROM ${analyticsTable(env, "wallet_labels")}
          WHERE attribution_category IS NOT NULL AND attribution_category != 'unknown'
          GROUP BY attribution_category
          ORDER BY cnt DESC`
@@ -179,14 +178,13 @@ analytics.get("/", async (c) => {
             percentage: totalLabeled > 0 ? Math.round((Number.parseInt(count, 10) / totalLabeled) * 100) : 0,
             holderCount: Number.parseInt(count, 10),
           }))
-        : [{ category: "unknown", percentage: 100, holderCount: totalHolders }];
+        : [];
       return { geography, attribution: attrEntries };
     }
 
-    return {
-      geography: [{ region: "Unknown", percentage: 100, holderCount: totalHolders }],
-      attribution: [{ category: "unknown", percentage: 100, holderCount: totalHolders }],
-    };
+    // No labelled wallets yet: report nothing rather than a synthetic
+    // "100% Unknown", which is indistinguishable from a real result.
+    return { geography: [], attribution: [] };
   }
 
   // ── Check Databricks credentials ──────────────────────────────────────────
@@ -201,7 +199,7 @@ analytics.get("/", async (c) => {
   // ── Read latest analytics_cache row ───────────────────────────────────────
   const cacheData = await queryDatabricks(
     c.env,
-    "SELECT response_json, snapshot_at FROM workspace.default.analytics_cache ORDER BY id DESC LIMIT 1"
+    `SELECT response_json, snapshot_at FROM ${analyticsTable(c.env, "analytics_cache")} ORDER BY id DESC LIMIT 1`
   );
   if (!cacheData || cacheData.length === 0) {
     return c.json(
@@ -215,7 +213,7 @@ analytics.get("/", async (c) => {
   parsed.lastUpdated = snapshotAt;
 
   // Enrich with wallet_labels if available
-  const enriched = await enrichGeography(c.env, parsed.holders.totalHolders);
+  const enriched = await enrichGeography(c.env);
   parsed.holders.geography = enriched.geography;
   parsed.holders.attribution = enriched.attribution;
 
