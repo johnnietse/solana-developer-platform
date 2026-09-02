@@ -1,3 +1,38 @@
+> **Note (July 24, 2026):** This is the current state of the repo before any changes from this morning's (July 24) meeting with Waddah. External Tables on Databricks still need to be created via SQL Editor (`CREATE TABLE ... USING delta LOCATION ...`).
+
+---
+
+# SDP Polars API — Fellowship Contributions
+
+## What I've Built
+
+A Solana data ingestion pipeline using **Polars + Flask + Delta Lake**:
+
+| Component | What it does |
+|-----------|-------------|
+| `GET /ingest/all` | Fetches Solana devnet data every 15 min (stablecoins, network, holders, whales, validators, events) |
+| `GET /stablecoins?days=N` | Stablecoin supply history (USDC, PYUSD on devnet) |
+| `GET /stablecoins/median` | Median supply per token (Polars) |
+| `GET /network?days=N` | Solana network metrics (TPS, SOL supply, epoch) |
+| `GET /holders/<mint>` | Top token holders |
+| `GET /rpc?token_address=X` | Token transfers from RPC, cached as Delta on S3 |
+| `POST /insert?table_name=X` | Write custom data to S3 as Delta (Databricks-readable) |
+
+**Data flows:** `Solana RPC → Polars API → S3 Delta Lake → Databricks External Tables`
+
+**Repo:** [github.com/johnnietse/solana-developer-platform](https://github.com/johnnietse/solana-developer-platform)
+
+## Waddah's Task Spec
+
+From Jul 17:
+> `select * from delta.'s3://tmp-sdp-data/dev/mlh/sdp_data'`
+>
+> Implement `/insert` to S3. Must be readable on Databricks.
+> Implement `/rpc` endpoint (start with just RPC response).
+> Implement `/metrics` through Polars.
+
+---
+
 # Solana Developer Platform
 
 Solana Developer Platform (SDP) is an enterprise development platform for building Solana applications with wallets, token issuance, payments, compliance checks, and a hosted dashboard.
