@@ -64,6 +64,8 @@ services:
       # App secrets
       API_KEY_PEPPER: ${API_KEY_PEPPER:-}
       CUSTODY_ENCRYPTION_KEY: ${CUSTODY_ENCRYPTION_KEY:-}
+      # Enables the "local" custody provider (base58 64-byte Solana keypair).
+      CUSTODY_PRIVATE_KEY: ${CUSTODY_PRIVATE_KEY:-}
 
       # Solana
       SOLANA_NETWORK: ${SOLANA_NETWORK:-devnet}
@@ -74,6 +76,16 @@ services:
       FEE_PAYER_PRIVATE_KEY: ${FEE_PAYER_PRIVATE_KEY:-}
       FEE_PAYMENT_PROVIDER: ${FEE_PAYMENT_PROVIDER:-native}
 
+      # Databricks — backs GET /v1/data-products/analytics. All three must be
+      # set or the route answers 503 "Databricks credentials not configured".
+      DATABRICKS_HOST: ${DATABRICKS_HOST:-}
+      DATABRICKS_TOKEN: ${DATABRICKS_TOKEN:-}
+      DATABRICKS_WAREHOUSE_ID: ${DATABRICKS_WAREHOUSE_ID:-}
+      DATABRICKS_CATALOG: ${DATABRICKS_CATALOG:-workspace}
+      DATABRICKS_SCHEMA: ${DATABRICKS_SCHEMA:-default}
+      ANALYTICS_ENABLED: ${ANALYTICS_ENABLED:-false}
+      ANALYTICS_MINTS: ${ANALYTICS_MINTS:-}
+
       # Observability (optional)
       SENTRY_DSN: ${SENTRY_DSN:-}
     depends_on:
@@ -83,6 +95,24 @@ services:
         condition: service_healthy
       sdp-migrate:
         condition: service_completed_successfully
+
+  sdp-metrics-api:
+    build:
+      context: ./apps/sdp-metrics-api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${SDP_METRICS_API_PORT:-8080}:8080"
+    environment:
+      # Falls back to the default AWS chain when these are unset; the Delta
+      # cache then misses on every call and /rpc still answers from live RPC.
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      SOLANA_RPC_URL: ${SOLANA_RPC_URL:-https://api.devnet.solana.com}
+      S3_INSERT_BUCKET: ${S3_INSERT_BUCKET:-tmp-sdp-data}
+      RPC_TABLE_NAME: ${RPC_TABLE_NAME:-dev.mlh.rpc_counts}
+      RPC_CACHE_TTL_SECONDS: ${RPC_CACHE_TTL_SECONDS:-3600}
 
   sdp-web:
     build:
@@ -98,11 +128,14 @@ services:
       - "${SDP_WEB_PORT:-3000}:3000"
     environment:
       SDP_API_BASE_URL: http://sdp-api:8787
+      METRICS_API_BASE_URL: http://sdp-metrics-api:8080
       CLERK_SECRET_KEY: ${CLERK_SECRET_KEY}
       CLERK_JWT_TEMPLATE: ${CLERK_JWT_TEMPLATE:-sdp-api}
     depends_on:
       sdp-api:
         condition: service_healthy
+      sdp-metrics-api:
+        condition: service_started
 
   sdp-docs:
     build:

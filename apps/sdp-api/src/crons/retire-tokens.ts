@@ -10,7 +10,7 @@
 
 import type { Env } from "@/types/env";
 import { getDb } from "@/db";
-import { queryDatabricks } from "@/lib/databricks-query";
+import { analyticsTable, queryDatabricks } from "@/lib/databricks-query";
 import { resolveAnalyticsMints } from "@/lib/token-registry";
 
 interface RetirementResult {
@@ -47,7 +47,7 @@ async function getTokenStatuses(env: Env): Promise<TokenStatus[]> {
             holder_count,
             total_supply,
             snapshot_at
-         FROM workspace.default.token_holders_latest
+         FROM ${analyticsTable(env, "token_holders_latest")}
          WHERE mint_address IN (${placeholders})`,
         mints
     );
@@ -55,7 +55,7 @@ async function getTokenStatuses(env: Env): Promise<TokenStatus[]> {
     // Get supply 1 hour ago (for rug detection)
     const supply1h = await queryDatabricks(env,
         `SELECT mint_address, SUM(supply) as supply_1h_ago
-         FROM workspace.default.token_supply_snapshots
+         FROM ${analyticsTable(env, "token_supply_snapshots")}
          WHERE mint_address IN (${placeholders})
            AND snapshot_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)
            AND snapshot_at < DATE_SUB(NOW(), INTERVAL 5 MINUTE)
@@ -66,7 +66,7 @@ async function getTokenStatuses(env: Env): Promise<TokenStatus[]> {
     // Get supply 24h ago (for trend analysis)
     const supply24h = await queryDatabricks(env,
         `SELECT mint_address, SUM(supply) as supply_24h_ago
-         FROM workspace.default.token_supply_snapshots
+         FROM ${analyticsTable(env, "token_supply_snapshots")}
          WHERE mint_address IN (${placeholders})
            AND snapshot_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
            AND snapshot_at < DATE_SUB(NOW(), INTERVAL 1 HOUR)
@@ -77,7 +77,7 @@ async function getTokenStatuses(env: Env): Promise<TokenStatus[]> {
     // Get last ingestion time from analytics_cache
     const lastIngested = await queryDatabricks(env,
         `SELECT mint_address, MAX(snapshot_at) as last_ingested_at
-         FROM workspace.default.analytics_cache
+         FROM ${analyticsTable(env, "analytics_cache")}
          WHERE mint_address IN (${placeholders})
          GROUP BY mint_address`,
         mints

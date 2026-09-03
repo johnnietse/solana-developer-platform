@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import { CoinsIcon } from "lucide-react";
 import { formatCurrency, formatNumber } from "./analytics-utils";
@@ -12,10 +13,122 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { UserAnalyticsResponse } from "./analytics-types";
+import type {
+  TokenActivity,
+  TokenActivityResponse,
+  UserAnalyticsResponse,
+} from "./analytics-types";
 
 interface MyTokensViewProps {
   data: UserAnalyticsResponse | null;
+}
+
+const ACTIVITY_DAYS = 30;
+
+/**
+ * On-chain activity is fetched from the client rather than in the server page
+ * because a cache miss walks RPC signature pages per mint — slow enough that
+ * blocking the whole Analytics render on it would be worse than an empty cell
+ * that fills in a moment later.
+ */
+function useTokenActivity(enabled: boolean) {
+  const [activity, setActivity] = useState<Map<string, TokenActivity> | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
+    const controller = new AbortController();
+
+    fetch(`/api/dashboard/analytics/rpc?days=${ACTIVITY_DAYS}`, {
+      signal: controller.signal,
+    })
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
+      .then((body: { data: TokenActivityResponse }) => {
+        setActivity(new Map(body.data.activity.map((entry) => [entry.mint, entry])));
+      })
+      .catch((error: unknown) => {
+        if (error instanceof Error && error.name === "AbortError") {
+          return;
+        }
+        setFailed(true);
+      });
+
+    return () => controller.abort();
+  }, [enabled]);
+
+  return { activity, failed };
+}
+
+/** Formats the `since` cutoff (ISO-8601 from /rpc) as a short local date. */
+function formatSince(since: string): string {
+  const parsed = new Date(since);
+  return Number.isNaN(parsed.getTime())
+    ? since
+    : parsed.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+function ActivityCell({
+  mint,
+  activity,
+  failed,
+  field,
+}: {
+  mint: string | null;
+  activity: Map<string, TokenActivity> | null;
+  failed: boolean;
+  field: "cluster" | "days" | "transactionCount" | "since";
+}) {
+  // A token with no mint was never deployed, so there is nothing on-chain to
+  // count — that is a real "—", not a pending lookup.
+  if (!mint) {
+    return <span className="text-[rgba(28,28,29,0.4)]">—</span>;
+  }
+
+  if (failed) {
+    return <span className="text-[rgba(28,28,29,0.4)]">—</span>;
+  }
+
+  if (!activity) {
+    return <span className="inline-block h-4 w-12 animate-pulse rounded bg-[rgba(28,28,29,0.08)]" />;
+  }
+
+  const entry = activity.get(mint);
+  const value = entry?.[field] ?? null;
+
+  if (!entry || value === null) {
+    return (
+      <span className="text-[rgba(28,28,29,0.4)]" title={entry?.error ?? "No data"}>
+        —
+      </span>
+    );
+  }
+
+  const title = entry.cached ? "From cache" : "Live from RPC";
+
+  if (field === "transactionCount") {
+    return (
+      <span className="text-[#1c1c1d]" title={title}>
+        {formatNumber(value as number)}
+      </span>
+    );
+  }
+
+  if (field === "since") {
+    return (
+      <span className="text-[rgba(28,28,29,0.72)]" title={value as string}>
+        {formatSince(value as string)}
+      </span>
+    );
+  }
+
+  return (
+    <span className="text-[rgba(28,28,29,0.72)]" title={title}>
+      {String(value)}
+    </span>
+  );
 }
 
 function SummaryCard({
@@ -52,6 +165,10 @@ function LoadingSkeleton() {
 }
 
 export function MyTokensView({ data }: MyTokensViewProps) {
+  // Must run before the early returns below — a hook cannot sit behind a
+  // conditional, and `data` arrives null on the first render.
+  const { activity, failed } = useTokenActivity((data?.tokens.length ?? 0) > 0);
+
   if (!data) {
     return <LoadingSkeleton />;
   }
@@ -113,6 +230,10 @@ export function MyTokensView({ data }: MyTokensViewProps) {
                 <TableHead>Status</TableHead>
                 <TableHead>Supply</TableHead>
                 <TableHead>Holders</TableHead>
+                <TableHead>Cluster</TableHead>
+                <TableHead>Window (days)</TableHead>
+                <TableHead>Transactions</TableHead>
+                <TableHead>Since</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -146,6 +267,16 @@ export function MyTokensView({ data }: MyTokensViewProps) {
                   <TableCell className="text-[#1c1c1d]">
                     {formatNumber(token.holderCount)}
                   </TableCell>
+                  {(["cluster", "days", "transactionCount", "since"] as const).map((field) => (
+                    <TableCell key={field}>
+                      <ActivityCell
+                        mint={token.mintAddress}
+                        activity={activity}
+                        failed={failed}
+                        field={field}
+                      />
+                    </TableCell>
+                  ))}
                 </TableRow>
               ))}
             </TableBody>
