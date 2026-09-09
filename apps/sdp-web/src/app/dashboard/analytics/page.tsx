@@ -2,7 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { AnalyticsWorkspace } from "./analytics-workspace";
-import type { AnalyticsResponse, UserAnalyticsResponse, ResponseMeta } from "./analytics-types";
+import type { UserAnalyticsResponse } from "./analytics-types";
 
 export const dynamic = "force-dynamic";
 
@@ -17,12 +17,12 @@ export default async function AnalyticsPage() {
     process.env.NEXT_PUBLIC_SDP_API_BASE_URL ||
     process.env.NEXT_PUBLIC_API_BASE_URL;
 
-  let stablecoinData: AnalyticsResponse | null = null;
   let userTokenData: UserAnalyticsResponse | null = null;
   let error: string | null = null;
-  let lastUpdated: string | null = null;
 
-  if (apiBaseUrl) {
+  if (!apiBaseUrl) {
+    error = "Analytics API not configured. Set SDP_API_BASE_URL environment variable.";
+  } else {
     const baseUrl = apiBaseUrl.replace(/\/$/, "");
 
     // Mint a Clerk JWT (sdp-api template carries the org_id claim the API
@@ -35,47 +35,26 @@ export default async function AnalyticsPage() {
       authHeaders.Authorization = `Bearer ${clerkToken}`;
     }
 
-    const [stablecoinRes, userTokenRes] = await Promise.all([
-      fetch(`${baseUrl}/v1/data-products/analytics`, {
+    // An unreachable API rejects rather than returning a response, so this has
+    // to catch: without it the throw escapes to the global error boundary and
+    // the whole route 500s instead of rendering the message below.
+    try {
+      const res = await fetch(`${baseUrl}/v1/data-products/user-analytics`, {
         cache: "no-store",
         headers: authHeaders,
-      }),
-      fetch(`${baseUrl}/v1/data-products/user-analytics`, {
-        cache: "no-store",
-        headers: authHeaders,
-      }),
-    ]);
+      });
 
-    if (stablecoinRes.ok) {
-      const body = (await stablecoinRes.json()) as { data: AnalyticsResponse; meta: ResponseMeta };
-      stablecoinData = body.data;
-      lastUpdated = stablecoinData.lastUpdated;
-    } else {
-      const body = await stablecoinRes.json().catch(() => ({}));
-      error = (body as any)?.meta?.error ?? `Analytics returned ${stablecoinRes.status}`;
-    }
-
-    if (userTokenRes.ok) {
-      const body = (await userTokenRes.json()) as { data: UserAnalyticsResponse };
-      userTokenData = body.data;
-      const tokenUpdated = userTokenData.lastUpdated;
-      if (!lastUpdated || tokenUpdated > lastUpdated) {
-        lastUpdated = tokenUpdated;
+      if (res.ok) {
+        const body = (await res.json()) as { data: UserAnalyticsResponse };
+        userTokenData = body.data;
+      } else {
+        error = `User analytics returned ${res.status}`;
       }
-    } else {
-      const tokenError = `User analytics returned ${userTokenRes.status}`;
-      error = error ? `${error}; ${tokenError}` : tokenError;
+    } catch (cause) {
+      console.error("User analytics fetch failed:", cause);
+      error = "Analytics API is unreachable.";
     }
-  } else {
-    error = "Analytics API not configured. Set SDP_API_BASE_URL environment variable.";
   }
 
-  return (
-    <AnalyticsWorkspace
-      stablecoinData={stablecoinData}
-      userTokenData={userTokenData}
-      error={error}
-      lastUpdated={lastUpdated}
-    />
-  );
+  return <AnalyticsWorkspace userTokenData={userTokenData} error={error} />;
 }

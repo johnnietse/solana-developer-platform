@@ -18,7 +18,12 @@ from config import (
     STORAGE_OPTIONS,
 )
 from insert import insert_delta
-from rpc import Options, count_recent_transactions, format_timestamp
+from rpc import (
+    Options,
+    count_recent_transactions,
+    daily_transaction_counts,
+    format_timestamp,
+)
 from rpc_cache import read_cached
 
 app = Flask(__name__)
@@ -123,6 +128,32 @@ def get_rpc():
             app.logger.warning("rpc cache write to %s failed: %s", RPC_TABLE_NAME, exc)
 
     return jsonify(record), 200, {"X-Cache": "MISS"}
+
+
+@app.get("/rpc/series")
+def get_rpc_series():
+    """Per-day transaction counts for one mint, for plotting.
+
+    Deliberately separate from /rpc: that endpoint's body IS the rpc_counts
+    Delta schema and must not grow fields. This one is a read-only view for the
+    dashboard and is not cached to Delta — its shape is not a table.
+    """
+    options, error = _parse_rpc_args(request.args)
+    if error:
+        return jsonify(error=error), 400
+
+    try:
+        buckets, _pages, cutoff = daily_transaction_counts(options)
+    except RuntimeError as exc:
+        return jsonify(error=str(exc)), 502
+
+    return jsonify(
+        mint=options.mint,
+        cluster=options.cluster,
+        days=options.days,
+        since=format_timestamp(cutoff),
+        series=buckets,
+    )
 
 
 @app.post("/insert")

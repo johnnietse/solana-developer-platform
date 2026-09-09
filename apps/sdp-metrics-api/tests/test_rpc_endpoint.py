@@ -109,3 +109,67 @@ def test_bad_input_is_rejected_before_any_rpc(client, monkeypatch, query):
 
     monkeypatch.setattr(app_module, "count_recent_transactions", explode)
     assert client.get(f"/rpc?{query}").status_code == 400
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /rpc/series — the chart's data source. Not a Delta table, so it is free to
+# carry fields /rpc cannot; it must still agree with /rpc on the total.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def offline_series(monkeypatch):
+    """Three transactions across two days inside a 3-day window."""
+    import time as _time
+
+    now = int(_time.time())
+    day = 24 * 60 * 60
+    buckets = [
+        {"date": "2026-09-01", "transactionCount": 2},
+        {"date": "2026-09-02", "transactionCount": 0},
+        {"date": "2026-09-03", "transactionCount": 1},
+    ]
+    monkeypatch.setattr(
+        app_module, "daily_transaction_counts", lambda options: (buckets, 1, now - 3 * day)
+    )
+
+
+def test_series_returns_a_continuous_bucket_list(client, offline_series):
+    body = client.get("/rpc/series?days=3").get_json()
+    assert [b["date"] for b in body["series"]] == ["2026-09-01", "2026-09-02", "2026-09-03"]
+    assert [b["transactionCount"] for b in body["series"]] == [2, 0, 1]
+
+
+def test_series_echoes_the_query_and_window(client, offline_series):
+    body = client.get("/rpc/series?days=3&cluster=testnet&mint=SoMeMint111").get_json()
+    assert body["mint"] == "SoMeMint111"
+    assert body["cluster"] == "testnet"
+    assert body["days"] == 3
+    assert body["since"].endswith("Z")
+
+
+def test_series_is_not_written_to_the_delta_cache(client, offline_series, monkeypatch):
+    """Its shape is not the rpc_counts schema, so it must never be appended."""
+    writes = []
+    monkeypatch.setattr(
+        app_module, "insert_delta", lambda *a, **k: writes.append(a) or ("s3://t", 1)
+    )
+    client.get("/rpc/series?days=3")
+    assert writes == []
+
+
+def test_series_upstream_failure_is_502(client, monkeypatch):
+    def boom(options):
+        raise RuntimeError("RPC HTTP 429")
+
+    monkeypatch.setattr(app_module, "daily_transaction_counts", boom)
+    assert client.get("/rpc/series?days=3").status_code == 502
+
+
+@pytest.mark.parametrize("query", ["cluster=bogus", "days=abc", "days=0", "days=366"])
+def test_series_rejects_bad_input_before_any_rpc(client, monkeypatch, query):
+    def explode(options):
+        raise AssertionError("invalid input must not reach the RPC")
+
+    monkeypatch.setattr(app_module, "daily_transaction_counts", explode)
+    assert client.get(f"/rpc/series?{query}").status_code == 400
