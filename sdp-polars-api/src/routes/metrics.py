@@ -25,16 +25,31 @@ if TYPE_CHECKING:
 
 metrics_bp = Blueprint("metrics", __name__)
 
-# Metric ID → human-readable name mapping (from dev.mlh.metrics lookup table)
+# Metric ID → human-readable name mapping, mirroring the dev.mlh.metrics lookup
+# table verbatim. Ids 14/25/28/29 were previously mislabelled, which surfaced
+# values under the wrong name (e.g. the validator count rendered as "SOL Price").
 METRIC_NAMES: dict[int, str] = {
-    14: "DEX Transactions",
+    1: "Supply",
+    2: "Transfer Volume",
+    3: "Transfer Count",
+    4: "Active Addresses",
+    14: "Slots",
+    15: "Fee Payers",
+    16: "SOL Price",
     17: "Compute Units",
+    18: "Fees",
+    19: "Transaction Count (Total)",
+    20: "Non Vote Transaction Count (Success)",
+    21: "Non Vote Transaction Count (Failed)",
     22: "Transaction Count (Vote)",
     23: "DEX Volume",
-    25: "Validator Count",
+    24: "DEX Traders",
+    25: "DEX Transactions",
+    26: "DEX Count",
     27: "Total Stake",
-    28: "Slots",
-    29: "SOL Price (Network)",
+    28: "SOL Price (Network)",
+    29: "Validator Count",
+    30: "Top 3 ASN Share",
     31: "Stablecoin Count",
 }
 
@@ -73,7 +88,9 @@ def _register_metrics_routes(app):
 
         # Group by date → { date: { metric_name: value, ... } }
         metrics_by_date: list[dict] = []
-        for date_group in df.partition_by("date", as_dict=True):
+        # partition_by(as_dict=True) returns dict[key_tuple, DataFrame]; iterating
+        # the dict directly yields the key tuples, so take .values() to get frames.
+        for date_group in df.partition_by("date", as_dict=True).values():
             date_val = str(date_group["date"][0])
             row: dict = {"date": date_val}
             for r in date_group.to_dicts():
