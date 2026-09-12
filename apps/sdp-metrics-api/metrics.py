@@ -1,3 +1,15 @@
+"""Superseded. Kept for reference, not imported by anything here.
+
+`latest_metrics` below is a copy of the catalog join that `sdp-polars-api`
+actually ships and serves, at sdp-polars-api/src/routes/metrics.py. This
+service registers no route that calls it, and nothing else in the repository
+imports this module.
+
+Do not edit this to fix a `/metrics` bug - you would be editing the copy that
+is not running. Change sdp-polars-api instead. This file is left in place only
+so the duplication is visible rather than silently rediscovered.
+"""
+
 import polars as pl
 
 from config import DELTA_CREDENTIAL_PROVIDER, STORAGE_OPTIONS

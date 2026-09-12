@@ -38,5 +38,5 @@ check() {
 }
 
 check "/healthz"
-check "/metrics"
+check "/rpc/series?days=1"
 check "/rpc?days=1"
