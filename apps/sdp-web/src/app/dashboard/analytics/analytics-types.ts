@@ -105,7 +105,25 @@ export interface TokenActivityResponse {
   lastUpdated: string;
 }
 
-export type ViewMode = "stablecoins" | "databricks" | "my-tokens";
+/** One day's transaction count, from GET /api/dashboard/analytics/rpc/series. */
+export interface TokenActivityPoint {
+  date: string;
+  transactionCount: number;
+}
+
+/** One token's daily series. `error` is set when that mint alone failed. */
+export interface TokenSeries {
+  mint: string;
+  series: TokenActivityPoint[];
+  since: string | null;
+  error?: string;
+}
+
+export interface TokenActivitySeriesResponse {
+  cluster: string;
+  days: number;
+  tokens: TokenSeries[];
+}
 
 export interface FreshnessInfo {
   cacheAgeSeconds: number;

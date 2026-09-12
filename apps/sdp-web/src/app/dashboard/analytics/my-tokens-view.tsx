@@ -13,9 +13,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { AreaChartCard } from "./area-chart-card";
+import { Select, SelectItem } from "@/components/ui/select";
 import type {
   TokenActivity,
   TokenActivityResponse,
+  TokenActivitySeriesResponse,
+  TokenSeries,
   UserAnalyticsResponse,
 } from "./analytics-types";
 
@@ -164,6 +168,151 @@ function LoadingSkeleton() {
   );
 }
 
+/** Window options for the transactions charts, in days. */
+const CHART_WINDOWS = [
+  { value: "7", label: "Last 7 days" },
+  { value: "30", label: "Last 30 days" },
+  { value: "90", label: "Last 90 days" },
+] as const;
+
+/**
+ * Daily transaction counts for every issued mint, in one request. Refetches
+ * when the window changes, so the grid tracks the control rather than a
+ * snapshot taken at mount.
+ */
+function useTransactionSeries(days: number, enabled: boolean) {
+  const [tokens, setTokens] = useState<TokenSeries[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!enabled) {
+      setTokens([]);
+      return;
+    }
+
+    const controller = new AbortController();
+    setTokens(null);
+    setError(null);
+
+    fetch(`/api/dashboard/analytics/rpc/series?days=${days}`, {
+      signal: controller.signal,
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => null);
+          throw new Error(body?.error?.message ?? `Request failed (${res.status})`);
+        }
+        return res.json();
+      })
+      .then((body: { data: TokenActivitySeriesResponse }) => setTokens(body.data.tokens ?? []))
+      .catch((cause: unknown) => {
+        if (cause instanceof Error && cause.name === "AbortError") {
+          return;
+        }
+        setError(cause instanceof Error ? cause.message : "Unable to load activity");
+      });
+
+    return () => controller.abort();
+  }, [days, enabled]);
+
+  return { tokens, error };
+}
+
+function TokenChartCard({
+  token,
+  entry,
+  days,
+  error,
+}: {
+  token: UserAnalyticsResponse["tokens"][number];
+  entry: TokenSeries | undefined;
+  days: number;
+  error: string | null;
+}) {
+  const points = (entry?.series ?? []).map((point) => ({
+    date: point.date,
+    value: point.transactionCount,
+  }));
+  const total = points.reduce((sum, point) => sum + point.value, 0);
+
+  // Whole-request failure, this token's own failure, still loading, then data.
+  const description = error
+    ? error
+    : entry?.error
+      ? `Activity unavailable (${entry.error})`
+      : entry === undefined
+        ? "Loading on-chain activity…"
+        : `${formatNumber(total)} transaction${total === 1 ? "" : "s"} over the last ${days} days`;
+
+  return (
+    <AreaChartCard
+      title={token.symbol || token.name}
+      description={description}
+      data={points}
+      color="#2163b6"
+      gradientColor="#2163b6"
+      formatValue={(v) => `${formatNumber(v)} tx`}
+    />
+  );
+}
+
+function TransactionsGrid({ tokens }: { tokens: UserAnalyticsResponse["tokens"] }) {
+  // Only deployed tokens have a mint to chart.
+  const charted = tokens.filter((token) => !!token.mintAddress);
+  const [window, setWindow] = useState("30");
+  const days = Number(window);
+  const { tokens: series, error } = useTransactionSeries(days, charted.length > 0);
+
+  if (charted.length === 0) {
+    return null;
+  }
+
+  const byMint = new Map((series ?? []).map((entry) => [entry.mint, entry]));
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2, ease: "easeOut", delay: 0.04 }}
+      className="flex flex-col gap-3"
+    >
+      {/* Filters sit in one row above the charts. */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[19px] leading-6 font-medium text-[#1c1c1d]">Transactions</p>
+          <p className="mt-0.5 text-sm text-[rgba(28,28,29,0.56)]">
+            Daily on-chain activity per issued token
+          </p>
+        </div>
+        <Select
+          value={window}
+          onValueChange={(value) => {
+            if (value) setWindow(value);
+          }}
+        >
+          {CHART_WINDOWS.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </Select>
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+        {charted.map((token) => (
+          <TokenChartCard
+            key={token.tokenId}
+            token={token}
+            entry={series === null ? undefined : byMint.get(token.mintAddress as string)}
+            days={days}
+            error={error}
+          />
+        ))}
+      </div>
+    </motion.div>
+  );
+}
+
 export function MyTokensView({ data }: MyTokensViewProps) {
   // Must run before the early returns below — a hook cannot sit behind a
   // conditional, and `data` arrives null on the first render.
@@ -207,6 +356,8 @@ export function MyTokensView({ data }: MyTokensViewProps) {
           value={`${summary.deployedTokens} / ${summary.pendingTokens}`}
         />
       </motion.div>
+
+      <TransactionsGrid tokens={tokens} />
 
       <motion.div
         initial={{ opacity: 0, y: 10 }}
