@@ -5,7 +5,7 @@ from app import app
 
 ENDPOINTS = (
     "/healthz",
-    "/metrics",
+    "/rpc/series?days=1",
     "/rpc?days=1",
 )
 

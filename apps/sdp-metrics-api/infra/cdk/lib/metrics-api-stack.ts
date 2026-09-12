@@ -87,8 +87,12 @@ export class MetricsApiStack extends cdk.Stack {
       }),
     );
 
+    // /healthz, not /metrics. This service has no /metrics route - see the
+    // README - so publishing that path as the stack's URL handed every reader
+    // an address that 404s. /healthz is the one route guaranteed to answer
+    // without reaching S3, which is what an output like this should point at.
     new cdk.CfnOutput(this, "MetricsApiUrl", {
-      value: `http://${service.loadBalancer.loadBalancerDnsName}/metrics`,
+      value: `http://${service.loadBalancer.loadBalancerDnsName}/healthz`,
     });
 
     new cdk.CfnOutput(this, "DeltaTablePath", { value: deltaTablePath });

@@ -1,13 +1,29 @@
 # sdp-metrics-api
 
-Flask API that serves Solana overview metrics read from a Delta table in S3, using Polars as the data framework.
+Flask API serving Solana RPC counts and transfer data, backed by Delta tables in S3, using Polars as the data framework.
 
 ## Endpoints
 
-- `GET /metrics` — reads the most recent row of the `analytics_cache` Delta table (see schema below) and returns its `response_json` payload, merged with `holderCount`, `totalSupply`, and `lastUpdated`. Returns `503` if the table can't be read or has no rows.
 - `GET /healthz` — liveness check. Never touches S3.
 - `GET /rpc` — transaction count for one SPL mint over a lookback window, cached as a Delta table on S3 (see below).
+- `GET /rpc/series` — per-day counts for the same mint, for plotting. Takes the same query string as `/rpc`. Deliberately a separate route: `/rpc`'s body *is* the `rpc_counts` Delta schema and cannot grow fields, whereas this is a read-only view whose shape is not a table, so it is not cached to Delta.
 - `POST /insert?table_name=X` — writes a JSON payload to S3 as a Delta table (Databricks-readable). Accepts either a bare array or `{"data": [...]}`; `mode` is `append` (default) or `overwrite`.
+
+### There is no `/metrics` here
+
+This service does not serve metrics, despite its name. Two other services do, and
+which one you want depends on the shape:
+
+| you want | ask |
+|----------|-----|
+| the analytics overview — stablecoins, holder counts, supply history | `sdp-api`, `GET /v1/data-products/analytics`, which reads Databricks |
+| the metric catalog — every metric id with its current value per provider | `sdp-polars-api`, `GET /metrics`, which reads `dev/mlh/polars_metrics_values` |
+
+An earlier version of this README documented a `/metrics` route on this service.
+It was never implemented: `app.py` registers `/metric` (singular), which returns
+the raw values table rather than either shape above, and nothing in the repository
+calls it. `metrics.py` in this directory holds a copy of the catalog-join logic
+that `sdp-polars-api` actually ships, and has no callers.
 
 ### `GET /rpc`
 
