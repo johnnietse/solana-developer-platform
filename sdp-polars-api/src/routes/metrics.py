@@ -30,6 +30,12 @@ metrics_bp = Blueprint("metrics", __name__)
 # Fallback metric ID → name map, used only when the catalog table is
 # unreachable. The source of truth is the Delta catalog at
 # dev/mlh/polars_metrics (written by /insert) — see _metric_names().
+#
+# It still mirrors the dev.mlh.metrics lookup table verbatim, because a fallback
+# that disagrees with the catalog is worse than no fallback: ids 14/25/28/29
+# were once mislabelled here and surfaced real values under the wrong name (the
+# validator count rendered as "SOL Price"). Nothing about that is visible to a
+# caller, so keep this map and the catalog in step.
 METRIC_NAMES: dict[int, str] = {
     1: "Supply",
     2: "Transfer Volume",
@@ -219,9 +225,12 @@ def _register_metrics_routes(app):
         df = df.sort(["date", "metric_id"])
 
         # Group by date → { date: { metric_name: value, ... } }
-        # partition_by(as_dict=True) yields {key_tuple: frame}; iterating it
-        # directly walks the key tuples, not the frames.
         metrics_by_date: list[dict] = []
+        # No as_dict here. partition_by(as_dict=True) returns
+        # dict[key_tuple, DataFrame], and iterating that dict yields the key
+        # tuples rather than the frames - the bug this replaced. Asking for
+        # frames directly cannot be got wrong the same way, and maintain_order
+        # keeps the groups in date order.
         for date_group in df.partition_by("date", maintain_order=True):
             date_val = str(date_group["date"][0])
             row: dict = {"date": date_val}

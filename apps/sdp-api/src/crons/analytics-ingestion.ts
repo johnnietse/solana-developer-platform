@@ -11,7 +11,7 @@
  */
 
 import type { Env } from "@/types/env";
-import { queryDatabricks } from "@/lib/databricks-query";
+import { analyticsTable, queryDatabricks } from "@/lib/databricks-query";
 import { rpcCall } from "@/lib/rpc-utils";
 import { resolveAnalyticsMints, getTokenMetadata, updateTokenVerification } from "@/lib/token-registry";
 
@@ -87,7 +87,7 @@ async function ingestMint(env: Env, mint: string): Promise<void> {
 
   // 3. Write supply snapshot
   await queryDatabricks(env,
-    `INSERT INTO workspace.default.token_supply_snapshots
+    `INSERT INTO ${analyticsTable(env, "token_supply_snapshots")}
      (mint_address, supply, decimals, slot, snapshot_at)
      VALUES (:1, :2, :3, :4, :5)`,
     [mint, supplyAdjusted, decimals, slot, now],
@@ -105,7 +105,7 @@ async function ingestMint(env: Env, mint: string): Promise<void> {
         params.push(mint, h.walletAddress, h.balance, slot, now);
       }
       await queryDatabricks(env,
-        `INSERT INTO workspace.default.token_holders
+        `INSERT INTO ${analyticsTable(env, "token_holders")}
          (mint_address, wallet_address, balance, slot, snapshot_at)
          VALUES ${placeholders}`,
         params,
@@ -123,7 +123,7 @@ async function ingestMint(env: Env, mint: string): Promise<void> {
       labelParams.push(w, "Unknown", "unknown", "sdp-analytics", now);
     }
     await queryDatabricks(env,
-      `INSERT INTO workspace.default.wallet_labels
+      `INSERT INTO ${analyticsTable(env, "wallet_labels")}
        (wallet_address, geography, attribution_category, source, updated_at)
        VALUES ${labelPlaceholders}`,
       labelParams,
@@ -151,14 +151,15 @@ async function ingestMint(env: Env, mint: string): Promise<void> {
     }],
     holders: {
       totalHolders,
-      geography: [{ region: "Unknown", percentage: 100, holderCount: totalHolders }],
-      attribution: [{ category: "unknown", percentage: 100, holderCount: totalHolders }],
+      // Empty until wallet_labels is enriched — see ingest-analytics.mjs.
+      geography: [],
+      attribution: [],
     },
     lastUpdated: now,
   };
 
   await queryDatabricks(env,
-    `INSERT INTO workspace.default.analytics_cache
+    `INSERT INTO ${analyticsTable(env, "analytics_cache")}
      (response_json, holder_count, total_supply, snapshot_at)
      VALUES (:1, :2, :3, :4)`,
     [JSON.stringify(cachePayload), totalHolders, supplyAdjusted, now],

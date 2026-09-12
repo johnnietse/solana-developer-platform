@@ -17,7 +17,7 @@
  */
 
 import type { Env } from "@/types/env";
-import { queryDatabricks } from "@/lib/databricks-query";
+import { analyticsTable, queryDatabricks } from "@/lib/databricks-query";
 
 // Verified Solana program IDs → protocol attribution (self-contained, no API).
 // Sourced from official program IDs (Jupiter V6, Orca Whirlpools, Raydium AMM v4,
@@ -75,7 +75,7 @@ async function enrichWallets(env: Env): Promise<{ enriched: number; skipped: num
   // 2. Fetch a bounded batch of still-unlabeled wallets.
   const rows = await queryDatabricks(
     env,
-    `SELECT wallet_address FROM workspace.default.wallet_labels
+    `SELECT wallet_address FROM ${analyticsTable(env, "wallet_labels")}
      WHERE (geography = 'Unknown' OR attribution_category = 'unknown')
      LIMIT ${ENRICHMENT_BATCH_LIMIT}`
   );
@@ -104,7 +104,7 @@ async function applyHeuristics(env: Env): Promise<void> {
   for (const [addr, attr] of Object.entries(PROGRAM_ID_ATTRIBUTION)) {
     await queryDatabricks(
       env,
-      `UPDATE workspace.default.wallet_labels
+      `UPDATE ${analyticsTable(env, "wallet_labels")}
        SET attribution_category = :1,
            source_detail = :2,
            confidence = :3,
@@ -184,7 +184,7 @@ async function writeEnrichment(
 ): Promise<void> {
   await queryDatabricks(
     env,
-    `UPDATE workspace.default.wallet_labels
+    `UPDATE ${analyticsTable(env, "wallet_labels")}
      SET attribution_category = :1,
          geography = :2,
          confidence = :3,

@@ -221,6 +221,11 @@ export interface Env {
   DATABRICKS_HOST?: string;
   DATABRICKS_TOKEN?: string;
   DATABRICKS_WAREHOUSE_ID?: string;
+  // Unity Catalog location of the analytics tables. Defaults to
+  // workspace.default; a workspace organised differently (dev.mlh, say) sets
+  // these rather than needing the table names patched in every query.
+  DATABRICKS_CATALOG?: string;
+  DATABRICKS_SCHEMA?: string;
 
   // Analytics ingestion cron
   ANALYTICS_ENABLED?: string;

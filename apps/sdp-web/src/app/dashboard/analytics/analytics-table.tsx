@@ -15,12 +15,10 @@ import {
 } from "@/components/ui/table";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { formatCurrency, formatNumber } from "./analytics-utils";
-import type { StablecoinEntry, GeographyEntry, AttributionEntry } from "./analytics-types";
+import type { StablecoinEntry } from "./analytics-types";
 
 interface AnalyticsTableProps {
   stablecoins: StablecoinEntry[];
-  geography: GeographyEntry[];
-  attribution: AttributionEntry[];
 }
 
 type SortKey = keyof StablecoinEntry;
@@ -53,7 +51,7 @@ function CardFrame({ title, description, children }: { title: string; descriptio
   );
 }
 
-export function AnalyticsTable({ stablecoins, geography, attribution }: AnalyticsTableProps) {
+export function AnalyticsTable({ stablecoins }: AnalyticsTableProps) {
   const [sortKey, setSortKey] = useState<SortKey>("symbol");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [search, setSearch] = useState("");
@@ -232,51 +230,6 @@ export function AnalyticsTable({ stablecoins, geography, attribution }: Analytic
         </div>
       </CardFrame>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <CardFrame title="Geography Breakdown" description="Holder distribution by region">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Region</TableHead>
-                <TableHead>Percentage</TableHead>
-                <TableHead>Holders</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {geography.map((g) => (
-                <TableRow key={g.region}>
-                  <TableCell className="font-medium text-[#1c1c1d]">{g.region}</TableCell>
-                  <TableCell className="text-[#1c1c1d]">{g.percentage}%</TableCell>
-                  <TableCell className="text-[#1c1c1d]">{formatNumber(g.holderCount)}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardFrame>
-
-        <CardFrame title="Attribution Breakdown" description="Holder distribution by category">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Category</TableHead>
-                <TableHead>Percentage</TableHead>
-                <TableHead>Holders</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {attribution.map((a) => (
-                <TableRow key={a.category}>
-                  <TableCell className="font-medium capitalize text-[#1c1c1d]">
-                    {a.category}
-                  </TableCell>
-                  <TableCell className="text-[#1c1c1d]">{a.percentage}%</TableCell>
-                  <TableCell className="text-[#1c1c1d]">{formatNumber(a.holderCount)}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardFrame>
-      </div>
     </motion.div>
   );
 }

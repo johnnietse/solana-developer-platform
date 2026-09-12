@@ -35,6 +35,9 @@ interface DonutCardProps {
   colors?: string[];
   headerAction?: ReactNode;
   onItemClick?: (name: string) => void;
+  /** Shown instead of the chart when `data` is empty. */
+  emptyLabel?: string;
+  emptyHint?: string;
 }
 
 export function DonutCard({
@@ -47,8 +50,25 @@ export function DonutCard({
   colors = DONUT_COLORS,
   headerAction,
   onItemClick,
+  emptyLabel = "No data",
+  emptyHint,
 }: DonutCardProps) {
   const chartRef = useRef<HTMLDivElement>(null);
+
+  // An empty series is "we have not measured this", which a 0% donut would
+  // misreport as a measured zero. Say so instead of drawing an empty ring.
+  if (data.length === 0) {
+    return (
+      <ChartCard title={title} description={description} headerAction={headerAction} chartRef={chartRef}>
+        <div className="flex h-full flex-col items-center justify-center gap-1 text-center">
+          <p className="text-sm text-[rgba(28,28,29,0.72)]">{emptyLabel}</p>
+          {emptyHint ? (
+            <p className="text-xs text-[rgba(28,28,29,0.48)]">{emptyHint}</p>
+          ) : null}
+        </div>
+      </ChartCard>
+    );
+  }
 
   return (
     <ChartCard title={title} description={description} headerAction={headerAction} chartRef={chartRef}>

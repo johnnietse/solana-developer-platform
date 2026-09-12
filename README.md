@@ -15,7 +15,7 @@ A Solana data ingestion pipeline using **Polars + Flask + Delta Lake**:
 | `GET /stablecoins/median` | Median supply per token (Polars) |
 | `GET /network?days=N` | Solana network metrics (TPS, SOL supply, epoch) |
 | `GET /holders/<mint>` | Top token holders |
-| `GET /rpc?token_address=X` | Token transfers from RPC, cached as Delta on S3 |
+| `GET /rpc?mint=X&cluster=Y&days=N` | Transaction count for a mint over a window, cached as Delta on S3 |
 | `POST /insert?table_name=X` | Write custom data to S3 as Delta (Databricks-readable) |
 
 **Data flows:** `Solana RPC → Polars API → S3 Delta Lake → Databricks External Tables`
