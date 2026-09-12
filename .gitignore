@@ -36,6 +36,10 @@ pnpm-debug.log*
 .env.preview
 .env.*.local
 .env.docker
+# File-manager duplicates such as ".env copy" carry the same secrets as
+# the original, and the exact-name rules above do not match them.
+.env copy
+.env.* copy
 
 # Kora keypairs and secrets (never commit)
 infra/kora/.keypair.json
