@@ -170,7 +170,41 @@ def _register_metrics_routes(app):
             }), 503
 
         if df.is_empty():
-            return jsonify({"days": days, "metrics": [], "count": 0, "source": source})
+            # An empty window is not the same fact as an empty table, and the
+            # dashboard cannot tell them apart from a zero count: both render a
+            # blank panel. This table is written by Databricks, so when that
+            # warehouse stops, the newest row simply ages past the default
+            # 30-day window and the panel goes blank while the pipeline looks
+            # fine everywhere else.
+            #
+            # So: look again with no window. If rows exist, serve the most
+            # recent day and say plainly that the data is stale, rather than
+            # reporting nothing and sending the reader after a fault that is
+            # not there.
+            everything = lf.collect() if lf is not None else None
+            if everything is None or everything.is_empty():
+                return jsonify({
+                    "days": days,
+                    "metrics": [],
+                    "count": 0,
+                    "source": source,
+                    "stale": False,
+                })
+
+            newest = everything["date"].max()
+            return jsonify({
+                "days": days,
+                "metrics": [],
+                "count": 0,
+                "source": source,
+                "stale": True,
+                "newest_date": str(newest),
+                "note": (
+                    f"No metrics in the last {days} days. The table's newest row "
+                    f"is {newest}; the data is stale, not missing. Widen the "
+                    "window with ?days= to read it."
+                ),
+            })
 
         # (the date filter already ran as part of the scan above)
 

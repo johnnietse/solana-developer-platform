@@ -116,6 +116,29 @@ def list_keys(cfg: Config, prefix: str) -> list[str]:
     return keys
 
 
+# Snapshot Parquet has lived under two prefixes. Ingestion wrote bare
+# ``{table}/`` until 2026-07-20 and ``insert/{table}/`` from then on, but the
+# reading routes were never moved across. Reading only the old prefix freezes
+# every panel at the changeover date; reading only the new one throws away the
+# history before it. Both are real, so read both.
+SNAPSHOT_PREFIXES = ("insert/{table}", "{table}")
+
+
+def list_snapshot_keys(cfg: Config, table: str) -> list[str]:
+    """Every snapshot Parquet key for a table, across both write prefixes.
+
+    A bare S3 prefix matches from the start of the key, so ``stablecoins``
+    does not match ``insert/stablecoins/...``. Listing them separately is what
+    keeps the series continuous across the prefix change.
+    """
+    keys: set[str] = set()
+    for pattern in SNAPSHOT_PREFIXES:
+        for key in list_keys(cfg, pattern.format(table=table)):
+            if key.endswith(".parquet"):
+                keys.add(key)
+    return sorted(keys)
+
+
 # ── Delta Lake (Databricks-readable) ────────────────────────────────────
 
 

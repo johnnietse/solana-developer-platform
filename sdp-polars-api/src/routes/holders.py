@@ -13,13 +13,64 @@ from typing import TYPE_CHECKING
 import polars as pl
 from flask import Blueprint, jsonify, request
 
-from src.services.s3_service import key_exists, read_parquet, write_parquet
+from src.services.s3_service import key_exists, read_parquet, scan_delta, write_parquet
 from src.services.solana_rpc import get_token_largest_accounts
 
 if TYPE_CHECKING:
     from config import Config
 
 holders_bp = Blueprint("holders", __name__)
+
+
+# The scheduler writes holder snapshots to a Delta table every 15 minutes, but
+# this route only ever read its own Parquet cache -- which is written solely
+# after a successful RPC fetch. On public devnet getTokenLargestAccounts is
+# rate limited to the point of never succeeding, so that cache stayed empty,
+# every request fell through to a failing RPC call, and the panel rendered
+# blank while 16k rows of real holder data sat one prefix away.
+#
+# So when the live call cannot answer, read what the scheduler already
+# collected rather than reporting nothing.
+DELTA_HOLDERS = "dev/mlh/sdp_data/holders"
+
+
+def _holders_from_delta(cfg, mint):
+    """Most recent scheduler snapshot for one mint, or None.
+
+    Shaped to match the RPC path's response: the Delta table names the column
+    `holder_address` where this route has always returned `address`, and it
+    carries no `percentage` because that is derived, not collected.
+    """
+    lf = scan_delta(cfg, path=DELTA_HOLDERS)
+    if lf is None:
+        return None
+    try:
+        df = lf.filter(pl.col("mint") == mint).collect()
+    except Exception:
+        return None
+    if df.is_empty():
+        return None
+
+    # One mint is snapshotted repeatedly; keep only the newest pass.
+    newest = df["scraped_at"].max()
+    df = df.filter(pl.col("scraped_at") == newest).sort("rank")
+
+    rows = df.to_dicts()
+    total_ui = sum(float(r.get("ui_amount") or 0) for r in rows)
+    records = []
+    for r in rows:
+        ui = float(r.get("ui_amount") or 0)
+        records.append({
+            "mint": r.get("mint"),
+            "rank": r.get("rank"),
+            "address": r.get("holder_address", ""),
+            "amount": int(r.get("amount") or 0),
+            "decimals": r.get("decimals", 0),
+            "ui_amount": ui,
+            "percentage": round((ui / total_ui) * 100, 4) if total_ui > 0 else 0.0,
+            "scraped_at": r.get("scraped_at"),
+        })
+    return records, str(newest)
 
 
 def _register_holders_routes(app):
@@ -63,6 +114,20 @@ def _register_holders_routes(app):
         try:
             accounts = get_token_largest_accounts(cfg, mint)
         except Exception as exc:
+            fallback = _holders_from_delta(cfg, mint)
+            if fallback:
+                records, scraped_at = fallback
+                return jsonify({
+                    "mint": mint,
+                    "source": "delta",
+                    "holders": records,
+                    "count": len(records),
+                    "scraped_at": scraped_at,
+                    "note": (
+                        "Live RPC unavailable; served from the scheduler's most "
+                        f"recent snapshot. RPC said: {exc}"
+                    ),
+                })
             return jsonify({
                 "mint": mint,
                 "source": "rpc",
@@ -71,6 +136,17 @@ def _register_holders_routes(app):
                 "count": 0,
             }), 502
         if not accounts:
+            fallback = _holders_from_delta(cfg, mint)
+            if fallback:
+                records, scraped_at = fallback
+                return jsonify({
+                    "mint": mint,
+                    "source": "delta",
+                    "holders": records,
+                    "count": len(records),
+                    "scraped_at": scraped_at,
+                    "note": "Live RPC returned no accounts; served from the scheduler's snapshot.",
+                })
             return jsonify({"mint": mint, "source": "rpc", "holders": [], "count": 0})
 
         scraped_at = now.isoformat()

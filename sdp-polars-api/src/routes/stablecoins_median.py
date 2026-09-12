@@ -19,7 +19,7 @@ import numpy as np
 import polars as pl
 from flask import Blueprint, jsonify, request
 
-from src.services.s3_service import list_keys, read_parquet
+from src.services.s3_service import list_snapshot_keys, read_parquet
 
 if TYPE_CHECKING:
     from config import Config
@@ -165,8 +165,23 @@ def _intelligent_median_analysis(df: pl.DataFrame, cfg: Config, median_params: d
             continue
         
         # Extract values and timestamps
-        values = symbol_df["ui_supply"].to_numpy()
+        values = symbol_df["ui_supply"].to_numpy().astype(float)
         timestamps = symbol_df["scraped_at_dt"].to_numpy()
+
+        # Drop snapshots with no supply reading before any arithmetic runs.
+        # numpy propagates NaN, so a single unreadable snapshot turns this
+        # symbol's median, mean and trend into NaN — which reaches the
+        # dashboard as a blank cell that looks like the whole metric is
+        # broken rather than like one sample was missing. These rows also
+        # carry no `date`, so /stablecoins filters them out and the two
+        # endpoints disagree about how many samples a symbol has.
+        readable = np.isfinite(values)
+        unreadable_samples = int((~readable).sum())
+        if unreadable_samples:
+            values = values[readable]
+            timestamps = timestamps[readable]
+        if len(values) < min_samples:
+            continue
         
         # Remove outliers if enabled. Count them here: `values` is rebound below,
         # so deriving the count afterwards reports against the post-removal
@@ -213,6 +228,7 @@ def _intelligent_median_analysis(df: pl.DataFrame, cfg: Config, median_params: d
             "std_supply": std_val if std_val > 0 else None,
             "sample_count": len(values),
             "outliers_removed": outliers_removed,
+            "unreadable_samples": unreadable_samples,
             "trend": trend,
             "analysis_timestamp": datetime.now(timezone.utc).isoformat()
         })
@@ -242,7 +258,7 @@ def _register_stablecoins_median_routes(app):
         outlier_threshold = float(request.args.get("outlier_threshold", cfg.median_outlier_threshold))
         min_samples = int(request.args.get("min_samples", cfg.median_min_samples))
         
-        all_keys = [k for k in list_keys(cfg, "stablecoins") if k.endswith(".parquet")]
+        all_keys = list_snapshot_keys(cfg, "stablecoins")
         frames: list[pl.DataFrame] = []
 
         for key in sorted(all_keys):
@@ -256,7 +272,11 @@ def _register_stablecoins_median_routes(app):
         if not frames:
             return jsonify({"count": 0, "median_supplies": []})
 
-        combined = pl.concat(frames, how="vertical_relaxed")
+        # diagonal_relaxed, not vertical_relaxed: the snapshot schema gained and
+        # lost columns across the prefix change, and vertical_ concat requires
+        # identical column sets. diagonal_ unions the columns and fills the
+        # gaps with null, so an older row simply lacks the newer fields.
+        combined = pl.concat(frames, how="diagonal_relaxed")
 
         if "symbol" not in combined.columns or "ui_supply" not in combined.columns:
             return jsonify({"count": 0, "median_supplies": []})

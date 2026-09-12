@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import polars as pl
 from flask import Blueprint, jsonify, request
 
-from src.services.s3_service import list_keys, read_parquet
+from src.services.s3_service import list_snapshot_keys, read_parquet
 
 if TYPE_CHECKING:
     from config import Config
@@ -25,7 +25,7 @@ def _register_stablecoins_routes(app):
         days = min(max(days, 1), 365)
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
-        all_keys = [k for k in list_keys(cfg, "stablecoins") if k.endswith(".parquet")]
+        all_keys = list_snapshot_keys(cfg, "stablecoins")
         frames: list[pl.DataFrame] = []
 
         for key in sorted(all_keys):
@@ -39,7 +39,11 @@ def _register_stablecoins_routes(app):
         if not frames:
             return jsonify({"days": days, "rows": 0, "data": []})
 
-        combined = pl.concat(frames, how="vertical_relaxed")
+        # diagonal_relaxed, not vertical_relaxed: the snapshot schema gained and
+        # lost columns across the prefix change, and vertical_ concat requires
+        # identical column sets. diagonal_ unions the columns and fills the
+        # gaps with null, so an older row simply lacks the newer fields.
+        combined = pl.concat(frames, how="diagonal_relaxed")
         if "date" in combined.columns:
             combined = combined.filter(pl.col("date") >= cutoff.strftime("%Y-%m-%d"))
 
