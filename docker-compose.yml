@@ -75,6 +75,16 @@ services:
       SIGNING_PROVIDER: ${SIGNING_PROVIDER:-local}
       FEE_PAYER_PRIVATE_KEY: ${FEE_PAYER_PRIVATE_KEY:-}
       FEE_PAYMENT_PROVIDER: ${FEE_PAYMENT_PROVIDER:-native}
+      # Where the Kora fee sponsor listens. env.d.ts has always declared this,
+      # but compose never passed it, so selecting FEE_PAYMENT_PROVIDER=kora
+      # gave an adapter with nowhere to send a request. Empty by default, which
+      # keeps the native path unchanged.
+      #
+      # For a Surfpool run this points at WSL through the Windows host:
+      # the container cannot reach WSL's 172.x address directly, but
+      # host.docker.internal plus WSL2 localhost forwarding does resolve.
+      # scripts/wire-surfpool.sh writes the value.
+      KORA_RPC_URL: ${KORA_RPC_URL:-}
 
       # Databricks — backs GET /v1/data-products/analytics. All three must be
       # set or the route answers 503 "Databricks credentials not configured".
