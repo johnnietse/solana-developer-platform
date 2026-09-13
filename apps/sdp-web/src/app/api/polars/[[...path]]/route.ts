@@ -11,12 +11,10 @@ import { NextRequest, NextResponse } from "next/server";
  * already does: they call `await auth()` in the handler despite the same
  * middleware covering them.
  *
- * The redundancy is worth its four lines because of what sits downstream.
- * These handlers reach services that are otherwise unreachable from outside
- * the compose network, and POST below forwards a body to whatever the resolved
- * target exposes. If the matcher in proxy.ts is ever narrowed, or this route is
- * lifted into an app without that middleware, the failure would be silent and
- * the blast radius large.
+ * The redundancy is worth its four lines because of what sits downstream: this
+ * handler reaches services that are otherwise unreachable from outside the
+ * compose network. If the matcher in proxy.ts is ever narrowed, or this route
+ * is lifted into an app without that middleware, the failure would be silent.
  */
 async function requireSession(): Promise<NextResponse | null> {
   const { userId } = await auth();
@@ -49,7 +47,7 @@ const POLARS_RPC_BASE = process.env.POLARS_RPC_API_BASE_URL?.replace(/\/$/, "");
  * prefix match would send them somewhere that answers 404 and turn working
  * panels into broken ones.
  */
-const DEPLOYED_ROUTES = new Set(["healthz", "metrics", "rpc", "insert"]);
+const DEPLOYED_ROUTES = new Set(["healthz", "metrics", "rpc"]);
 
 /**
  * Explicit escape hatch: /api/polars/deployed/<path> always goes to the
@@ -61,6 +59,41 @@ const DEPLOYED_ROUTES = new Set(["healthz", "metrics", "rpc", "insert"]);
  * in the URL means the answer cannot be ambiguous about where it came from.
  */
 const DEPLOYED_PREFIX = "deployed";
+
+/**
+ * Read-only routes this proxy will forward. Anything absent is refused.
+ *
+ * An allowlist rather than a denylist, because the thing being protected is
+ * not a fixed set of dangerous paths - it is every route the upstream services
+ * happen to expose, now and in future. The local Polars container answers
+ * `POST /insert?table_name=<anything>&mode=overwrite` with no authentication of
+ * its own: it is only reachable inside the compose network, which is the whole
+ * of its protection. Proxying it from the dashboard would have handed any
+ * signed-in user the ability to overwrite a production Delta table on S3. The
+ * deployed service rejects that write; the local one has never had to.
+ *
+ * The dashboard reads `rpc` and nothing else today. The rest are listed
+ * because they are the service's other read routes and panels for them are
+ * plausible; adding one later should not require reasoning about this file
+ * again. Adding a *write* route should.
+ */
+const ALLOWED_READ_ROUTES = new Set([
+  "health",
+  "healthz",
+  "rpc",
+  "rpc/count",
+  "rpc/series",
+  "metrics",
+  "metrics/latest",
+  "metrics/catalog",
+  "stablecoins",
+  "stablecoins/median",
+  "network",
+  "tokens",
+  "holders",
+  "whales",
+  "validators",
+]);
 
 function resolveTarget(path: string[] | undefined) {
   const segments = path ?? [];
@@ -79,12 +112,14 @@ function resolveTarget(path: string[] | undefined) {
 }
 
 /**
- * Proxy API route — forwards requests to the Polars API service.
+ * Proxy API route — forwards read requests to the Polars API services.
  *
- * GET  /api/polars/metrics?days=N
- * POST /api/polars/insert?table_name=X
- * GET  /api/polars/rpc?mint=X&cluster=devnet&limit=N
- * GET  /api/polars/health
+ * GET /api/polars/rpc?mint=X&cluster=devnet&limit=N
+ * GET /api/polars/metrics?days=N
+ * GET /api/polars/stablecoins        (and the rest of ALLOWED_READ_ROUTES)
+ * GET /api/polars/deployed/<route>   forces the ECS service
+ *
+ * Reads only. There is no POST here; see the note above the GET handler.
  *
  * Note the /rpc parameter name. The deployed service reads `mint` and defaults
  * it to USDC when absent, so a caller sending the older `token_address` gets a
@@ -145,6 +180,14 @@ export async function GET(
   const { path } = await params;
   const url = new URL(_request.url);
   const route = resolveTarget(path);
+
+  if (!ALLOWED_READ_ROUTES.has(route.path)) {
+    return NextResponse.json(
+      { error: { message: `Not a proxied route: ${route.path || "(root)"}` } },
+      { status: 404 }
+    );
+  }
+
   const target = `${route.base}/${route.path}${url.search}`;
 
   try {
@@ -165,35 +208,16 @@ export async function GET(
   }
 }
 
-export async function POST(
-  _request: NextRequest,
-  { params }: { params: Promise<{ path?: string[] }> }
-) {
-  const denied = await requireSession();
-  if (denied) return denied;
-
-  const { path } = await params;
-  const url = new URL(_request.url);
-  const route = resolveTarget(path);
-  const target = `${route.base}/${route.path}${url.search}`;
-
-  try {
-    const body = await _request.json();
-    const upstream = await fetch(target, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(60_000),
-    });
-
-    const { body: resp } = await readUpstream(upstream);
-    return withUpstreamHeaders(
-      NextResponse.json(resp, { status: upstream.status }),
-      upstream,
-      route.service
-    );
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    return NextResponse.json({ error: `Polars API proxy error: ${message}` }, { status: 502 });
-  }
-}
+/**
+ * No POST handler, deliberately.
+ *
+ * There was one; it forwarded an arbitrary body to the resolved target. The
+ * only write route behind this proxy is the local container's
+ * `POST /insert?table_name=<name>&mode=overwrite`, which has no authentication
+ * of its own because nothing outside the compose network could reach it. The
+ * dashboard never called it - token-transfers-view issues one request, a GET
+ * to /rpc - so the handler existed purely as reachable surface.
+ *
+ * If a panel ever needs to write, it should call a route that names the table
+ * it is allowed to touch, not a pass-through that accepts any of them.
+ */
