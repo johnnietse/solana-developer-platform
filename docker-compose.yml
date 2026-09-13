@@ -177,6 +177,16 @@ services:
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
       SOLANA_RPC_URL: ${SOLANA_RPC_URL:-https://api.devnet.solana.com}
+      # The public devnet endpoint throttles this service's ingestion cycle:
+      # getLargestAccounts and getTokenLargestAccounts are 429'd on every run,
+      # so whales and holders fall back to a slower proxy path. config.py reads
+      # both of these and ingestion.py already rotates through them in order,
+      # but compose never passed them, so the rotation pool was always empty
+      # and "trying next endpoint" had nowhere to go. Set either in .env to a
+      # keyed endpoint and the 429s stop.
+      SOLANA_RPC_FALLBACK_URL: ${SOLANA_RPC_FALLBACK_URL:-}
+      SOLANA_RPC_URLS: ${SOLANA_RPC_URLS:-}
+      INGESTION_INTERVAL_MINUTES: ${INGESTION_INTERVAL_MINUTES:-15}
       # Databricks bridge, optional
       DATABRICKS_HOST: ${DATABRICKS_HOST:-}
       DATABRICKS_TOKEN: ${DATABRICKS_TOKEN:-}
