@@ -104,8 +104,10 @@ services:
     ports:
       - "${SDP_METRICS_API_PORT:-8080}:8080"
     environment:
-      # Falls back to the default AWS chain when these are unset; the Delta
-      # cache then misses on every call and /rpc still answers from live RPC.
+      # Credentials come from the mounted profile below rather than env vars.
+      # Without them the Delta cache misses on every call and /rpc still
+      # answers, from live RPC - correct, but far slower and rate-limited.
+      AWS_PROFILE: ${AWS_PROFILE:-sdp-user}
       AWS_REGION: ${AWS_REGION:-us-east-1}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
@@ -113,6 +115,8 @@ services:
       S3_INSERT_BUCKET: ${S3_INSERT_BUCKET:-tmp-sdp-data}
       RPC_TABLE_NAME: ${RPC_TABLE_NAME:-dev.mlh.rpc_counts}
       RPC_CACHE_TTL_SECONDS: ${RPC_CACHE_TTL_SECONDS:-3600}
+    volumes:
+      - "${USERPROFILE:-${HOME}}/.aws:/root/.aws:ro"
 
   sdp-web:
     build:
@@ -162,6 +166,14 @@ services:
       # S3, for the Delta tables Databricks writes and Polars reads back
       S3_BUCKET: ${S3_BUCKET:-tmp-sdp-data}
       S3_REGION: ${AWS_REGION:-us-east-1}
+      # Credentials come from the mounted profile below, not from env vars, so
+      # no key material is written into this file, the shell history or an
+      # image layer. Static keys still win if both are set, which is what CI
+      # uses; on ECS the task role replaces both. Blank env vars were the old
+      # default and gave the worst outcome available: every Delta read failed
+      # and the routes answered 200 with zero rows.
+      AWS_PROFILE: ${AWS_PROFILE:-sdp-user}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
       SOLANA_RPC_URL: ${SOLANA_RPC_URL:-https://api.devnet.solana.com}
@@ -169,6 +181,9 @@ services:
       DATABRICKS_HOST: ${DATABRICKS_HOST:-}
       DATABRICKS_TOKEN: ${DATABRICKS_TOKEN:-}
       DATABRICKS_WAREHOUSE_ID: ${DATABRICKS_WAREHOUSE_ID:-}
+    volumes:
+      # Read-only so a compromised container cannot rewrite the credentials.
+      - "${USERPROFILE:-${HOME}}/.aws:/root/.aws:ro"
     # The image declares no HEALTHCHECK, so define one here; curl is installed
     # by the Dockerfile. /health is used rather than a data route because it
     # never touches S3 and so cannot flap on Delta table availability.
