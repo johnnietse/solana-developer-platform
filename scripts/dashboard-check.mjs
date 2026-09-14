@@ -18,7 +18,7 @@ const API = process.env.SDP_API_URL || "http://localhost:8787";
 const WEB = process.env.SDP_WEB_URL || "http://localhost:3002";
 const KEY = process.env.SDP_API_KEY || "sk_test_local_deploy_kora";
 
-// [tab, method, path, acceptable statuses, note]
+// [tab, method, path, acceptable statuses, note, body?]
 // 401 is listed where a route is organisation-scoped in a way the API key does
 // not satisfy; that is the route working, not failing.
 const CHECKS = [
@@ -36,16 +36,12 @@ const CHECKS = [
   // not a broken route, so it counts as a pass.
   ["Payments",    "GET", "/v1/payments/recurring-payments", [200, 401, 403], "403 = feature flag off"],
   ["Counterparty","GET", "/v1/counterparties", [200, 401], null],
-  // POST-only: screening takes an address in the body. A GET here 404s by
-  // design, so only its presence is worth asserting - 405/404 both mean the
-  // router is mounted and the verb is simply wrong.
-  // POST-only: screening takes an address in the body. Answers 500 with an
-  // error body whose own code is FORBIDDEN - "requires at least one configured
-  // compliance provider (RANGE_API_KEY, ELLIPTIC_API_TOKEN, TRM_API_KEY or
-  // CHAINALYSIS_API_KEY)". The status and the body disagree; the route works
-  // and simply has no provider configured, so 500 is accepted here rather than
-  // reported as a broken tab.
-  ["Compliance",  "POST", "/v1/compliance/address-screenings", [200, 400, 401, 403, 422, 500], "500 body says FORBIDDEN: no screening provider configured"],
+  // POST-only, and the address goes in the body. Sending none fails JSON
+  // parsing and answers 500, which is not the route misbehaving - it is the
+  // request being malformed. With a body it answers a clean 403 FORBIDDEN:
+  // "requires at least one configured compliance provider". 403 is therefore
+  // the pass condition, and a 500 here now means a genuine fault.
+  ["Compliance",  "POST", "/v1/compliance/address-screenings", [200, 403], "403 = no screening provider configured (RANGE/ELLIPTIC/TRM/CHAINALYSIS key)", { address: "EY3hQnjN29sWMfkXTFzWXo17vwMi3n93GBo3YaT5QPgt" }],
   ["API keys",    "GET", "/v1/api-keys", [200], null],
   // Clerk-session route: an API key is the wrong credential, so 401 is correct.
   ["Settings",    "GET", "/v1/onboarding/status", [200, 401], "401 = needs a browser session, not an API key"],
@@ -61,20 +57,26 @@ const PAGES = [
   ["/dashboard/wallets", [200, 302, 307]],
 ];
 
-async function hit(url, { method = "GET", auth = false, timeout = 90000 } = {}) {
+async function hit(url, { method = "GET", auth = false, timeout = 90000, body = null } = {}) {
   const t0 = Date.now();
   try {
+    const headers = auth ? { Authorization: `Bearer ${KEY}` } : {};
+    // A POST with no body fails JSON parsing and answers 500, which reads as a
+    // broken route when it is really a malformed request. Routes that need one
+    // declare it in CHECKS.
+    if (body) headers["Content-Type"] = "application/json";
     const res = await fetch(url, {
       method,
       redirect: "manual",
-      headers: auth ? { Authorization: `Bearer ${KEY}` } : {},
+      headers,
+      ...(body ? { body: JSON.stringify(body) } : {}),
       signal: AbortSignal.timeout(timeout),
     });
-    let body = "";
+    let text = "";
     try {
-      body = (await res.text()).slice(0, 160);
+      text = (await res.text()).slice(0, 160);
     } catch {}
-    return { status: res.status, ms: Date.now() - t0, body };
+    return { status: res.status, ms: Date.now() - t0, body: text };
   } catch (err) {
     return { status: "ERR", ms: Date.now() - t0, body: err.message.slice(0, 80) };
   }
@@ -94,9 +96,30 @@ function rowsOf(body) {
 }
 
 const results = [];
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-for (const [tab, method, path, ok, note] of CHECKS) {
-  const r = await hit(`${API}${path}`, { method, auth: true });
+/**
+ * Run a check, backing off once on 429.
+ *
+ * This script fires sixteen authenticated calls in a burst, and running it a
+ * few times in a row trips the API's own rate limiter - at which point every
+ * row reports 429 and the output looks like a total outage. That is the
+ * limiter working correctly and the tool misreading it. One retry after a
+ * pause distinguishes "genuinely throttled" from "I caused this", and the
+ * spacing below keeps a single run under the limit.
+ */
+async function checkWithBackoff(url, opts) {
+  let r = await hit(url, opts);
+  if (r.status === 429) {
+    await sleep(5000);
+    r = await hit(url, opts);
+  }
+  return r;
+}
+
+for (const [tab, method, path, ok, note, body] of CHECKS) {
+  const r = await checkWithBackoff(`${API}${path}`, { method, auth: true, body: body ?? null });
+  await sleep(250);
   const pass = ok.includes(r.status);
   const rows = pass && r.status === 200 ? rowsOf(r.body) : null;
   results.push({ group: "api", tab, path, status: r.status, ms: r.ms, pass, note, rows });
@@ -119,7 +142,13 @@ for (const r of results) {
   );
   if (r.rows) console.log(`         ${r.rows}`);
   if (r.note && r.pass) console.log(`         ${r.note}`);
-  if (!r.pass) console.log(`         expected one of the accepted codes`);
+  if (!r.pass) {
+    console.log(
+      r.status === 429
+        ? `         still rate limited after a retry - wait a minute and re-run`
+        : `         expected one of the accepted codes`
+    );
+  }
 }
 console.log("");
 console.log(`  ${results.length - failed}/${results.length} checks passed`);
