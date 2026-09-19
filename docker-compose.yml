@@ -147,6 +147,9 @@ services:
       # this one by default; hardcoding devnet charted zero activity for every
       # token issued on a local validator.
       SOLANA_NETWORK: ${SOLANA_NETWORK:-devnet}
+      # Token Transfers reads localnet activity straight from this RPC; the
+      # deployed service behind /api/polars/rpc cannot reach a local validator.
+      SOLANA_RPC_URL: ${SOLANA_RPC_URL:-https://api.devnet.solana.com}
       # Read by app/api/polars/[[...path]]/route.ts. Service DNS, not
       # localhost: inside this container 127.0.0.1 is the container itself, so
       # the route's default would connect to nothing and every panel that uses

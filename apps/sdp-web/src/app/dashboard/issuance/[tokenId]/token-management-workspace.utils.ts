@@ -443,10 +443,13 @@ export function getExplorerHref(mintAddress: string | null): string | null {
   }
 
   const cluster = process.env.NEXT_PUBLIC_SOLANA_NETWORK?.trim() || "devnet";
+  // The explorer has no "localnet" cluster; point it at the local validator.
   const clusterQuery =
     cluster === "mainnet-beta" || cluster === "mainnet"
       ? ""
-      : `?cluster=${encodeURIComponent(cluster)}`;
+      : cluster === "localnet"
+        ? `?cluster=custom&customUrl=${encodeURIComponent("http://localhost:8899")}`
+        : `?cluster=${encodeURIComponent(cluster)}`;
   return `https://explorer.solana.com/address/${mintAddress}${clusterQuery}`;
 }
 

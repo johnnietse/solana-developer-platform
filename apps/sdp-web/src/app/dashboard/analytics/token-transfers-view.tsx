@@ -89,8 +89,20 @@ interface RpcResponse {
   cache_age_seconds?: number | null;
 }
 
-const CLUSTERS = ["devnet", "mainnet-beta", "testnet"] as const;
+const CLUSTERS = ["localnet", "devnet", "mainnet-beta", "testnet"] as const;
 type Cluster = (typeof CLUSTERS)[number];
+
+/**
+ * The cluster this platform issues tokens on. Tokens deployed from the
+ * dashboard live there, so looking them up on devnet always said "no
+ * activity". localnet is the platform's own validator, served by the local
+ * Polars container; the public clusters go to the deployed service.
+ */
+const PLATFORM_CLUSTER: Cluster = CLUSTERS.includes(
+  process.env.NEXT_PUBLIC_SOLANA_NETWORK as Cluster
+)
+  ? (process.env.NEXT_PUBLIC_SOLANA_NETWORK as Cluster)
+  : "devnet";
 
 /**
  * Stand-in used when the account has no deployed token yet.
@@ -101,8 +113,8 @@ type Cluster = (typeof CLUSTERS)[number];
 const DEMO_TOKEN = {
   tokenId: "__demo__",
   mintAddress: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
-  name: "Example token",
-  symbol: "DEMO",
+  name: "Devnet USDC (example)",
+  symbol: "USDC",
   status: "demo",
 } as const;
 
@@ -170,7 +182,12 @@ function describeAge(seconds: number) {
 
 function explorerUrl(signature: string, cluster: string) {
   // mainnet-beta is the explorer's default and takes no query parameter.
-  const suffix = cluster === "mainnet-beta" ? "" : `?cluster=${cluster}`;
+  const suffix =
+    cluster === "mainnet-beta"
+      ? ""
+      : cluster === "localnet"
+        ? `?cluster=custom&customUrl=${encodeURIComponent("http://localhost:8899")}`
+        : `?cluster=${cluster}`;
   return `https://explorer.solana.com/tx/${signature}${suffix}`;
 }
 
@@ -324,7 +341,7 @@ function useMetrics(transfers: TransferRow[], decimals: number | null) {
 /* ── View ───────────────────────────────────────────────────────────── */
 
 export function TokenTransfersView({ tokens }: { tokens: UserTokenEntry[] | null }) {
-  const [cluster, setCluster] = useState<Cluster>("devnet");
+  const [cluster, setCluster] = useState<Cluster>(PLATFORM_CLUSTER);
   const [limit, setLimit] = useState(100);
   const [selected, setSelected] = useState<string | null>(null);
   const [data, setData] = useState<RpcResponse | null>(null);
@@ -347,10 +364,14 @@ export function TokenTransfersView({ tokens }: { tokens: UserTokenEntry[] | null
       status: t.status,
       createdAt: t.deployedAt ?? t.createdAt,
     }));
-    return own.some((t) => t.mintAddress) ? own : [...own, DEMO_TOKEN];
+    // Always offered, not only when the account has no tokens: it is the one
+    // row that exercises the deployed service and its S3 cache with real
+    // devnet traffic, whatever cluster the account's own tokens live on.
+    return [...own, DEMO_TOKEN];
   }, [tokens]);
 
-  const load = useCallback(async (mint: string, forCluster: Cluster, rowLimit: number) => {
+  const load = useCallback(
+    async (mint: string, forCluster: Cluster, rowLimit: number, refresh = false) => {
     setLoading(true);
     setError(null);
     try {
@@ -359,6 +380,11 @@ export function TokenTransfersView({ tokens }: { tokens: UserTokenEntry[] | null
         cluster: forCluster,
         limit: String(rowLimit),
       });
+      // The deployed service answers from its S3 cache whenever that cache
+      // holds a full page, so a busy mint never fetched again and showed weeks
+      // old rows as current. Refresh asks it to go to the chain and write the
+      // new rows back.
+      if (refresh) query.set("refresh", "true");
       const res = await fetch(`/api/polars/rpc?${query.toString()}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json?.detail ?? json?.error ?? `HTTP ${res.status}`);
@@ -386,8 +412,8 @@ export function TokenTransfersView({ tokens }: { tokens: UserTokenEntry[] | null
   const token = list.find((t) => t.mintAddress === selected);
   const isDemo = token?.tokenId === DEMO_TOKEN.tokenId;
 
-  const reload = (mint = selected, c = cluster, n = limit) => {
-    if (mint) void load(mint, c, n);
+  const reload = (mint = selected, c = cluster, n = limit, refresh = false) => {
+    if (mint) void load(mint, c, n, refresh);
   };
 
   return (
@@ -443,7 +469,12 @@ export function TokenTransfersView({ tokens }: { tokens: UserTokenEntry[] | null
                           onClick={() => {
                             if (!t.mintAddress) return;
                             setSelected(t.mintAddress);
-                            reload(t.mintAddress);
+                            // The example mint only exists on devnet; the
+                            // account's own tokens live on the platform cluster.
+                            const c: Cluster =
+                              t.tokenId === DEMO_TOKEN.tokenId ? "devnet" : PLATFORM_CLUSTER;
+                            setCluster(c);
+                            reload(t.mintAddress, c);
                           }}
                         >
                           {isSelected ? "Selected" : "View activity"}
@@ -514,7 +545,7 @@ export function TokenTransfersView({ tokens }: { tokens: UserTokenEntry[] | null
                   {n} rows
                 </button>
               ))}
-              <Button size="sm" variant="outline" disabled={!selected || loading} onClick={() => reload()}>
+              <Button size="sm" variant="outline" disabled={!selected || loading} onClick={() => reload(selected, cluster, limit, true)}>
                 {loading ? "Loading..." : "Refresh"}
               </Button>
             </span>

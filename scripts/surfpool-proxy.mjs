@@ -393,6 +393,44 @@ setInterval(async () => {
   }
 }, PROBE_MS);
 
+/**
+ * Surfpool 1.4.0 reports `blockTime` a thousand times too small from
+ * getTransaction and getBlock (1789825 where getBlockTime and
+ * getSignaturesForAddress agree on 1789825663). Every consumer then dated
+ * local transactions to January 1970 - the dashboard's "20,695 days ago".
+ * Multiplying back would lose up to 999 seconds, so ask getBlockTime for the
+ * slot instead, which Surfpool gets right.
+ */
+const TIME_FIXED_METHODS = new Set(["getTransaction", "getBlock"]);
+async function fixBlockTimes(requestBody, responseText) {
+  let reqs, resps;
+  try {
+    reqs = [].concat(JSON.parse(requestBody));
+    resps = JSON.parse(responseText);
+  } catch {
+    return responseText;
+  }
+  const list = [].concat(resps);
+  let changed = false;
+  for (let i = 0; i < list.length; i++) {
+    const out = list[i];
+    const req = reqs.find((r) => r?.id === out?.id) ?? reqs[i];
+    const result = out?.result;
+    if (!req || !TIME_FIXED_METHODS.has(req.method) || !result) continue;
+    if (typeof result.blockTime !== "number" || result.blockTime >= 1e9) continue;
+    const slot = req.method === "getBlock" ? req.params?.[0] : result.slot;
+    if (typeof slot !== "number") continue;
+    try {
+      const t = await rpc("getBlockTime", [slot], 5000);
+      if (typeof t === "number" && t >= 1e9) {
+        result.blockTime = t;
+        changed = true;
+      }
+    } catch {}
+  }
+  return changed ? JSON.stringify(resps) : responseText;
+}
+
 /** Note what a request will change, so the snapshot can follow it. */
 function observe(requestBody, responseText) {
   let reqs, resps;
@@ -452,10 +490,12 @@ const server = createServer(async (req, res) => {
         body: ["GET", "HEAD"].includes(req.method || "") ? undefined : Buffer.concat(chunks),
         signal: AbortSignal.timeout(120000),
       });
-      const text = await upstream.text();
+      const body = Buffer.concat(chunks).toString("utf8");
+      let text = await upstream.text();
+      if (req.method === "POST") text = await fixBlockTimes(body, text);
       res.writeHead(upstream.status, { "Content-Type": "application/json" });
       res.end(text);
-      if (req.method === "POST") observe(Buffer.concat(chunks).toString("utf8"), text);
+      if (req.method === "POST") observe(body, text);
     } catch (err) {
       // 502 rather than a hang: a caller that gets an answer can retry, and the
       // 300s undici timeouts were the worst part of every earlier failure.

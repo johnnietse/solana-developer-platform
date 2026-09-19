@@ -170,6 +170,103 @@ async function readUpstream(upstream: Response) {
   }
 }
 
+/** The platform's own validator (Surfpool when SOLANA_NETWORK=localnet). */
+const LOCALNET_RPC_URL = process.env.SOLANA_RPC_URL?.replace(/\/$/, "");
+
+interface TokenBalance {
+  mint: string;
+  owner?: string;
+  uiTokenAmount: { amount: string; decimals: number };
+}
+
+async function solanaRpc<T>(method: string, params: unknown[]): Promise<T> {
+  if (!LOCALNET_RPC_URL) throw new Error("SOLANA_RPC_URL is not configured");
+  const res = await fetch(LOCALNET_RPC_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    signal: AbortSignal.timeout(20_000),
+  });
+  const json = (await res.json()) as { result?: T; error?: { message?: string } };
+  if (json.error) throw new Error(`${method}: ${json.error.message ?? "RPC error"}`);
+  return json.result as T;
+}
+
+/**
+ * /rpc for tokens on the platform's own validator (cluster=localnet).
+ *
+ * The deployed service cannot reach a local validator, and the local Polars
+ * container's /rpc reports absolute balance changes (a burn reads as a mint)
+ * and keeps only one side of each transfer. So derive the rows here the way
+ * the deployed service does for public clusters: the mint's signatures, then
+ * each transaction's pre/post token balances for that mint, netted per owner.
+ * The response uses the deployed service's row shape so the Token Transfers
+ * view renders every cluster the same way.
+ */
+async function localnetRpc(url: URL) {
+  const mint = url.searchParams.get("mint") ?? "";
+  const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 25, 1), 250);
+  const signatures = await solanaRpc<
+    Array<{ signature: string; slot: number; blockTime: number | null; err: unknown }>
+  >("getSignaturesForAddress", [mint, { limit }]);
+
+  const transfers = [];
+  for (const sig of signatures) {
+    const tx = await solanaRpc<{
+      meta?: { preTokenBalances?: TokenBalance[]; postTokenBalances?: TokenBalance[] };
+    } | null>("getTransaction", [
+      sig.signature,
+      { encoding: "jsonParsed", maxSupportedTransactionVersion: 0, commitment: "confirmed" },
+    ]);
+    const net = new Map<string, bigint>();
+    let decimals: number | null = null;
+    const add = (list: TokenBalance[] | undefined, sign: bigint) => {
+      for (const b of list ?? []) {
+        if (b.mint !== mint || !b.owner) continue;
+        decimals = b.uiTokenAmount.decimals;
+        net.set(b.owner, (net.get(b.owner) ?? BigInt(0)) + sign * BigInt(b.uiTokenAmount.amount));
+      }
+    };
+    add(tx?.meta?.preTokenBalances, BigInt(-1));
+    add(tx?.meta?.postTokenBalances, BigInt(1));
+    const moves = [...net.entries()].filter(([, v]) => v !== BigInt(0));
+    const rises = moves.filter(([, v]) => v > BigInt(0)).sort((a, b) => (b[1] > a[1] ? 1 : -1));
+    const falls = moves.filter(([, v]) => v < BigInt(0)).sort((a, b) => (a[1] > b[1] ? 1 : -1));
+    const kind =
+      rises.length && falls.length ? "transfer" : rises.length ? "mint" : falls.length ? "burn" : "no_movement";
+    const raw = rises[0]?.[1] ?? (falls[0] ? -falls[0][1] : BigInt(0));
+    const scale = 10 ** (decimals ?? 0);
+    transfers.push({
+      mint,
+      cluster: "localnet",
+      signature: sig.signature,
+      slot: sig.slot,
+      block_time: sig.blockTime,
+      failed: sig.err !== null,
+      fetched_at: new Date().toISOString(),
+      kind,
+      amount: kind === "no_movement" ? null : Number(raw) / scale,
+      decimals,
+      source: falls[0]?.[0] ?? null,
+      destination: rises[0]?.[0] ?? null,
+    });
+  }
+
+  const response = NextResponse.json({
+    mint,
+    cluster: "localnet",
+    limit,
+    source: "rpc",
+    table: "localnet (live RPC)",
+    count: transfers.length,
+    newly_cached: 0,
+    resolved: transfers.length,
+    transfers,
+  });
+  response.headers.set("X-Polars-Service", "localnet-rpc");
+  return response;
+}
+
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ path?: string[] }> }
@@ -180,6 +277,15 @@ export async function GET(
   const { path } = await params;
   const url = new URL(_request.url);
   const route = resolveTarget(path);
+
+  if (route.path === "rpc" && url.searchParams.get("cluster") === "localnet") {
+    try {
+      return await localnetRpc(url);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      return NextResponse.json({ error: `Polars API proxy error: ${message}` }, { status: 502 });
+    }
+  }
 
   if (!ALLOWED_READ_ROUTES.has(route.path)) {
     return NextResponse.json(
