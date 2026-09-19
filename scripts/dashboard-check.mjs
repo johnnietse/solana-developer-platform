@@ -49,6 +49,24 @@ const CHECKS = [
   ["health",      "GET", "/health", [200], null],
 ];
 
+// The Analytics tab's data tier. These read S3 with the local AWS profile, so
+// they are what fails when the key is rotated or revoked - which the checks
+// above cannot see, since sdp-api never touches S3. A 21/21 without these
+// once hid a deleted access key.
+const POLARS = process.env.SDP_POLARS_URL || "http://localhost:8081";
+const METRICS = process.env.SDP_METRICS_URL || "http://localhost:8080";
+const DEPLOYED = process.env.SDP_DEPLOYED_URL || "http://35.171.121.207:8080";
+const DATA = [
+  ["Analytics", `${POLARS}/metrics/latest`, [200], "polars: newest metric snapshot (S3 Delta)"],
+  ["Analytics", `${POLARS}/stablecoins`, [200], "polars: stablecoins (S3)"],
+  ["Analytics", `${POLARS}/network`, [200], "polars: network (S3)"],
+  ["Analytics", `${POLARS}/tokens`, [200], "polars: token registry (S3)"],
+  ["Analytics", `${METRICS}/metric`, [200], "metrics-api (S3)"],
+  ["Analytics", `${METRICS}/rpc`, [200], "metrics-api RPC counts"],
+  ["deployed", `${DEPLOYED}/healthz`, [200], "EC2 tmp-sdp-data"],
+  ["deployed", `${DEPLOYED}/rpc`, [200], "EC2 tmp-sdp-data /rpc"],
+];
+
 const PAGES = [
   ["/", [200]],
   ["/dashboard/analytics", [200, 302, 307]],
@@ -125,6 +143,12 @@ for (const [tab, method, path, ok, note, body] of CHECKS) {
   results.push({ group: "api", tab, path, status: r.status, ms: r.ms, pass, note, rows });
 }
 
+for (const [tab, url, ok, note] of DATA) {
+  const r = await hit(url);
+  const pass = ok.includes(r.status);
+  results.push({ group: "data", tab, path: url, status: r.status, ms: r.ms, pass, note: pass ? note : `${note}: ${r.body.replace(/\s+/g, " ").slice(0, 110)}`, rows: null });
+}
+
 for (const [path, ok] of PAGES) {
   const r = await hit(`${WEB}${path}`);
   results.push({ group: "web", tab: "page", path, status: r.status, ms: r.ms, pass: ok.includes(r.status), note: null, rows: null });
@@ -146,7 +170,7 @@ for (const r of results) {
     console.log(
       r.status === 429
         ? `         still rate limited after a retry - wait a minute and re-run`
-        : `         expected one of the accepted codes`
+        : `         expected one of the accepted codes${r.note ? ` - ${r.note}` : ""}`
     );
   }
 }

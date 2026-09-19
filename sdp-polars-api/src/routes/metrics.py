@@ -299,10 +299,16 @@ def _register_metrics_routes(app):
 
         # Resolve the newest date first so the row filter is pushed into the
         # scan, rather than collecting every date and discarding most of them.
+        # A failed read is not an empty table. Folding the exception into None
+        # reported a deleted AWS key as "has no rows", which sends the reader
+        # looking for a broken pipeline instead of broken credentials.
         try:
             latest_date = lf.select(pl.col("date").max()).collect().item()
-        except Exception:
-            latest_date = None
+        except Exception as exc:
+            return jsonify({
+                "error": f"Could not read {source}: {exc}",
+                "source": source,
+            }), 503
 
         if latest_date is None:
             return jsonify({
