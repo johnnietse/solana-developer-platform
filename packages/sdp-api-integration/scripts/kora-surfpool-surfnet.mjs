@@ -79,7 +79,19 @@ process.on("unhandledRejection", (error) => {
   process.exit(1);
 });
 
-setInterval(() => {}, 60_000);
+// Surfnet buffers simnet events (one per block, plus per-transaction ones) in a
+// bounded queue that only drainEvents() empties. Once about 1024 are waiting,
+// the runloop blocks on the full queue while holding its state lock: getVersion
+// still answers, but every state method hangs. At 400ms blocks that is ~7
+// minutes of uptime; in transaction mode, a handful of writes. Draining keeps
+// the queue empty.
+setInterval(() => {
+  try {
+    surfnet.drainEvents();
+  } catch (error) {
+    logError("Embedded Surfpool event drain failed", error);
+  }
+}, 1_000);
 
 function parseBoolean(name, fallback) {
   const value = process.env[name];

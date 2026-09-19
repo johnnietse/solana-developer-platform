@@ -60,8 +60,14 @@ else
   wsl.exe -d Ubuntu -- bash "$W/wsl-surfpool-proxy-up.sh" >/dev/null 2>&1
   proxy_up && echo "  serving on :8899" || echo "  surfpool not answering - run: bash scripts/surfpool.sh restart"
 fi
+# Restarts so far and how many accounts would be restored after the next one.
+curl -s --max-time 5 http://127.0.0.1:8899/__proxy/status | sed 's/^/  /'
+echo
 
 echo "== 4/4 dashboard check =="
-node scripts/dashboard-check.mjs 2>&1 | grep -E 'FAIL|checks passed'
+node scripts/dashboard-check.mjs > /tmp/sdp-dashboard-check.txt 2>&1
+rc=$?
+grep -E 'FAIL|checks passed' /tmp/sdp-dashboard-check.txt
 echo
 echo "dashboard: http://localhost:3002"
+exit $rc

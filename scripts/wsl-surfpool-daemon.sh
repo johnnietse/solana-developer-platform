@@ -22,8 +22,31 @@ DST=/home/ohnnie/sdp
 STATE="$DST/.secrets/kora-surfpool"
 cd "$DST"
 
-export SURFPOOL_REMOTE_RPC_URL="${SURFPOOL_REMOTE_RPC_URL:-https://api.devnet.solana.com}"
-export KORA_SURFPOOL_OFFLINE=false
+# SDP_SURFPOOL_MODE=offline runs without a devnet fork. Forking fetches any
+# account it has not seen from the public devnet RPC, which rate-limits, and a
+# fetch that hangs holds Surfpool's state lock - every query then hangs with it.
+if [ "${SDP_SURFPOOL_MODE:-offline}" = "offline" ]; then
+  unset SURFPOOL_REMOTE_RPC_URL
+  export KORA_SURFPOOL_OFFLINE=true
+else
+  export SURFPOOL_REMOTE_RPC_URL="${SURFPOOL_REMOTE_RPC_URL:-https://api.devnet.solana.com}"
+  export KORA_SURFPOOL_OFFLINE=false
+fi
+# Clock-driven blocks, so slots and blockhashes advance while idle like a real
+# cluster.
+export KORA_SURFPOOL_BLOCK_PRODUCTION_MODE="${KORA_SURFPOOL_BLOCK_PRODUCTION_MODE:-clock}"
+export KORA_SURFPOOL_SLOT_TIME_MS="${KORA_SURFPOOL_SLOT_TIME_MS:-400}"
+# Send Kora's transactions through the fixed-port proxy, which records the
+# accounts they touch so they can be restored after a Surfpool restart.
+export KORA_SHIM_UPSTREAM_RPC_URL="${KORA_SHIM_UPSTREAM_RPC_URL:-http://127.0.0.1:8899}"
+
+# The WSL clone is a snapshot and does not follow edits on the Windows side;
+# take up.sh from the Windows checkout like the proxy script does.
+WIN_REPO=/mnt/c/Users/Johnnie/Documents/MLH_Fellowship_2026
+tr -d '\r' < "$WIN_REPO/scripts/kora-surfpool/up.sh" > scripts/kora-surfpool/up.sh
+# Carries the drainEvents fix; without it Surfpool freezes after ~1024 blocks.
+tr -d '\r' < "$WIN_REPO/packages/sdp-api-integration/scripts/kora-surfpool-surfnet.mjs" \
+  > packages/sdp-api-integration/scripts/kora-surfpool-surfnet.mjs
 
 echo "== stopping anything still running =="
 timeout 90 bash scripts/kora-surfpool/down.sh >/dev/null 2>&1 || true

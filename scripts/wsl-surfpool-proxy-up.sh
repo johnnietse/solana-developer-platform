@@ -31,6 +31,7 @@ cd "$DST"
 # it produced a "restart" that changed nothing and left the same dead port in
 # place. The daemon script runs down.sh and pkill first, so the replacement is
 # real.
+SDP_SURFPOOL_MODE="${SDP_SURFPOOL_MODE:-offline}" \
 PROXY_PORT="$PROXY_PORT" \
 SURFPOOL_STATE="$STATE" \
 SURFPOOL_RESTART="$WIN_REPO/scripts/wsl-surfpool-daemon.sh" \
