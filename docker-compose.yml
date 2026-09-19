@@ -143,6 +143,10 @@ services:
     environment:
       SDP_API_BASE_URL: http://sdp-api:8787
       METRICS_API_BASE_URL: http://sdp-metrics-api:8080
+      # The cluster the platform issues tokens on. The analytics charts query
+      # this one by default; hardcoding devnet charted zero activity for every
+      # token issued on a local validator.
+      SOLANA_NETWORK: ${SOLANA_NETWORK:-devnet}
       # Read by app/api/polars/[[...path]]/route.ts. Service DNS, not
       # localhost: inside this container 127.0.0.1 is the container itself, so
       # the route's default would connect to nothing and every panel that uses
