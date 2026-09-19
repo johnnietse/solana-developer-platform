@@ -79,38 +79,52 @@ export async function getTokenSupply(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Query the number of token accounts (holders) for a given mint.
+ * Query the number of holders (token accounts with a non-zero balance) for a
+ * given mint.
  *
- * Uses `getProgramAccounts` with a `dataSize` filter for the Token program
- * and a `memcmp` filter on the mint address. This is expensive on mainnet;
- * devnet is manageable.
+ * Searches both the legacy Token program and Token-2022. Tokens issued by the
+ * platform are Token-2022, whose accounts carry extensions and are larger
+ * than 165 bytes, so the old `dataSize: 165` filter on the legacy program
+ * alone counted zero holders for every platform token. The mint sits at
+ * offset 0 and the u64 amount at offset 64 in both layouts; only those 8
+ * amount bytes are fetched. This is expensive on mainnet; devnet and local
+ * validators are manageable.
  *
  * @param rpcUrl - The RPC endpoint URL.
  * @param mint - The mint address (base58).
- * @returns The number of token accounts holding this mint.
+ * @returns The number of token accounts holding a positive balance of this mint.
  */
 export async function getHolderCount(
   rpcUrl: string,
   mint: string,
 ): Promise<number> {
-  // TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA
   const TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+  const TOKEN_2022_PROGRAM_ID = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
 
-  const result = (await rpcCall(rpcUrl, "getProgramAccounts", [
-    TOKEN_PROGRAM_ID,
-    {
-      encoding: "base64",
-      filters: [
-        { dataSize: 165 }, // Token account size
-        {
-          memcmp: {
-            offset: 0, // Mint address starts at offset 0
-            bytes: mint,
-          },
-        },
-      ],
-    },
-  ])) as Array<unknown>;
+  const countFor = async (programId: string, sizeFilter: object[]): Promise<number> => {
+    const result = (await rpcCall(rpcUrl, "getProgramAccounts", [
+      programId,
+      {
+        encoding: "base64",
+        dataSlice: { offset: 64, length: 8 },
+        filters: [...sizeFilter, { memcmp: { offset: 0, bytes: mint } }],
+      },
+    ])) as Array<{ account?: { data?: [string, string] } }>;
+    if (!Array.isArray(result)) return 0;
+    return result.filter((entry) => {
+      const raw = entry.account?.data?.[0];
+      if (!raw) return false;
+      // atob rather than Buffer: this module also runs on Workers.
+      return [...atob(raw)].some((ch) => ch.charCodeAt(0) !== 0);
+    }).length;
+  };
 
-  return Array.isArray(result) ? result.length : 0;
+  // Token-2022 account sizes vary with extensions; a Token-2022 mint account
+  // never has the mint's own address at offset 0, so the memcmp alone is
+  // enough to exclude it.
+  const [legacy, token2022] = await Promise.all([
+    countFor(TOKEN_PROGRAM_ID, [{ dataSize: 165 }]),
+    countFor(TOKEN_2022_PROGRAM_ID, []),
+  ]);
+  return legacy + token2022;
 }
