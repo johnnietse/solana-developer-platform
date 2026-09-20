@@ -16,7 +16,13 @@
 
 const API = process.env.SDP_API_URL || "http://localhost:8787";
 const WEB = process.env.SDP_WEB_URL || "http://localhost:3002";
-const KEY = process.env.SDP_API_KEY || "sk_test_local_deploy_kora";
+// No default: a key literal in the repository is a credential in the
+// repository, however local the sandbox it belongs to.
+const KEY = process.env.SDP_API_KEY;
+if (!KEY) {
+  console.error("Set SDP_API_KEY to a sandbox key from the dashboard's API keys page.");
+  process.exit(2);
+}
 
 // [tab, method, path, acceptable statuses, note, body?]
 // 401 is listed where a route is organisation-scoped in a way the API key does

@@ -65,6 +65,18 @@ curl -s --max-time 5 http://127.0.0.1:8899/__proxy/status | sed 's/^/  /'
 echo
 
 echo "== 4/4 dashboard check =="
+# The checker takes its key from the environment; .env is the local source of
+# truth for it and is not in the repository.
+if [ -z "${SDP_API_KEY:-}" ] && [ -f .env ]; then
+  SDP_API_KEY="$(awk -F= '$1 == "SDP_API_KEY" { print substr($0, index($0, "=") + 1); exit }' .env)"
+  export SDP_API_KEY
+fi
+if [ -z "${SDP_API_KEY:-}" ]; then
+  echo "  set SDP_API_KEY (dashboard > API keys) to run the per-tab checks"
+  echo
+  echo "dashboard: http://localhost:3002"
+  exit 0
+fi
 node scripts/dashboard-check.mjs > /tmp/sdp-dashboard-check.txt 2>&1
 rc=$?
 grep -E 'FAIL|checks passed' /tmp/sdp-dashboard-check.txt
