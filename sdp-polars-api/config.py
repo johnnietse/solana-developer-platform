@@ -1,7 +1,21 @@
 """Application configuration."""
 
 from dataclasses import dataclass, field
-from os import getenv
+from os import getenv as _raw_getenv
+
+
+def getenv(name: str, default: str | None = None) -> str | None:
+    """``os.getenv`` that treats a blank value as unset.
+
+    A bare ``KEY=`` line in a sourced .env (or an ECS task definition with an
+    empty string) sets the variable to ``""`` rather than leaving it unset, so
+    plain ``os.getenv(name, default)`` hands back ``""`` and the default never
+    applies. That silently blanked string settings — ``s3_bucket=""`` turns
+    every path into ``s3:///dev/mlh/...`` — and made the numeric ones raise
+    ``ValueError: invalid literal for int() with base 10: ''`` at import.
+    """
+    value = _raw_getenv(name)
+    return value if value else default
 
 
 @dataclass(frozen=True)
@@ -12,8 +26,10 @@ class Config:
     aws_profile: str | None = getenv("AWS_PROFILE")
 
     # Solana
+    # Devnet is the fellowship's target cluster. The public mainnet endpoint
+    # also rate-limits hard (429) and disables getProgramAccounts (403).
     solana_rpc_url: str = getenv(
-        "SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com"
+        "SOLANA_RPC_URL", "https://api.devnet.solana.com"
     )
     solana_rpc_fallback_url: str | None = getenv("SOLANA_RPC_FALLBACK_URL") or None
     solana_rpc_timeout: int = int(getenv("SOLANA_RPC_TIMEOUT", "30"))
@@ -48,7 +64,10 @@ class Config:
 
     # Token discovery
     token_discovery_enabled: bool = getenv("TOKEN_DISCOVERY_ENABLED", "true").lower() == "true"
-
+    fallback_mints: str = getenv(
+        "FALLBACK_MINTS",
+        "Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr:USDC:6,9fxDZ7rBCNdHureibbAVa6J73srhCYWoKYZWwegXe72Z:PYUSD:6"
+    )
     # Expanded data ingestion
     holders_ingestion_enabled: bool = getenv("HOLDERS_INGESTION_ENABLED", "true").lower() == "true"
     whales_ingestion_enabled: bool = getenv("WHALES_INGESTION_ENABLED", "true").lower() == "true"

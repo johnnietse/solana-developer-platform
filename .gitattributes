@@ -1,0 +1,45 @@
+# This repository is checked out on Windows with core.autocrlf=true, which
+# rewrites LF to CRLF in the working tree. Docker builds from the working tree,
+# not from the index, so any script copied into a Linux image arrives with CRLF
+# line endings. A CRLF shebang makes the kernel look for an interpreter named
+# "/bin/sh\r", and the failure is reported against the script instead:
+#
+#     exec /app/entrypoint.sh: no such file or directory
+#
+# The file is present and executable; the interpreter is what is missing. This
+# took down sdp-docs and sdp-web, both in a restart loop with exit 255.
+#
+# Forcing LF for anything that runs inside a container makes the working tree
+# match the index for these paths, so the bug cannot come back on a fresh clone.
+
+* text=auto
+
+# Executed inside Linux containers - must be LF regardless of host platform.
+*.sh            text eol=lf
+Dockerfile      text eol=lf
+*.Dockerfile    text eol=lf
+entrypoint.sh   text eol=lf
+*.bash          text eol=lf
+
+# Read by Linux tooling.
+*.yml           text eol=lf
+*.yaml          text eol=lf
+
+# Windows-native scripts keep CRLF.
+*.bat           text eol=crlf
+*.cmd           text eol=crlf
+*.ps1           text eol=crlf
+
+# Binary - never convert.
+*.png           binary
+*.jpg           binary
+*.jpeg          binary
+*.gif           binary
+*.ico           binary
+*.pdf           binary
+*.pptx          binary
+*.docx          binary
+*.xlsx          binary
+*.parquet       binary
+*.woff          binary
+*.woff2         binary

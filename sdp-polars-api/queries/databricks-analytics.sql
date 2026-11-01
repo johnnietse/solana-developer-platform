@@ -49,6 +49,22 @@ USING delta
 LOCATION 's3://tmp-sdp-data/dev/mlh/sdp_data/events/';
 
 
+-- ── 2b. Tables written by POST /insert?table_name=… ────────────────────────
+--
+-- /insert maps the dotted table_name straight onto the S3 prefix:
+--   table_name=dev.mlh.polars_metrics  ->  s3://tmp-sdp-data/dev/mlh/polars_metrics/
+-- so the Databricks three-part name and the S3 path stay in sync.
+--
+-- Ad-hoc read (no registration needed):
+--   SELECT * FROM delta.`s3://tmp-sdp-data/dev/mlh/polars_metrics`
+
+CREATE SCHEMA IF NOT EXISTS dev.mlh;
+
+CREATE TABLE IF NOT EXISTS dev.mlh.polars_metrics
+USING delta
+LOCATION 's3://tmp-sdp-data/dev/mlh/polars_metrics/';
+
+
 -- ── 3. Analytics Queries ──────────────────────────────────────────────────
 
 -- 3a. Latest stablecoin supplies (most recent snapshot per token)

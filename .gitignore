@@ -56,3 +56,7 @@ apps/sdp-web/test-results/
 *.tsbuildinfo
 .vercel
 private/
+
+# Stale ralph-loop state, committed by accident in 1d64e2c8. Never track it.
+.claude/ralph-loop.local.md
+.gstack/

@@ -75,6 +75,16 @@ services:
       SIGNING_PROVIDER: ${SIGNING_PROVIDER:-local}
       FEE_PAYER_PRIVATE_KEY: ${FEE_PAYER_PRIVATE_KEY:-}
       FEE_PAYMENT_PROVIDER: ${FEE_PAYMENT_PROVIDER:-native}
+      # Where the Kora fee sponsor listens. env.d.ts has always declared this,
+      # but compose never passed it, so selecting FEE_PAYMENT_PROVIDER=kora
+      # gave an adapter with nowhere to send a request. Empty by default, which
+      # keeps the native path unchanged.
+      #
+      # For a Surfpool run this points at WSL through the Windows host:
+      # the container cannot reach WSL's 172.x address directly, but
+      # host.docker.internal plus WSL2 localhost forwarding does resolve.
+      # scripts/wire-surfpool.sh writes the value.
+      KORA_RPC_URL: ${KORA_RPC_URL:-}
 
       # Databricks — backs GET /v1/data-products/analytics. All three must be
       # set or the route answers 503 "Databricks credentials not configured".
@@ -104,8 +114,10 @@ services:
     ports:
       - "${SDP_METRICS_API_PORT:-8080}:8080"
     environment:
-      # Falls back to the default AWS chain when these are unset; the Delta
-      # cache then misses on every call and /rpc still answers from live RPC.
+      # Credentials come from the mounted profile below rather than env vars.
+      # Without them the Delta cache misses on every call and /rpc still
+      # answers, from live RPC - correct, but far slower and rate-limited.
+      AWS_PROFILE: ${AWS_PROFILE:-sdp-user}
       AWS_REGION: ${AWS_REGION:-us-east-1}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
@@ -113,6 +125,8 @@ services:
       S3_INSERT_BUCKET: ${S3_INSERT_BUCKET:-tmp-sdp-data}
       RPC_TABLE_NAME: ${RPC_TABLE_NAME:-dev.mlh.rpc_counts}
       RPC_CACHE_TTL_SECONDS: ${RPC_CACHE_TTL_SECONDS:-3600}
+    volumes:
+      - "${USERPROFILE:-${HOME}}/.aws:/root/.aws:ro"
 
   sdp-web:
     build:
@@ -129,6 +143,23 @@ services:
     environment:
       SDP_API_BASE_URL: http://sdp-api:8787
       METRICS_API_BASE_URL: http://sdp-metrics-api:8080
+      # The cluster the platform issues tokens on. The analytics charts query
+      # this one by default; hardcoding devnet charted zero activity for every
+      # token issued on a local validator.
+      SOLANA_NETWORK: ${SOLANA_NETWORK:-devnet}
+      # Token Transfers reads localnet activity straight from this RPC; the
+      # deployed service behind /api/polars/rpc cannot reach a local validator.
+      SOLANA_RPC_URL: ${SOLANA_RPC_URL:-https://api.devnet.solana.com}
+      # Read by app/api/polars/[[...path]]/route.ts. Service DNS, not
+      # localhost: inside this container 127.0.0.1 is the container itself, so
+      # the route's default would connect to nothing and every panel that uses
+      # it would show a connection error while the service sat healthy.
+      POLARS_API_BASE_URL: http://sdp-polars-api:8080
+      # The ECS deployment. The proxy sends the four routes that service
+      # actually implements here, and anything under /deployed/ unconditionally,
+      # so the dashboard can prove the deployed container works rather than
+      # inferring it from a panel the local service might have answered.
+      POLARS_RPC_API_BASE_URL: ${POLARS_RPC_API_BASE_URL:-http://35.171.121.207:8080}
       CLERK_SECRET_KEY: ${CLERK_SECRET_KEY}
       CLERK_JWT_TEMPLATE: ${CLERK_JWT_TEMPLATE:-sdp-api}
     depends_on:
@@ -162,13 +193,34 @@ services:
       # S3, for the Delta tables Databricks writes and Polars reads back
       S3_BUCKET: ${S3_BUCKET:-tmp-sdp-data}
       S3_REGION: ${AWS_REGION:-us-east-1}
+      # Credentials come from the mounted profile below, not from env vars, so
+      # no key material is written into this file, the shell history or an
+      # image layer. Static keys still win if both are set, which is what CI
+      # uses; on ECS the task role replaces both. Blank env vars were the old
+      # default and gave the worst outcome available: every Delta read failed
+      # and the routes answered 200 with zero rows.
+      AWS_PROFILE: ${AWS_PROFILE:-sdp-user}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
       SOLANA_RPC_URL: ${SOLANA_RPC_URL:-https://api.devnet.solana.com}
+      # The public devnet endpoint throttles this service's ingestion cycle:
+      # getLargestAccounts and getTokenLargestAccounts are 429'd on every run,
+      # so whales and holders fall back to a slower proxy path. config.py reads
+      # both of these and ingestion.py already rotates through them in order,
+      # but compose never passed them, so the rotation pool was always empty
+      # and "trying next endpoint" had nowhere to go. Set either in .env to a
+      # keyed endpoint and the 429s stop.
+      SOLANA_RPC_FALLBACK_URL: ${SOLANA_RPC_FALLBACK_URL:-}
+      SOLANA_RPC_URLS: ${SOLANA_RPC_URLS:-}
+      INGESTION_INTERVAL_MINUTES: ${INGESTION_INTERVAL_MINUTES:-15}
       # Databricks bridge, optional
       DATABRICKS_HOST: ${DATABRICKS_HOST:-}
       DATABRICKS_TOKEN: ${DATABRICKS_TOKEN:-}
       DATABRICKS_WAREHOUSE_ID: ${DATABRICKS_WAREHOUSE_ID:-}
+    volumes:
+      # Read-only so a compromised container cannot rewrite the credentials.
+      - "${USERPROFILE:-${HOME}}/.aws:/root/.aws:ro"
     # The image declares no HEALTHCHECK, so define one here; curl is installed
     # by the Dockerfile. /health is used rather than a data route because it
     # never touches S3 and so cannot flap on Delta table availability.

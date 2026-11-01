@@ -152,7 +152,77 @@ def get_signatures_for_address(
         return resp.get("result", [])
     except Exception as exc:
         print(f"[solana_rpc] getSignaturesForAddress failed for {address}: {exc}")
-        return []
+        raise
+
+
+def count_signatures_since(
+    cfg: Config,
+    address: str,
+    days: int,
+    include_failed: bool = False,
+    page_size: int = 1000,
+    max_pages: int = 50,
+) -> dict:
+    """Count confirmed signatures for *address* over the last *days* days.
+
+    Walks getSignaturesForAddress backwards a page at a time, stopping at the
+    first entry older than the cutoff. Answers "how much activity has this mint
+    seen" without materialising every transaction, which is what ``/rpc`` does.
+
+    Pagination is capped at *max_pages*: a busy mainnet address can hold
+    millions of signatures, and an uncapped walk would hammer the RPC for the
+    length of the window. When the cap is hit the count is a floor, not a
+    total, so ``complete`` reports which one the caller is holding — returning
+    a truncated count as though it were final is the failure this guards.
+
+    Returns a dict with: count, pages, cutoff, complete, scanned.
+    """
+    cutoff = int(time.time()) - days * 24 * 60 * 60
+    before: str | None = None
+    total = 0
+    scanned = 0
+    pages = 0
+
+    while pages < max_pages:
+        query: dict[str, Any] = {"limit": min(page_size, 1000)}
+        if before:
+            query["before"] = before
+
+        resp = _call(cfg, "getSignaturesForAddress", [address, query])
+        signatures = resp.get("result", []) or []
+        if not signatures:
+            return {
+                "count": total, "pages": pages, "cutoff": cutoff,
+                "complete": True, "scanned": scanned,
+            }
+
+        pages += 1
+        for entry in signatures:
+            scanned += 1
+            block_time = entry.get("blockTime")
+            # Signatures come back newest-first, so the first one older than the
+            # cutoff means every remaining entry is older too.
+            if block_time is not None and block_time < cutoff:
+                return {
+                    "count": total, "pages": pages, "cutoff": cutoff,
+                    "complete": True, "scanned": scanned,
+                }
+            if not include_failed and entry.get("err") is not None:
+                continue
+            total += 1
+
+        before = signatures[-1]["signature"]
+        # A short page means the address has no older signatures to walk.
+        if len(signatures) < query["limit"]:
+            return {
+                "count": total, "pages": pages, "cutoff": cutoff,
+                "complete": True, "scanned": scanned,
+            }
+
+    return {
+        "count": total, "pages": pages, "cutoff": cutoff,
+        "complete": False, "scanned": scanned,
+    }
 
 
 def get_transaction(cfg: Config, signature: str) -> dict | None:

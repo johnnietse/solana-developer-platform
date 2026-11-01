@@ -1,0 +1,200 @@
+name: Deploy SDP Polars API to ECS
+
+# PREREQUISITE, not yet met: the role assumed below,
+# arn:aws:iam::017605949106:role/github-actions-deploy, does not exist
+# (iam:GetRole returns NoSuchEntity). Until someone with IAM write access
+# creates it with a GitHub OIDC trust policy for this repository, every run
+# fails at "Configure AWS credentials" before reaching anything else.
+#
+# The rest of this file was written against a Fargate service that does not
+# exist either. It has been corrected to match the running service - EC2 launch
+# type, bridge networking, no task or execution role, cluster
+# ecosystem-devs-cluster - as observed on task definition revision 19. Do not
+# reintroduce awsvpc/FARGATE or the two role ARNs without also changing the
+# service; they were never valid here.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - sdp-polars-api/**
+      - .github/workflows/deploy-sdp-polars-api.yml
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        type: choice
+        options:
+          - dev
+          - production
+        default: dev
+        required: true
+      image_tag:
+        description: "Docker image tag"
+        type: string
+        default: "latest"
+        required: false
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-sdp-polars-api-${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'dev' }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy SDP Polars API to ECS (${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'dev' }})
+    runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'dev' }}
+    env:
+      AWS_REGION: us-east-1
+      ECR_REPOSITORY: sdp-polars-api
+      ECS_CLUSTER: ecosystem-devs-cluster
+      ECS_SERVICE: sdp-polars-api
+      ECS_TASK_DEFINITION: sdp-polars-api
+      CONTAINER_NAME: polars-api
+      IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || github.sha }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.3
+        with:
+          fetch-depth: 0
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: arn:aws:iam::017605949106:role/github-actions-deploy
+          role-session-name: GitHubActionsDeploy
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push image to Amazon ECR
+        working-directory: ./sdp-polars-api
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+        run: |
+          set -euo pipefail
+          docker build -t "$ECR_REGISTRY/sdp-polars-api:$IMAGE_TAG" .
+          docker push "$ECR_REGISTRY/sdp-polars-api:$IMAGE_TAG"
+
+          # Deploy the digest, not the tag. This repository is MUTABLE, so the
+          # tag can later be repointed at different bytes while the task
+          # definition keeps claiming the same image. The running service
+          # (revision 19) is already digest-pinned; referencing the tag here
+          # would quietly undo that on the first deploy.
+          IMAGE_DIGEST="$(aws ecr describe-images \
+            --repository-name sdp-polars-api \
+            --image-ids imageTag="$IMAGE_TAG" \
+            --query 'imageDetails[0].imageDigest' --output text)"
+          if [[ -z "$IMAGE_DIGEST" || "$IMAGE_DIGEST" == "None" ]]; then
+            echo "could not resolve a digest for tag $IMAGE_TAG" >&2
+            exit 1
+          fi
+          echo "IMAGE_URI=$ECR_REGISTRY/sdp-polars-api@$IMAGE_DIGEST" >> $GITHUB_ENV
+          echo "resolved $IMAGE_TAG -> $IMAGE_DIGEST"
+
+      - name: Ensure the log group exists
+        run: |
+          set -euo pipefail
+          # The task definition names this group but ECS will not create it.
+          # A create that fails for any reason other than "already exists" must
+          # stop the deploy: the same omission on tmp-sdp-data left a service
+          # running with logging silently disabled and nothing to debug from.
+          if aws logs create-log-group --log-group-name /ecs/sdp-polars-api 2>/tmp/lg.err; then
+            echo "created /ecs/sdp-polars-api"
+          elif grep -q 'ResourceAlreadyExistsException' /tmp/lg.err; then
+            echo "/ecs/sdp-polars-api already exists"
+          else
+            cat /tmp/lg.err >&2
+            exit 1
+          fi
+          # Retention is best-effort: logs:PutRetentionPolicy is not granted to
+          # the deploy principal yet, and an unbounded group is worse than a
+          # failed deploy is useful. Tracked separately.
+          aws logs put-retention-policy \
+            --log-group-name /ecs/sdp-polars-api --retention-in-days 30 \
+            || echo "note: could not set retention (logs:PutRetentionPolicy not granted)"
+
+      - name: Update ECS task definition with new image
+        id: task-def
+        run: |
+          cat > task-definition.json <<EOF
+          {
+            "family": "sdp-polars-api",
+            "networkMode": "bridge",
+            "requiresCompatibilities": ["EC2"],
+            "containerDefinitions": [
+              {
+                "name": "polars-api",
+                "image": "${{ env.IMAGE_URI }}",
+                "memory": 512,
+                "essential": true,
+                "portMappings": [
+                  {
+                    "containerPort": 8080,
+                    "protocol": "tcp"
+                  }
+                ],
+                "environment": [
+                  { "name": "S3_BUCKET", "value": "tmp-sdp-data" },
+                  { "name": "S3_REGION", "value": "us-east-1" },
+                  { "name": "SOLANA_RPC_URL", "value": "https://api.devnet.solana.com" },
+                  { "name": "HOST", "value": "0.0.0.0" },
+                  { "name": "PORT", "value": "8080" },
+                  { "name": "DEBUG", "value": "false" }
+                ],
+                "logConfiguration": {
+                  "logDriver": "awslogs",
+                  "options": {
+                    "awslogs-group": "/ecs/sdp-polars-api",
+                    "awslogs-region": "us-east-1",
+                    "awslogs-stream-prefix": "ecs"
+                  }
+                },
+                "healthCheck": {
+                  "command": ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"],
+                  "interval": 30,
+                  "timeout": 5,
+                  "retries": 3,
+                  "startPeriod": 15
+                }
+              }
+            ]
+          }
+          EOF
+          echo "task-definition.json created"
+
+      - name: Register ECS task definition
+        id: register-task
+        run: |
+          TASK_DEFINITION_ARN=$(aws ecs register-task-definition --cli-input-json file://task-definition.json --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "TASK_DEFINITION_ARN=$TASK_DEFINITION_ARN" >> $GITHUB_ENV
+
+      - name: Update ECS service
+        run: |
+          aws ecs update-service \
+            --cluster ecosystem-devs-cluster \
+            --service sdp-polars-api \
+            --task-definition ${{ env.TASK_DEFINITION_ARN }} \
+            --force-new-deployment
+
+      - name: Wait for deployment to complete
+        run: |
+          aws ecs wait services-stable \
+            --cluster ecosystem-devs-cluster \
+            --services sdp-polars-api
+
+      - name: Verify deployment
+        run: |
+          echo "Deployment completed successfully!"
+          echo "Service: sdp-polars-api"
+          echo "Task Definition: ${{ env.TASK_DEFINITION_ARN }}"
+          echo "Image: ${{ env.IMAGE_URI }}"

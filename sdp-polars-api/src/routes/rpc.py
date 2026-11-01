@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
@@ -9,12 +11,45 @@ import polars as pl
 from flask import Blueprint, jsonify, request
 
 from src.services.s3_service import read_delta, write_delta, list_keys
-from src.services.solana_rpc import get_signatures_for_address, get_transaction
+from src.services.solana_rpc import (
+    count_signatures_since,
+    get_signatures_for_address,
+    get_transaction,
+)
 
 if TYPE_CHECKING:
     from config import Config
 
+log = logging.getLogger(__name__)
+
 rpc_bp = Blueprint("rpc", __name__)
+
+# Named clusters for the ?cluster= param on /rpc/count. The service is normally
+# pinned to one endpoint via SOLANA_RPC_URL; naming a cluster overrides it for
+# that request only, so a devnet-configured instance can still be asked about
+# mainnet activity without a redeploy.
+CLUSTER_RPC: dict[str, str] = {
+    "devnet": "https://api.devnet.solana.com",
+    "mainnet-beta": "https://api.mainnet-beta.solana.com",
+    "testnet": "https://api.testnet.solana.com",
+}
+
+
+def _newest_first(records: list[dict]) -> list[dict]:
+    """Order transfers newest-first and drop duplicate signatures.
+
+    "Last N transfers" is only meaningful against a known order, and cached rows
+    carry no guaranteed ordering of their own.
+    """
+    seen: set[str] = set()
+    unique: list[dict] = []
+    for r in sorted(records, key=lambda r: (r.get("slot") or 0), reverse=True):
+        sig = r.get("signature")
+        if sig in seen:
+            continue
+        seen.add(sig)
+        unique.append(r)
+    return unique
 
 
 def _register_rpc_routes(app):
@@ -23,55 +58,228 @@ def _register_rpc_routes(app):
 
     @rpc_bp.route("/rpc", methods=["GET"])
     def get_rpc_data():
-        token_address = request.args.get("token_address")
+        # Both spellings, for the same reason /rpc/count below accepts both: a
+        # caller should not have to know which service it reached to name the
+        # token. The deployed service reads `mint` and the dashboard's newer
+        # components send it, so a client written against either one works here
+        # without a rewrite.
+        #
+        # Unlike the deployed service, a missing token is an error rather than a
+        # fallback. That service defaults to USDC and reports mint_defaulted;
+        # this one has no such flag, and answering a question about a token the
+        # caller never named is the worse of the two failures.
+        token_address = request.args.get("token_address") or request.args.get("mint")
         if not token_address:
-            return jsonify({"error": "Missing required query param: token_address"}), 400
+            return jsonify({
+                "error": "Missing required query param: token_address (or mint)"
+            }), 400
 
         limit = request.args.get("limit", default=cfg.default_transfer_limit, type=int)
         limit = min(max(limit, 1), 1000)
 
         # ── Check S3 cache (Delta) first ──
+        # The spec is "check s3 first, otherwise read from RPC" AND "returns the
+        # last 100 transfers". Serving a short cache would satisfy the first and
+        # break the second, so the cache is only authoritative when it holds at
+        # least `limit` rows; otherwise fall through and top it up from RPC.
+        cached_records: list[dict] = []
         df = read_delta(cfg, "rpc_cache")
-        if df is not None:
-            cached = df.filter(pl.col("mint") == token_address)
-            if not cached.is_empty():
-                records = cached.to_dicts()
+        if df is not None and "mint" in df.columns:
+            cached_records = _newest_first(
+                df.filter(pl.col("mint") == token_address).to_dicts()
+            )
+            if len(cached_records) >= limit:
                 return jsonify({
                     "token_address": token_address,
                     "source": "cache",
-                    "transfers": records[:limit],
-                    "total_cached": len(records),
+                    "transfers": cached_records[:limit],
+                    "total": len(cached_records),
+                    "scanned": None,  # not applicable on the cache path
+                    "total_cached": len(cached_records),  # retained for callers
                 })
 
         # ── Fetch from RPC ──
-        signatures = get_signatures_for_address(cfg, token_address, limit=limit)
+        try:
+            signatures = get_signatures_for_address(cfg, token_address, limit=limit)
+        except Exception as exc:
+            log.exception("getSignaturesForAddress failed for %s", token_address)
+            return jsonify({
+                "error": "Solana RPC request failed",
+                "detail": f"{type(exc).__name__}: {exc}",
+                "token_address": token_address,
+                "rpc_url": cfg.solana_rpc_url,
+            }), 502
+
         transfers: list[dict] = []
+        scanned = 0
 
         for sig in signatures:
-            tx = get_transaction(cfg, sig["signature"])
+            try:
+                tx = get_transaction(cfg, sig["signature"])
+            except Exception as exc:
+                # One bad signature should not sink the whole batch.
+                log.warning("getTransaction failed for %s: %s", sig.get("signature"), exc)
+                continue
             if not tx:
                 continue
 
-            parsed = _parse_transfer(tx, sig["signature"])
+            scanned += 1
+            parsed = _parse_transfer(tx, sig["signature"], prefer_mint=token_address)
             if parsed:
                 transfers.append(parsed)
 
         # ── Cache to S3 as Delta (Databricks-readable) ──
-        if transfers:
-            df = pl.DataFrame(transfers)
-            write_delta(cfg, "rpc_cache", df, mode="append")
+        # rpc_cache is append-only, so only write signatures it does not already
+        # hold — otherwise every refetch duplicates rows for the same mint.
+        known = {r.get("signature") for r in cached_records}
+        fresh = [t for t in transfers if t["signature"] not in known]
+        if fresh:
+            # Caching is best-effort: the caller asked for transfers, so a cache
+            # write failure (e.g. schema drift) must not fail the request.
+            try:
+                write_delta(cfg, "rpc_cache", pl.DataFrame(fresh), mode="append")
+            except Exception as exc:
+                log.warning("rpc_cache write failed (%s): %s", type(exc).__name__, exc)
+
+        # Merge what we just fetched with anything already cached, newest first.
+        merged = _newest_first(transfers + cached_records)
 
         return jsonify({
             "token_address": token_address,
             "source": "rpc",
-            "transfers": transfers[:limit],
-            "total": len(transfers),
+            "transfers": merged[:limit],
+            "total": len(merged),
+            "cached_before": len(cached_records),
+            "newly_cached": len(fresh),
+            # Signatures reference the address in accountKeys; only some of them
+            # actually move tokens. Surfacing both makes an empty result readable.
+            "scanned": scanned,
+        })
+
+    @rpc_bp.route("/rpc/count", methods=["GET"])
+    def get_rpc_count():
+        """Count transactions referencing a mint over a recent window.
+
+        A companion to ``/rpc`` rather than a variant of it: ``/rpc`` returns
+        the transfer records themselves, this returns only how many there were,
+        which is answerable from signature pages alone and so stays cheap over
+        long windows.
+        """
+        # `mint` is the natural name here; `token_address` is accepted so a
+        # caller does not have to rename the param moving between the two routes.
+        mint = request.args.get("mint") or request.args.get("token_address")
+        if not mint:
+            return jsonify({"error": "Missing required query param: mint"}), 400
+
+        days = request.args.get("days", default=cfg.default_metrics_days, type=int)
+        if days is None or days < 1 or days > 365:
+            return jsonify({"error": "days must be between 1 and 365"}), 400
+
+        include_failed = request.args.get("include_failed", "false").lower() == "true"
+
+        cluster = request.args.get("cluster")
+        if cluster and cluster not in CLUSTER_RPC:
+            return jsonify({
+                "error": f"Unknown cluster: {cluster}",
+                "valid": sorted(CLUSTER_RPC),
+            }), 400
+
+        # Override the configured endpoint for this request only.
+        req_cfg = replace(cfg, solana_rpc_url=CLUSTER_RPC[cluster]) if cluster else cfg
+
+        try:
+            result = count_signatures_since(
+                req_cfg, mint, days=days, include_failed=include_failed
+            )
+        except Exception as exc:
+            log.exception("getSignaturesForAddress failed counting %s", mint)
+            return jsonify({
+                "error": "Solana RPC request failed",
+                "detail": f"{type(exc).__name__}: {exc}",
+                "mint": mint,
+                "rpc_url": req_cfg.solana_rpc_url,
+            }), 502
+
+        return jsonify({
+            "mint": mint,
+            "cluster": cluster or "configured",
+            "rpc_url": req_cfg.solana_rpc_url,
+            "days": days,
+            "include_failed": include_failed,
+            "transaction_count": result["count"],
+            "since": datetime.fromtimestamp(
+                result["cutoff"], tz=timezone.utc
+            ).isoformat(),
+            "signatures_scanned": result["scanned"],
+            "pages": result["pages"],
+            # False when the page cap stopped the walk early — the count is then
+            # a lower bound over the window, not the total.
+            "complete": result["complete"],
         })
 
     app.register_blueprint(rpc_bp)
 
 
-def _parse_transfer(tx: dict, signature: str) -> dict | None:
+TOKEN_PROGRAM_IDS: set[str] = {
+    "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",  # SPL Token
+    "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",  # Token-2022
+}
+
+
+def _token_change(meta: dict, prefer_mint: str | None = None) -> dict | None:
+    """Find the SPL token balance delta in a transaction, or None if there is none.
+
+    Pre/post balances are matched by ``accountIndex``, per the RPC
+    json-structures spec: ``owner`` is optional and one owner can hold several
+    accounts for the same mint, so matching on owner drops or mismatches rows.
+
+    ``prefer_mint`` is the mint the caller asked about. getSignaturesForAddress
+    returns every transaction referencing that address, and such a transaction
+    routinely moves several different tokens — so without this the first delta
+    in the list wins and the response describes some unrelated token.
+    """
+    pre_by_index = {
+        b.get("accountIndex"): b for b in (meta.get("preTokenBalances") or [])
+    }
+
+    posts = meta.get("postTokenBalances") or []
+    if prefer_mint:
+        posts = sorted(posts, key=lambda p: p.get("mint") != prefer_mint)
+
+    for post in posts:
+        pre = pre_by_index.get(post.get("accountIndex"))
+        if pre is None or pre.get("mint") != post.get("mint"):
+            continue
+
+        # programId is optional; only reject when it is present and not a token program.
+        program_id = post.get("programId") or pre.get("programId")
+        if program_id and program_id not in TOKEN_PROGRAM_IDS:
+            continue
+
+        post_amount = int(post.get("uiTokenAmount", {}).get("amount") or 0)
+        pre_amount = int(pre.get("uiTokenAmount", {}).get("amount") or 0)
+        change = post_amount - pre_amount
+        if change == 0:
+            continue
+
+        decimals = post.get("uiTokenAmount", {}).get("decimals", 0) or 0
+        # Keys here become a nested struct in the rpc_cache Delta table — adding
+        # one breaks appends against existing data, so keep this shape stable.
+        return {
+            "mint": post.get("mint", ""),
+            "owner": post.get("owner") or pre.get("owner") or "",
+            "change": abs(change),
+            # uiAmount is deprecated and may be null — derive from the raw amount.
+            "ui_change": abs(change) / (10**decimals) if decimals else float(abs(change)),
+            "decimals": decimals,
+        }
+
+    return None
+
+
+def _parse_transfer(
+    tx: dict, signature: str, prefer_mint: str | None = None
+) -> dict | None:
     """Extract transfer info from a Solana transaction.
 
     Returns a dict with standardised fields, or None if not a transfer.
@@ -99,35 +307,11 @@ def _parse_transfer(tx: dict, signature: str) -> dict | None:
     # Get accounts from the message
     account_keys = message.get("accountKeys", [])
 
-    # Try to find the transfer amount from postTokenBalances
-    post_token_balances = meta.get("postTokenBalances", [])
-    pre_token_balances = meta.get("preTokenBalances", [])
-    token_change = None
-
-    if post_token_balances and pre_token_balances:
-        for post in post_token_balances:
-            mint = post.get("mint", "")
-            owner = post.get("owner", "")
-            post_amount = int(post.get("uiTokenAmount", {}).get("amount", "0"))
-
-            # Find matching pre balance
-            for pre in pre_token_balances:
-                if pre.get("mint") == mint and pre.get("owner") == owner:
-                    pre_amount = int(pre.get("uiTokenAmount", {}).get("amount", "0"))
-                    change = post_amount - pre_amount
-                    if change != 0:
-                        post_ui = post.get("uiTokenAmount", {}).get("uiAmount") or 0
-                        pre_ui = pre.get("uiTokenAmount", {}).get("uiAmount") or 0
-                        token_change = {
-                            "mint": mint,
-                            "owner": owner,
-                            "change": abs(change),
-                            "ui_change": abs(float(post_ui) - float(pre_ui)),
-                            "decimals": post.get("uiTokenAmount", {}).get("decimals", 0),
-                        }
-                        break
-            if token_change:
-                break
+    token_change = _token_change(meta, prefer_mint=prefer_mint)
+    if token_change is None:
+        # Not an SPL token transfer — the address appeared in accountKeys but no
+        # token balance moved. Callers asked for transfers, so drop it.
+        return None
 
     return {
         "signature": signature,

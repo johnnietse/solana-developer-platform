@@ -316,7 +316,9 @@ NODE
       export KORA_SHIM_PORT
       export KORA_SHIM_RPC_TIMEOUT_MS
       export KORA_SHIM_SEND_TRANSACTION_TIMEOUT_MS
-      export SOLANA_RPC_URL="${SURFPOOL_RPC_URL}"
+      # KORA_SHIM_UPSTREAM_RPC_URL lets a fronting proxy see the shim's
+      # transactions; otherwise the shim talks to Surfpool directly.
+      export SOLANA_RPC_URL="${KORA_SHIM_UPSTREAM_RPC_URL:-${SURFPOOL_RPC_URL}}"
       export SIGNER_PRIVATE_KEY
       exec node scripts/kora-surfpool-shim.mjs
     ) >"${KORA_SHIM_LOG}" 2>&1 &

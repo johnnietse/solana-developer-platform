@@ -23,10 +23,14 @@ import { createOrgSdpApiClient } from "@/lib/sdp-api";
  * `refresh=true` to bypass the metrics API's Delta-backed cache.
  */
 
-const CLUSTERS = ["devnet", "mainnet-beta", "testnet"] as const;
+const CLUSTERS = ["devnet", "mainnet-beta", "testnet", "localnet"] as const;
 type Cluster = (typeof CLUSTERS)[number];
 
-const DEFAULT_CLUSTER: Cluster = "devnet";
+// Default to the cluster the platform issues on, so tokens minted on a local
+// validator are charted where they actually live.
+const DEFAULT_CLUSTER: Cluster = CLUSTERS.includes(process.env.SOLANA_NETWORK as Cluster)
+  ? (process.env.SOLANA_NETWORK as Cluster)
+  : "devnet";
 const DEFAULT_DAYS = 30;
 
 // Signature pagination on a cache miss can run long. Cap the wait so one busy

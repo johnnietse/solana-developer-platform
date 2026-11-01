@@ -69,4 +69,8 @@ CLUSTER_RPC = {
     "devnet": "https://api.devnet.solana.com",
     "mainnet-beta": "https://api.mainnet-beta.solana.com",
     "testnet": "https://api.testnet.solana.com",
+    # The platform's own validator (Surfpool when SOLANA_NETWORK=localnet).
+    # Tokens issued from the dashboard live there, so charting them against a
+    # public cluster always showed zero activity.
+    "localnet": env("LOCALNET_RPC_URL", RPC_URL),
 }

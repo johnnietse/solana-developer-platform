@@ -1,40 +1,42 @@
-# Sensitive / secrets
+# ── Secrets — never commit ──────────────────────────────────────────────
 .env
+.env.*
+!.env.example
+*.pem
 *.key
 credentials
+credentials.json
+.aws/
+*.tfvars
 
-# Python cache
+# ── Python ──────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
-.pytest_cache/
-
-# Virtual environments
-venv/
+.Python
+build/
+dist/
+*.egg-info/
 .venv/
+venv/
+env/
+ENV/
 
-# Docker
-.docker/
+# ── Tooling ─────────────────────────────────────────────────────────────
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
-# IDE
-.idea/
+# ── Editors / OS ────────────────────────────────────────────────────────
 .vscode/
-*.swp
-*.swo
-*~
-
-# OS
+.idea/
 .DS_Store
 Thumbs.db
 
-# Superpowers / agent tools
-.superpowers/
-
-# Testing artifacts
-test_output/
-*.parquet
-!src/**/*.py
-
-# Session / temp files
+# ── Local scratch ───────────────────────────────────────────────────────
+*.log
+tmp/
 .tmp/

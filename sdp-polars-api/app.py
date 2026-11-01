@@ -20,6 +20,23 @@ import logging
 import os
 import sys
 
+# ── Console encoding ──
+# Windows consoles default to cp1252, which cannot represent the box-drawing and
+# arrow characters used in this codebase's log banners — or the ones Polars puts
+# in its Rust-side error messages. Printing any of them raises UnicodeEncodeError
+# from inside the logging call, which then surfaces as the *job* failing rather
+# than as a logging problem: an ingestion cycle reported
+# "'charmap' codec can't encode character '↳'" as its error while the
+# underlying write had actually succeeded. Docker/Linux already default to UTF-8,
+# so this only bites local runs. errors="replace" keeps an unmappable character
+# from ever taking down a request.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        # Not a reconfigurable text stream (already wrapped, or redirected).
+        pass
+
 # ── Logging (visible in Docker/gunicorn) ──
 logging.basicConfig(
     level=logging.INFO,
